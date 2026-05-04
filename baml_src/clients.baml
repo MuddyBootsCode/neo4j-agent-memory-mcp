@@ -14,13 +14,16 @@ client<llm> OpenAI {
   }
 }
 
-client<llm> Anthropic {
-  provider anthropic
+client<llm> Bedrock {
+  provider aws-bedrock
   retry_policy StandardRetry
   options {
-    model "claude-sonnet-4-20250514"
-    temperature 0
-    max_tokens 4096
+    model "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    region env.AWS_REGION
+    inference_configuration {
+      temperature 0
+      max_tokens 4096
+    }
   }
 }
 
@@ -40,8 +43,8 @@ client<llm> Resilient {
   provider fallback
   options {
     strategy [
+      Bedrock
       OpenAI
-      Anthropic
       Gemini
     ]
   }

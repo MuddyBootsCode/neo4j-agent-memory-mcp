@@ -72,7 +72,7 @@ class TestBamlReasoningExtractorExtraction:
         assert result["final_conclusion"] == "Fixed typo in config"
         assert result["success"] is True
 
-        mock_fn.assert_called_once_with(text="Some conversation text")
+        mock_fn.assert_called_once_with(text="Some conversation text", baml_options={})
 
     async def test_confidence_clamped(self, monkeypatch):
         """Confidence values outside [0,1] are clamped."""

@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (1)
+# Generated enums (5)
 # #########################################################################
 
 class EntityType(str, Enum):
@@ -47,9 +47,48 @@ class EntityType(str, Enum):
     EVENT = "EVENT"
     OBJECT = "OBJECT"
 
+class MeetingEntityType(str, Enum):
+    MEETING = "MEETING"
+    ATTENDEE = "ATTENDEE"
+    AGENDA_ITEM = "AGENDA_ITEM"
+    ACTION_ITEM = "ACTION_ITEM"
+    DECISION = "DECISION"
+
+class ProjectEntityType(str, Enum):
+    PROJECT = "PROJECT"
+    TASK = "TASK"
+    MILESTONE = "MILESTONE"
+    DELIVERABLE = "DELIVERABLE"
+    TEAM = "TEAM"
+
+class QueryVertical(str, Enum):
+    MEETINGS = "MEETINGS"
+    PROJECTS = "PROJECTS"
+    RESEARCH = "RESEARCH"
+    GENERAL = "GENERAL"
+
+class ResearchEntityType(str, Enum):
+    NOTE = "NOTE"
+    FINDING = "FINDING"
+    SOURCE = "SOURCE"
+    TOPIC = "TOPIC"
+    EXPERIMENT = "EXPERIMENT"
+
 # #########################################################################
-# Generated classes (8)
+# Generated classes (25)
 # #########################################################################
+
+class CandidateFact(BaseModel):
+    idx: int = Field(description='Index of this fact in the candidates list')
+    subject: str
+    predicate: str
+    object: str
+    confidence: float
+
+class ContradictionResult(BaseModel):
+    contradicted_indices: typing.List[int] = Field(description='Indices of candidate facts that are contradicted by the new fact. Empty if no contradictions.')
+    contradiction_type: str = Field(description='Type: \'direct_supersession\' (same subject, updated value), \'negation\' (opposite claim), \'refinement\' (more specific version), or \'none\'')
+    reasoning: str = Field(description='Brief explanation of why these facts are contradicted')
 
 class ExtractedEntity(BaseModel):
     name: str = Field(description='The entity name as it appears in text')
@@ -81,6 +120,40 @@ class ExtractionOutput(BaseModel):
     relations: typing.List["ExtractedRelation"]
     preferences: typing.List["ExtractedPreference"]
 
+class MeetingEntity(BaseModel):
+    name: str = Field(description='Entity name as it appears in text')
+    type: MeetingEntityType
+    date: typing.Optional[str] = Field(default=None, description='Date/time if mentioned, ISO format preferred')
+    status: typing.Optional[str] = Field(default=None, description='Status: scheduled, completed, cancelled, recurring')
+    confidence: float = Field(description='Extraction confidence 0.0 to 1.0')
+
+class MeetingExtractionOutput(BaseModel):
+    entities: typing.List["MeetingEntity"]
+    relations: typing.List["MeetingRelation"]
+
+class MeetingRelation(BaseModel):
+    source: str = Field(description='Source entity name')
+    target: str = Field(description='Target entity name')
+    relation_type: str = Field(description='Relationship: ATTENDED, PRESENTED, ASSIGNED_TO, DISCUSSED, FOLLOW_UP, DECIDED_IN, SCHEDULED_FOR, BLOCKED_BY')
+    confidence: float
+
+class ProjectEntity(BaseModel):
+    name: str = Field(description='Entity name as it appears in text')
+    type: ProjectEntityType
+    status: typing.Optional[str] = Field(default=None, description='Status: active, completed, blocked, planned, cancelled')
+    priority: typing.Optional[str] = Field(default=None, description='Priority: critical, high, medium, low')
+    confidence: float = Field(description='Extraction confidence 0.0 to 1.0')
+
+class ProjectExtractionOutput(BaseModel):
+    entities: typing.List["ProjectEntity"]
+    relations: typing.List["ProjectRelation"]
+
+class ProjectRelation(BaseModel):
+    source: str = Field(description='Source entity name')
+    target: str = Field(description='Target entity name')
+    relation_type: str = Field(description='Relationship: DEPENDS_ON, ASSIGNED_TO, BLOCKED_BY, DELIVERS, PART_OF, OWNS, CONTRIBUTES_TO, TRACKS')
+    confidence: float
+
 class ReasoningChainInput(BaseModel):
     task: str = Field(description='The task that was solved')
     steps: typing.List["ReasoningStepInput"] = Field(description='The reasoning steps taken')
@@ -96,6 +169,56 @@ class ReasoningStepInput(BaseModel):
     thought: str = Field(description='Why this action was chosen')
     action: str = Field(description='What was done')
     observation: str = Field(description='What was learned')
+
+class RerankOutput(BaseModel):
+    scored_results: typing.List["ScoredResult"] = Field(description='Results scored and filtered, ordered by relevance descending')
+    total_input: int = Field(description='Number of results received')
+    total_kept: int = Field(description='Number of results kept after filtering')
+
+class ResearchEntity(BaseModel):
+    name: str = Field(description='Entity name as it appears in text')
+    type: ResearchEntityType
+    status: typing.Optional[str] = Field(default=None, description='Status: draft, validated, refuted, in_progress')
+    confidence: float = Field(description='Extraction confidence 0.0 to 1.0')
+
+class ResearchExtractionOutput(BaseModel):
+    entities: typing.List["ResearchEntity"]
+    relations: typing.List["ResearchRelation"]
+
+class ResearchRelation(BaseModel):
+    source: str = Field(description='Source entity name')
+    target: str = Field(description='Target entity name')
+    relation_type: str = Field(description='Relationship: CITES, SUPPORTS, CONTRADICTS, BUILDS_ON, EXPLORES, PRODUCED_BY, RELATED_TOPIC, VALIDATES')
+    confidence: float
+
+class ResultItem(BaseModel):
+    id: str = Field(description='Result ID')
+    content: str = Field(description='The result content or summary')
+    source_db: str = Field(description='Which database this came from')
+    result_type: str = Field(description='Type: message, entity, preference, trace')
+
+class RoutingDecision(BaseModel):
+    targets: typing.List["RoutingTarget"] = Field(description='Verticals to query, ordered by confidence descending. Only include verticals with confidence > 0.3')
+    primary_vertical: QueryVertical = Field(description='The single most relevant vertical')
+    requires_fanout: bool = Field(description='True if multiple verticals must be queried to fully answer the query')
+    ambiguous: bool = Field(description='True if the query is too vague to route confidently. Set true when no vertical has confidence > 0.6 or the query lacks specificity')
+    disambiguation_options: typing.Optional[typing.List[str]] = Field(default=None, description='If ambiguous, provide 2-3 concrete interpretations of what the user might mean, each mentioning which vertical it would search. Only populate when ambiguous is true.')
+
+class RoutingTarget(BaseModel):
+    vertical: QueryVertical = Field(description='The database vertical to query')
+    confidence: float = Field(description='Confidence this vertical is relevant, 0.0 to 1.0')
+    reasoning: str = Field(description='Brief explanation of why this vertical is relevant')
+
+class ScoredResult(BaseModel):
+    id: str = Field(description='Result ID (pass through from input)')
+    relevance: float = Field(description='Relevance to the original query, 0.0 to 1.0')
+    keep: bool = Field(description='True if this result is relevant enough to show to the user')
+    reasoning: str = Field(description='Brief explanation of relevance assessment')
+
+class TemporalExtraction(BaseModel):
+    valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')
+    temporal_qualifier: typing.Optional[str] = Field(default=None, description='Temporal qualifier: \'since\', \'until\', \'as_of\', \'formerly\', \'currently\', or null')
+    is_current_state: bool = Field(description='True if this describes the current state of affairs, false if explicitly past tense')
 
 # #########################################################################
 # Generated type aliases (0)

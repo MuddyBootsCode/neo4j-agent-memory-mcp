@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
 
-from neo4j_agent_memory.mcp._common import get_client
+from neo4j_agent_memory.mcp._common import get_client, get_reranker, get_registry, get_router
+from neo4j_agent_memory.mcp._logging import log_tool_call
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -110,6 +111,7 @@ def register_tools(mcp: FastMCP) -> None:
     """
 
     @mcp.tool()
+    @log_tool_call
     async def memory_search(
         ctx: Context,
         query: str,
@@ -117,10 +119,19 @@ def register_tools(mcp: FastMCP) -> None:
         memory_types: list[str] | None = None,
         session_id: str | None = None,
         threshold: float = 0.7,
+        database: str | None = None,
+        graph_augment: bool = True,
+        include_expired: bool = True,
     ) -> str:
         """Search across all memory types using hybrid vector + graph search.
 
-        Finds relevant messages, entities, preferences, and reasoning traces.
+        Searches messages, entities, preferences, traces, and facts using
+        vector similarity. Automatically routes to the most relevant database(s)
+        using AI classification. Set database explicitly to target a specific
+        vertical (meetings, projects, research, or neo4j for general).
+
+        If the query is ambiguous, returns disambiguation options instead of results
+        so the calling LLM can ask the user for clarification.
 
         Note: Entity relationships in the graph use a generic RELATED_TO edge type
         with the semantic relationship stored as a property. To find specific
@@ -128,15 +139,49 @@ def register_tools(mcp: FastMCP) -> None:
             MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity)
             WHERE r.relation_type = "WORKS_AT"
             RETURN a.name, r.relation_type, b.name
+
+        Args:
+            include_expired: If True (default), include expired/superseded facts
+                (annotated with temporal_status). Set False to hide expired facts.
         """
-        client = get_client(ctx)
-
-        if memory_types is None:
-            memory_types = ["messages", "entities", "preferences", "traces"]
-
-        results: dict[str, list[dict[str, Any]]] = {}
+        from neo4j_agent_memory.mcp._merge import merge_search_results
 
         try:
+            registry = get_registry(ctx)
+        except RuntimeError:
+            # Fall back to single-client mode
+            registry = None
+
+        router = get_router(ctx)
+
+        # Step 1: Determine target databases
+        route = None
+        if database:
+            target_dbs = [database]
+        elif registry is None:
+            # Single-client mode — no routing
+            target_dbs = ["neo4j"]
+        else:
+            route = await router.route_query(query)
+
+            # Step 2: Confidence gate — if ambiguous, ask for clarification
+            if route.ambiguous:
+                return json.dumps({
+                    "ambiguous": True,
+                    "message": "This query could apply to several areas. Can you clarify?",
+                    "disambiguation_options": route.disambiguation_options,
+                    "suggestion": "You can also pass database='meetings' (or projects, research, neo4j) to target a specific vertical.",
+                })
+
+            target_dbs = route.target_databases
+
+        if memory_types is None:
+            memory_types = ["messages", "entities", "preferences", "traces", "facts"]
+
+        # Step 3: Search function to run per-database
+        async def _search_db(client, db_name):
+            results: dict[str, list[dict[str, Any]]] = {}
+
             if "messages" in memory_types:
                 messages = await client.short_term.search_messages(
                     query=query,
@@ -204,13 +249,143 @@ def register_tools(mcp: FastMCP) -> None:
                     for trace in traces
                 ]
 
+            if "facts" in memory_types:
+                try:
+                    from datetime import datetime as _dt
+                    from datetime import timezone as _tz
+
+                    facts = await client.long_term.search_facts(
+                        query=query,
+                        limit=limit,
+                        threshold=threshold,
+                    )
+
+                    now_epoch = int(_dt.now(_tz.utc).timestamp() * 1000)
+
+                    fact_results = []
+                    for fact in facts:
+                        valid_until_val = None
+                        if fact.valid_until:
+                            if isinstance(fact.valid_until, (int, float)):
+                                valid_until_val = fact.valid_until
+                            else:
+                                valid_until_val = fact.valid_until.isoformat()
+
+                        valid_from_val = None
+                        if fact.valid_from:
+                            if isinstance(fact.valid_from, (int, float)):
+                                valid_from_val = fact.valid_from
+                            else:
+                                valid_from_val = fact.valid_from.isoformat()
+
+                        # Determine temporal status
+                        is_expired = False
+                        if valid_until_val is not None:
+                            if isinstance(valid_until_val, (int, float)):
+                                is_expired = valid_until_val <= now_epoch
+                            elif isinstance(valid_until_val, str):
+                                is_expired = True  # If valid_until is set as string, treat as expired
+
+                        temporal_status = "active"
+                        if is_expired:
+                            temporal_status = "expired"
+
+                        superseded_by = getattr(fact, "superseded_by", None)
+                        if superseded_by is None and fact.metadata:
+                            superseded_by = fact.metadata.get("superseded_by")
+
+                        fact_results.append({
+                            "id": str(fact.id),
+                            "subject": fact.subject,
+                            "predicate": fact.predicate,
+                            "object": fact.object,
+                            "confidence": fact.confidence,
+                            "similarity": fact.metadata.get("similarity") if fact.metadata else None,
+                            "valid_from": valid_from_val,
+                            "valid_until": valid_until_val,
+                            "temporal_status": temporal_status,
+                            "superseded_by": superseded_by,
+                        })
+
+                    # Sort: active facts first, then by confidence/similarity
+                    fact_results.sort(
+                        key=lambda f: (
+                            0 if f["temporal_status"] == "active" else 1,
+                            -(f.get("similarity") or f.get("confidence") or 0),
+                        )
+                    )
+
+                    if not include_expired:
+                        fact_results = [f for f in fact_results if f["temporal_status"] == "active"]
+
+                    results["facts"] = fact_results
+                except AttributeError:
+                    # Older versions of the upstream library may not have search_facts
+                    logger.debug("search_facts not available on this client")
+                    results["facts"] = []
+
+            # Graph augmentation — attach neighbors/mentions to vector results
+            if graph_augment:
+                if "entities" in results and results["entities"]:
+                    results["entities"] = await _augment_entities_with_neighbors(
+                        client, results["entities"]
+                    )
+                if "messages" in results and results["messages"]:
+                    results["messages"] = await _augment_messages_with_mentions(
+                        client, results["messages"]
+                    )
+
+            return results
+
+        try:
+            # Fan out search to target databases
+            if registry and len(target_dbs) > 0:
+                per_db = await registry.query_multiple(target_dbs, _search_db)
+                merged = merge_search_results(per_db)
+            else:
+                # Single-client fallback
+                client = get_client(ctx)
+                merged = await _search_db(client, "neo4j")
+
+            # Step 4: Re-rank results if this was a fan-out query
+            reranked = False
+            if route and route.requires_fanout and len(target_dbs) > 1:
+                reranker = get_reranker(ctx)
+                all_results = []
+                for memory_type, items in merged.items():
+                    for item in items:
+                        item["_result_type"] = memory_type
+                    all_results.extend(items)
+
+                reranked_results = await reranker.rerank(query, all_results)
+
+                # Rebuild merged dict from reranked results
+                merged = {}
+                for item in reranked_results:
+                    rt = item.pop("_result_type", "unknown")
+                    if rt not in merged:
+                        merged[rt] = []
+                    merged[rt].append(item)
+                reranked = True
+
         except Exception as e:
             logger.error(f"Error in memory_search: {e}")
             return json.dumps({"error": str(e)})
 
-        return json.dumps({"results": results, "query": query}, default=str)
+        response = {
+            "results": merged,
+            "query": query,
+            "databases_searched": target_dbs,
+            "reranked": reranked,
+            "graph_augmented": graph_augment,
+        }
+        if route:
+            response["routing"] = route.to_metadata()
+
+        return json.dumps(response, default=str)
 
     @mcp.tool()
+    @log_tool_call
     async def memory_store(
         ctx: Context,
         memory_type: str,
@@ -221,9 +396,18 @@ def register_tools(mcp: FastMCP) -> None:
         subject: str | None = None,
         predicate: str | None = None,
         object_value: str | None = None,
+        valid_from: str | None = None,
+        valid_until: str | None = None,
+        confidence: float = 1.0,
+        supersedes: str | None = None,
         metadata: dict[str, Any] | None = None,
+        database: str | None = None,
     ) -> str:
         """Store a memory in the knowledge graph.
+
+        Automatically routes to the most relevant database vertical using AI
+        classification. Set database explicitly to target a specific vertical
+        (meetings, projects, research, or neo4j for general).
 
         Supports messages, facts (SPO triples), and user preferences.
         Automatically extracts entities from message content.
@@ -237,11 +421,36 @@ def register_tools(mcp: FastMCP) -> None:
             subject: Fact subject (required for fact type).
             predicate: Fact predicate/relationship (required for fact type).
             object_value: Fact object (required for fact type).
+            valid_from: When this fact became true (ISO 8601). Defaults to now.
+            valid_until: When this fact stops being true (ISO 8601). None = still true.
+            confidence: Fact confidence score from 0.0 to 1.0 (default: 1.0).
+            supersedes: ID of an existing fact this one replaces. Sets valid_until on the old fact.
             metadata: Optional metadata to attach.
+            database: Target database vertical. If None, auto-routed by AI.
         """
-        client = get_client(ctx)
+        router = get_router(ctx)
+
+        # Route to target database
+        route = None
+        if database:
+            target_db = database
+        else:
+            route = await router.route_storage(content, memory_type)
+            target_db = route.primary_database
+
+        # Get the appropriate client
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(target_db)
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
+            target_db = "neo4j"
 
         try:
+            result_data: dict[str, Any] | None = None
+            stored_id: str | None = None
+            stored_name: str | None = None
+
             if memory_type == "message":
                 if not session_id:
                     return json.dumps({"error": "session_id required for message storage"})
@@ -260,15 +469,43 @@ def register_tools(mcp: FastMCP) -> None:
                     client, str(message.id)
                 )
 
-                return json.dumps(
-                    {
-                        "stored": True,
-                        "type": "message",
-                        "id": str(message.id),
-                        "session_id": session_id,
-                        "entities_embedded": embedded_count,
-                    }
-                )
+                # Run vertical-specific extraction for domain databases
+                vertical_counts = None
+                if target_db != "neo4j":
+                    try:
+                        from neo4j_agent_memory.extraction.vertical_extractor import (
+                            extract_for_vertical,
+                            persist_vertical_entities,
+                        )
+
+                        vertical_extraction = await extract_for_vertical(content, target_db)
+                        if vertical_extraction:
+                            vertical_counts = await persist_vertical_entities(
+                                client=client,
+                                message_id=str(message.id),
+                                extraction=vertical_extraction,
+                                database=target_db,
+                            )
+                    except Exception as vert_err:
+                        logger.warning(
+                            "Vertical extraction failed for %s: %s", target_db, vert_err
+                        )
+
+                stored_id = str(message.id)
+                stored_name = content[:80]
+                result_data = {
+                    "stored": True,
+                    "type": "message",
+                    "id": stored_id,
+                    "session_id": session_id,
+                    "entities_embedded": embedded_count,
+                    "database": target_db,
+                }
+
+                if vertical_counts:
+                    result_data["vertical_entities"] = vertical_counts["entities"]
+                    result_data["vertical_relations"] = vertical_counts["relations"]
+                    result_data["vertical_ontology"] = target_db
 
             elif memory_type == "preference":
                 if not category:
@@ -279,14 +516,15 @@ def register_tools(mcp: FastMCP) -> None:
                     preference=content,
                     generate_embedding=True,
                 )
-                return json.dumps(
-                    {
-                        "stored": True,
-                        "type": "preference",
-                        "id": str(preference.id),
-                        "category": category,
-                    }
-                )
+                stored_id = str(preference.id)
+                stored_name = f"{category}: {content[:60]}"
+                result_data = {
+                    "stored": True,
+                    "type": "preference",
+                    "id": stored_id,
+                    "category": category,
+                    "database": target_db,
+                }
 
             elif memory_type == "fact":
                 if not all([subject, predicate, object_value]):
@@ -294,34 +532,132 @@ def register_tools(mcp: FastMCP) -> None:
                         {"error": "subject, predicate, and object_value required for fact storage"}
                     )
 
+                # Parse temporal params
+                from neo4j_agent_memory.temporal.lifecycle import (
+                    parse_iso_datetime,
+                    supersede_fact_by_id,
+                    supersede_matching_facts,
+                )
+
+                parsed_valid_from = parse_iso_datetime(valid_from)
+                parsed_valid_until = parse_iso_datetime(valid_until)
+
+                # Attempt temporal extraction from content if valid_from not provided
+                import os
+                if parsed_valid_from is None and os.environ.get("NAM_TEMPORAL_EXTRACTION", "true").lower() != "false":
+                    try:
+                        from neo4j_agent_memory.temporal.extraction import extract_temporal_context
+
+                        temporal_ctx = await extract_temporal_context(content)
+                        if temporal_ctx["valid_at"]:
+                            parsed_valid_from = parse_iso_datetime(temporal_ctx["valid_at"])
+                        if temporal_ctx.get("temporal_qualifier"):
+                            if metadata is None:
+                                metadata = {}
+                            metadata["temporal_qualifier"] = temporal_ctx["temporal_qualifier"]
+                            metadata["is_current_state"] = temporal_ctx["is_current_state"]
+                    except Exception:
+                        pass  # Non-critical — proceed without temporal extraction
+
+                # Store fact with temporal params
                 fact = await client.long_term.add_fact(
                     subject=subject,
                     predicate=predicate,
                     obj=object_value,
+                    confidence=confidence,
+                    valid_from=parsed_valid_from,
+                    valid_until=parsed_valid_until,
                 )
-                return json.dumps(
-                    {
-                        "stored": True,
-                        "type": "fact",
-                        "id": str(fact.id) if hasattr(fact, "id") else None,
-                        "triple": f"{subject} -> {predicate} -> {object_value}",
+
+                fact_id = str(fact.id) if hasattr(fact, "id") else None
+
+                # Supersede old facts with same subject+predicate (excluding this new one)
+                superseded_count = 0
+                if fact_id:
+                    if supersedes:
+                        # Explicit supersession
+                        superseded_count = await supersede_fact_by_id(
+                            client, supersedes, fact_id
+                        )
+                    else:
+                        # Auto-supersede: invalidate older facts with same subject+predicate
+                        superseded_count = await supersede_matching_facts(
+                            client, subject, predicate, fact_id
+                        )
+
+                # Phase 2: LLM contradiction detection (semantic, beyond SPO match)
+                contradiction_result = None
+                if fact_id and os.environ.get("NAM_CONTRADICTION_DETECTION", "true").lower() != "false":
+                    try:
+                        from neo4j_agent_memory.temporal.contradiction import detect_and_invalidate
+
+                        contradiction_result = await detect_and_invalidate(
+                            client, subject, predicate, object_value, fact_id
+                        )
+                    except Exception as contradiction_err:
+                        logger.warning("Contradiction detection failed: %s", contradiction_err)
+
+                stored_id = fact_id
+                stored_name = f"{subject} -> {predicate} -> {object_value}"
+                result_data = {
+                    "stored": True,
+                    "type": "fact",
+                    "id": stored_id,
+                    "triple": stored_name,
+                    "database": target_db,
+                    "confidence": confidence,
+                    "valid_from": valid_from,
+                    "valid_until": valid_until,
+                    "superseded_facts": superseded_count,
+                }
+
+                if contradiction_result:
+                    result_data["contradiction_detection"] = {
+                        "candidates_found": contradiction_result["candidates_found"],
+                        "contradictions_detected": contradiction_result["contradictions_detected"],
+                        "facts_invalidated": contradiction_result["facts_invalidated"],
+                        "type": contradiction_result["contradiction_type"],
+                        "reasoning": contradiction_result["reasoning"],
                     }
-                )
 
             else:
                 return json.dumps({"error": f"Unknown memory type: {memory_type}"})
+
+            # Create proxy reference in general DB for vertical storage
+            if target_db != "neo4j" and stored_id and result_data:
+                try:
+                    from neo4j_agent_memory.mcp._proxy import create_proxy_reference
+
+                    general_client = registry.general
+                    proxy_id = await create_proxy_reference(
+                        general_client=general_client,
+                        source_db=target_db,
+                        node_id=stored_id,
+                        node_type=memory_type,
+                        node_name=stored_name or content[:80],
+                    )
+                    result_data["proxy_id"] = proxy_id
+                except Exception as proxy_err:
+                    logger.warning("Proxy creation failed: %s", proxy_err)
+
+            if route and result_data:
+                result_data["routing"] = route.to_metadata()
+
+            return json.dumps(result_data)
 
         except Exception as e:
             logger.error(f"Error in memory_store: {e}")
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def entity_lookup(
         ctx: Context,
         name: str,
         entity_type: str | None = None,
         include_neighbors: bool = True,
         max_hops: int = 1,
+        database: str | None = None,
     ) -> str:
         """Look up an entity and retrieve its relationships and neighbors.
 
@@ -329,8 +665,25 @@ def register_tools(mcp: FastMCP) -> None:
         graph traversal to find related entities. Neighbors include the
         semantic relationship type (e.g., WORKS_AT, CREATES, REQUIRES)
         and direction of the connection.
+
+        Automatically searches across relevant database verticals.
+        Set database explicitly to search a specific vertical.
         """
-        client = get_client(ctx)
+        # Determine which databases to search
+        route = None
+        try:
+            registry = get_registry(ctx)
+            if database:
+                target_dbs = [database]
+            else:
+                router = get_router(ctx)
+                route = await router.route_query(f"entity: {name}")
+                target_dbs = route.target_databases
+        except RuntimeError:
+            registry = None
+            target_dbs = ["neo4j"]
+
+        client = get_client(ctx) if registry is None else registry.get(target_dbs[0])
 
         try:
             # Try vector search first (requires entity embeddings)
@@ -380,6 +733,23 @@ def register_tools(mcp: FastMCP) -> None:
                     )
                     result["neighbors"] = neighbors
 
+                # Resolve cross-database proxy references
+                if registry:
+                    try:
+                        from neo4j_agent_memory.mcp._proxy import resolve_proxy_references
+                        cross_refs = await resolve_proxy_references(
+                            general_client=registry.general,
+                            registry=registry,
+                            entity_id=match["id"],
+                        )
+                        if cross_refs:
+                            result["cross_references"] = cross_refs
+                    except Exception as proxy_err:
+                        logger.debug("Proxy resolution skipped: %s", proxy_err)
+
+                if route:
+                    result["routing"] = route.to_metadata()
+
                 return json.dumps(result, default=str)
 
             entity = entities[0]
@@ -401,6 +771,23 @@ def register_tools(mcp: FastMCP) -> None:
                 neighbors = await _get_entity_neighbors(client, str(entity.id), max_hops)
                 result["neighbors"] = neighbors
 
+            # Resolve cross-database proxy references
+            if registry:
+                try:
+                    from neo4j_agent_memory.mcp._proxy import resolve_proxy_references
+                    cross_refs = await resolve_proxy_references(
+                        general_client=registry.general,
+                        registry=registry,
+                        entity_id=str(entity.id),
+                    )
+                    if cross_refs:
+                        result["cross_references"] = cross_refs
+                except Exception as proxy_err:
+                    logger.debug("Proxy resolution skipped: %s", proxy_err)
+
+            if route:
+                result["routing"] = route.to_metadata()
+
             return json.dumps(result, default=str)
 
         except Exception as e:
@@ -408,18 +795,25 @@ def register_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def conversation_history(
         ctx: Context,
         session_id: str,
         limit: int = 50,
         before: str | None = None,
         include_metadata: bool = True,
+        database: str | None = None,
     ) -> str:
         """Retrieve conversation history for a session.
 
         Returns messages in chronological order with role, content, and metadata.
+        Set database to target a specific vertical.
         """
-        client = get_client(ctx)
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(database) if database else registry.general
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
 
         try:
             conversation = await client.short_term.get_conversation(
@@ -453,15 +847,20 @@ def register_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def graph_query(
         ctx: Context,
         query: str,
         parameters: dict[str, Any] | None = None,
+        database: str | None = None,
     ) -> str:
         """Execute a read-only Cypher query against the knowledge graph.
 
         Only MATCH/RETURN queries are allowed. Write operations
         (CREATE, MERGE, DELETE, SET, REMOVE) are blocked for safety.
+
+        Set database to target a specific vertical (meetings, projects,
+        research, or neo4j for general).
 
         Schema notes for writing effective queries:
         - Entity nodes have labels like :Entity:Person:Individual, :Entity:Organization:Company,
@@ -472,6 +871,14 @@ def register_tools(mcp: FastMCP) -> None:
         - Messages link to entities via :MENTIONS relationships
         - Conversations link to messages via :HAS_MESSAGE, :FIRST_MESSAGE, :NEXT_MESSAGE
         - Facts are stored as :Fact nodes with subject, predicate, object properties
+          Fact nodes include temporal properties:
+            - valid_from: When the fact became true (epoch millis or ISO string)
+            - valid_until: When the fact was superseded (epoch millis, NULL = current)
+            - superseded_by: ID of the fact that replaced this one (NULL = current)
+            - created_at: When the fact was stored
+          Example temporal query:
+            MATCH (f:Fact) WHERE f.subject = 'Alice' AND f.valid_until IS NULL
+            RETURN f.predicate, f.object  // Only current facts about Alice
         - Preferences are :Preference nodes with category and preference properties
         - ReasoningTrace nodes link to :ReasoningStep via :HAS_STEP, steps link to :ToolCall
         """
@@ -483,7 +890,11 @@ def register_tools(mcp: FastMCP) -> None:
                 }
             )
 
-        client = get_client(ctx)
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(database) if database else registry.general
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
 
         try:
             records = await client.graph.execute_read(query, parameters or {})
@@ -501,6 +912,7 @@ def register_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def add_reasoning_trace(
         ctx: Context,
         session_id: str,
@@ -510,12 +922,15 @@ def register_tools(mcp: FastMCP) -> None:
         outcome: str | None = None,
         success: bool = True,
         metadata: dict[str, Any] | None = None,
+        database: str | None = None,
     ) -> str:
         """Store a reasoning trace capturing HOW and WHY a task was solved.
 
         Records the task, reasoning steps with thought/action/observation,
         tool calls, and final outcome. Enables later retrieval via
         explain_reasoning to understand the agent's decision process.
+
+        Set database to target a specific vertical.
 
         Args:
             session_id: Session ID for the reasoning trace.
@@ -532,10 +947,15 @@ def register_tools(mcp: FastMCP) -> None:
             outcome: Final outcome or result of the task.
             success: Whether the task was completed successfully.
             metadata: Optional metadata (model, latency, etc.).
+            database: Target database vertical. If None, uses general.
         """
         from neo4j_agent_memory.memory.reasoning import ToolCallStatus
 
-        client = get_client(ctx)
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(database) if database else registry.general
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
         # Use steps if provided, fall back to tool_calls for backward compat
         step_list = steps or tool_calls or []
 
@@ -606,12 +1026,14 @@ def register_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def explain_reasoning(
         ctx: Context,
         trace_id: str | None = None,
         query: str | None = None,
         session_id: str | None = None,
         synthesize: bool = False,
+        database: str | None = None,
     ) -> str:
         """Retrieve and explain the reasoning behind a past decision or answer.
 
@@ -625,14 +1047,20 @@ def register_tools(mcp: FastMCP) -> None:
 
         Set synthesize=true for a natural-language explanation powered by LLM.
         Default returns the raw reasoning chain.
+        Set database to search a specific vertical.
 
         Args:
             trace_id: Specific trace ID to explain.
             query: Semantic search query to find relevant trace.
             session_id: Session ID to get most recent trace from.
             synthesize: If true, produce LLM-synthesized explanation (slower).
+            database: Target database vertical. If None, uses general.
         """
-        client = get_client(ctx)
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(database) if database else registry.general
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
 
         try:
             trace = None
@@ -736,11 +1164,13 @@ def register_tools(mcp: FastMCP) -> None:
             return json.dumps({"error": str(e)})
 
     @mcp.tool()
+    @log_tool_call
     async def extract_reasoning(
         ctx: Context,
         text: str,
         session_id: str,
         store: bool = True,
+        database: str | None = None,
     ) -> str:
         """Extract structured reasoning from conversation text using LLM analysis.
 
@@ -748,13 +1178,19 @@ def register_tools(mcp: FastMCP) -> None:
         hypotheses formed, evidence gathered, decisions made, and conclusions drawn.
 
         Optionally stores the extracted reasoning as a trace in memory.
+        Set database to target a specific vertical.
 
         Args:
             text: Conversation transcript or text to analyze.
             session_id: Session ID to associate with the extracted trace.
             store: If true (default), store extracted reasoning as a trace.
+            database: Target database vertical. If None, uses general.
         """
-        client = get_client(ctx)
+        try:
+            registry = get_registry(ctx)
+            client = registry.get(database) if database else registry.general
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
 
         try:
             from neo4j_agent_memory.extraction.reasoning_extractor import (
@@ -802,6 +1238,212 @@ def register_tools(mcp: FastMCP) -> None:
 
         except Exception as e:
             logger.error(f"Error in extract_reasoning: {e}")
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    @log_tool_call
+    async def temporal_query(
+        ctx: Context,
+        point_in_time: str,
+        subject: str | None = None,
+        predicate: str | None = None,
+        limit: int = 20,
+        database: str | None = None,
+    ) -> str:
+        """Query facts that were valid at a specific point in time.
+
+        Returns only facts where valid_from <= point_in_time AND
+        (valid_until is NULL or valid_until > point_in_time).
+        Useful for understanding what was true at a past date.
+
+        Args:
+            point_in_time: ISO 8601 datetime to query against.
+            subject: Optional — filter to facts about this subject.
+            predicate: Optional — filter to facts with this predicate.
+            limit: Maximum results (default 20).
+            database: Target database vertical. If None, searches general.
+        """
+        from neo4j_agent_memory.temporal.lifecycle import (
+            parse_iso_datetime,
+            temporal_fact_query,
+        )
+
+        pit = parse_iso_datetime(point_in_time)
+        if not pit:
+            return json.dumps({"error": f"Invalid datetime: {point_in_time}"})
+
+        try:
+            if database:
+                registry = get_registry(ctx)
+                client = registry.get(database)
+            else:
+                client = get_client(ctx)
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
+
+        try:
+            facts = await temporal_fact_query(
+                client, pit, subject=subject, predicate=predicate, limit=limit
+            )
+            return json.dumps({
+                "point_in_time": point_in_time,
+                "facts": facts,
+                "count": len(facts),
+            }, default=str)
+        except Exception as e:
+            logger.error("temporal_query error: %s", e)
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    @log_tool_call
+    async def fact_evolution(
+        ctx: Context,
+        subject: str,
+        predicate: str | None = None,
+        limit: int = 50,
+        database: str | None = None,
+    ) -> str:
+        """Trace how knowledge about a subject has evolved over time.
+
+        Returns the full version history of facts about a subject,
+        ordered chronologically, showing supersession chains.
+        Useful for understanding how plans, statuses, or relationships changed.
+
+        Args:
+            subject: The entity/subject to trace.
+            predicate: Optional — filter to a specific relationship type.
+            limit: Maximum results (default 50).
+            database: Target database vertical. If None, searches general.
+        """
+        from neo4j_agent_memory.temporal.lifecycle import get_fact_evolution
+
+        try:
+            if database:
+                registry = get_registry(ctx)
+                client = registry.get(database)
+            else:
+                client = get_client(ctx)
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
+
+        try:
+            evolution = await get_fact_evolution(
+                client, subject, predicate=predicate, limit=limit
+            )
+
+            # Build summary
+            current_facts = [f for f in evolution if f["is_current"]]
+            superseded_facts = [f for f in evolution if not f["is_current"]]
+
+            return json.dumps({
+                "subject": subject,
+                "predicate": predicate,
+                "total_versions": len(evolution),
+                "current_facts": len(current_facts),
+                "superseded_facts": len(superseded_facts),
+                "evolution": evolution,
+            }, default=str)
+        except Exception as e:
+            logger.error("fact_evolution error: %s", e)
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    @log_tool_call
+    async def knowledge_state(
+        ctx: Context,
+        as_of: str,
+        subject: str | None = None,
+        predicate: str | None = None,
+        limit: int = 20,
+        database: str | None = None,
+    ) -> str:
+        """Query what the system knew at a specific point in system time.
+
+        Uses transaction-time filtering: created_at <= as_of AND
+        (expired_at is NULL or expired_at > as_of).
+        Different from temporal_query which uses event time (when facts were true).
+
+        Args:
+            as_of: ISO 8601 datetime — the system time to query.
+            subject: Optional — filter to facts about this subject.
+            predicate: Optional — filter to facts with this predicate.
+            limit: Maximum results (default 20).
+            database: Target database vertical.
+        """
+        from neo4j_agent_memory.temporal.lifecycle import parse_iso_datetime
+
+        as_of_dt = parse_iso_datetime(as_of)
+        if not as_of_dt:
+            return json.dumps({"error": f"Invalid datetime: {as_of}"})
+
+        try:
+            if database:
+                registry = get_registry(ctx)
+                client = registry.get(database)
+            else:
+                client = get_client(ctx)
+        except (RuntimeError, KeyError):
+            client = get_client(ctx)
+
+        as_of_epoch = int(as_of_dt.timestamp() * 1000)
+        params: dict[str, Any] = {"as_of": as_of_epoch, "limit": limit}
+
+        where_clauses = [
+            "f.created_at <= datetime({epochMillis: $as_of})",
+            "(f.expired_at IS NULL OR f.expired_at > $as_of)",
+        ]
+        if subject:
+            where_clauses.append("f.subject = $subject")
+            params["subject"] = subject
+        if predicate:
+            where_clauses.append("f.predicate = $predicate")
+            params["predicate"] = predicate
+
+        where = " AND ".join(where_clauses)
+
+        try:
+            result = await client.graph.execute_read(
+                f"""
+                MATCH (f:Fact)
+                WHERE {where}
+                RETURN f.id AS id,
+                       f.subject AS subject,
+                       f.predicate AS predicate,
+                       f.object AS object,
+                       f.confidence AS confidence,
+                       f.created_at AS created_at,
+                       f.expired_at AS expired_at,
+                       f.valid_from AS valid_from,
+                       f.valid_until AS valid_until
+                ORDER BY f.confidence DESC, f.created_at DESC
+                LIMIT $limit
+                """,
+                params,
+            )
+
+            facts = [
+                {
+                    "id": row["id"],
+                    "subject": row["subject"],
+                    "predicate": row["predicate"],
+                    "object": row["object"],
+                    "confidence": row["confidence"],
+                    "created_at": str(row["created_at"]) if row["created_at"] else None,
+                    "expired_at": str(row["expired_at"]) if row["expired_at"] else None,
+                    "valid_from": str(row["valid_from"]) if row["valid_from"] else None,
+                    "valid_until": str(row["valid_until"]) if row["valid_until"] else None,
+                }
+                for row in result
+            ]
+
+            return json.dumps({
+                "as_of": as_of,
+                "facts": facts,
+                "count": len(facts),
+            }, default=str)
+
+        except Exception as e:
+            logger.error("knowledge_state error: %s", e)
             return json.dumps({"error": str(e)})
 
 
@@ -898,3 +1540,79 @@ async def _get_entity_neighbors(
     except Exception as e:
         logger.debug(f"Error getting neighbors: {e}")
         return []
+
+
+async def _augment_entities_with_neighbors(
+    client,
+    entity_results: list[dict[str, Any]],
+    max_neighbors: int = 5,
+) -> list[dict[str, Any]]:
+    """Attach 1-hop RELATED_TO neighbors to each entity result.
+
+    Adds a 'neighbors' list to each entity dict containing related
+    entities from graph traversal. This provides graph context beyond
+    what vector similarity alone returns.
+
+    Args:
+        client: MemoryClient instance.
+        entity_results: List of entity dicts from vector search.
+        max_neighbors: Max neighbors per entity (keeps response size bounded).
+
+    Returns:
+        The same entity_results list, with 'neighbors' added to each item.
+    """
+    for entity in entity_results:
+        entity_id = entity.get("id")
+        if not entity_id:
+            entity["neighbors"] = []
+            continue
+        try:
+            neighbors = await _get_entity_neighbors(client, entity_id, max_hops=1)
+            entity["neighbors"] = neighbors[:max_neighbors]
+        except Exception:
+            entity["neighbors"] = []
+    return entity_results
+
+
+async def _augment_messages_with_mentions(
+    client,
+    message_results: list[dict[str, Any]],
+    max_mentions: int = 5,
+) -> list[dict[str, Any]]:
+    """Attach entities mentioned by each message via MENTIONS edges.
+
+    Args:
+        client: MemoryClient instance.
+        message_results: List of message dicts from vector search.
+        max_mentions: Max mentioned entities per message.
+
+    Returns:
+        The same message_results list, with 'mentioned_entities' added.
+    """
+    for msg in message_results:
+        msg_id = msg.get("id")
+        if not msg_id:
+            msg["mentioned_entities"] = []
+            continue
+        try:
+            records = await client.graph.execute_read(
+                """
+                MATCH (m:Message {id: $message_id})-[:MENTIONS]->(e:Entity)
+                RETURN e.id AS id, e.name AS name, e.type AS type,
+                       e.description AS description
+                LIMIT $limit
+                """,
+                {"message_id": msg_id, "limit": max_mentions},
+            )
+            msg["mentioned_entities"] = [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "type": r["type"],
+                    "description": r["description"],
+                }
+                for r in records
+            ]
+        except Exception:
+            msg["mentioned_entities"] = []
+    return message_results

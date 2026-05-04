@@ -16,6 +16,12 @@ from . import stream_types
 
 type_map = {
 
+    "types.CandidateFact": types.CandidateFact,
+    "stream_types.CandidateFact": stream_types.CandidateFact,
+
+    "types.ContradictionResult": types.ContradictionResult,
+    "stream_types.ContradictionResult": stream_types.ContradictionResult,
+
     "types.ExtractedEntity": types.ExtractedEntity,
     "stream_types.ExtractedEntity": stream_types.ExtractedEntity,
 
@@ -31,6 +37,24 @@ type_map = {
     "types.ExtractionOutput": types.ExtractionOutput,
     "stream_types.ExtractionOutput": stream_types.ExtractionOutput,
 
+    "types.MeetingEntity": types.MeetingEntity,
+    "stream_types.MeetingEntity": stream_types.MeetingEntity,
+
+    "types.MeetingExtractionOutput": types.MeetingExtractionOutput,
+    "stream_types.MeetingExtractionOutput": stream_types.MeetingExtractionOutput,
+
+    "types.MeetingRelation": types.MeetingRelation,
+    "stream_types.MeetingRelation": stream_types.MeetingRelation,
+
+    "types.ProjectEntity": types.ProjectEntity,
+    "stream_types.ProjectEntity": stream_types.ProjectEntity,
+
+    "types.ProjectExtractionOutput": types.ProjectExtractionOutput,
+    "stream_types.ProjectExtractionOutput": stream_types.ProjectExtractionOutput,
+
+    "types.ProjectRelation": types.ProjectRelation,
+    "stream_types.ProjectRelation": stream_types.ProjectRelation,
+
     "types.ReasoningChainInput": types.ReasoningChainInput,
     "stream_types.ReasoningChainInput": stream_types.ReasoningChainInput,
 
@@ -40,7 +64,42 @@ type_map = {
     "types.ReasoningStepInput": types.ReasoningStepInput,
     "stream_types.ReasoningStepInput": stream_types.ReasoningStepInput,
 
+    "types.RerankOutput": types.RerankOutput,
+    "stream_types.RerankOutput": stream_types.RerankOutput,
+
+    "types.ResearchEntity": types.ResearchEntity,
+    "stream_types.ResearchEntity": stream_types.ResearchEntity,
+
+    "types.ResearchExtractionOutput": types.ResearchExtractionOutput,
+    "stream_types.ResearchExtractionOutput": stream_types.ResearchExtractionOutput,
+
+    "types.ResearchRelation": types.ResearchRelation,
+    "stream_types.ResearchRelation": stream_types.ResearchRelation,
+
+    "types.ResultItem": types.ResultItem,
+    "stream_types.ResultItem": stream_types.ResultItem,
+
+    "types.RoutingDecision": types.RoutingDecision,
+    "stream_types.RoutingDecision": stream_types.RoutingDecision,
+
+    "types.RoutingTarget": types.RoutingTarget,
+    "stream_types.RoutingTarget": stream_types.RoutingTarget,
+
+    "types.ScoredResult": types.ScoredResult,
+    "stream_types.ScoredResult": stream_types.ScoredResult,
+
+    "types.TemporalExtraction": types.TemporalExtraction,
+    "stream_types.TemporalExtraction": stream_types.TemporalExtraction,
+
 
     "types.EntityType": types.EntityType,
+
+    "types.MeetingEntityType": types.MeetingEntityType,
+
+    "types.ProjectEntityType": types.ProjectEntityType,
+
+    "types.QueryVertical": types.QueryVertical,
+
+    "types.ResearchEntityType": types.ResearchEntityType,
 
 }

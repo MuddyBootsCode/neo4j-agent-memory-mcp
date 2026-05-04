@@ -1,0 +1,482 @@
+[
+  {
+    "id": 1,
+    "name": "MeetingQuery_Clear",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "MEETINGS",
+          "confidence": 0.9,
+          "reasoning": "The query specifically mentions a standup, which directly relates to meetings and discussions about project status."
+        }
+      ],
+      "primary_vertical": "MEETINGS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 2,
+    "name": "ProjectQuery_Clear",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.9,
+          "reasoning": "The query specifically asks about the status of a project, which directly relates to project management and tasks."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 3,
+    "name": "ResearchQuery_Clear",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.9,
+          "reasoning": "The query specifically asks about papers and citations related to an NLP analysis, which directly pertains to research notes and findings."
+        }
+      ],
+      "primary_vertical": "RESEARCH",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 4,
+    "name": "GeneralQuery_Clear",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "GENERAL",
+          "confidence": 0.5,
+          "reasoning": "The query pertains to personal information about an individual, which falls under general memory and facts."
+        }
+      ],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 5,
+    "name": "MeetingQuery_Implicit",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "MEETINGS",
+          "confidence": 0.9,
+          "reasoning": "The query specifically mentions a sync, which relates directly to meetings and attendees."
+        }
+      ],
+      "primary_vertical": "MEETINGS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 6,
+    "name": "ProjectQuery_Implicit",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.9,
+          "reasoning": "The query specifically asks about tasks, which directly relates to project management and task tracking."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 7,
+    "name": "ResearchQuery_Implicit",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.8,
+          "reasoning": "The query specifically asks about experiments, which aligns with research notes and findings related to the embedding approach."
+        }
+      ],
+      "primary_vertical": "RESEARCH",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 8,
+    "name": "GeneralQuery_Preference",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "GENERAL",
+          "confidence": 0.7,
+          "reasoning": "The query pertains to personal preferences, which fits within general memory and personal facts."
+        }
+      ],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 9,
+    "name": "StoreMeeting",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "MEETINGS",
+          "confidence": 0.9,
+          "reasoning": "The content relates to a team standup meeting, which includes attendees, action items, and discussions about blockers."
+        }
+      ],
+      "primary_vertical": "MEETINGS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 10,
+    "name": "StoreProject",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.9,
+          "reasoning": "The content relates to project updates, including task status, milestones, and deliverables, which are all key components of project management."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 11,
+    "name": "StoreResearch",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.9,
+          "reasoning": "The content discusses findings from a research paper and mentions a hypothesis, which aligns closely with research notes and literature."
+        }
+      ],
+      "primary_vertical": "RESEARCH",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 12,
+    "name": "StoreGeneral",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "GENERAL",
+          "confidence": 0.9,
+          "reasoning": "The content includes personal preferences and facts about an individual, which fits well into the general memory vertical."
+        }
+      ],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 13,
+    "name": "StoreAmbiguousContent",
+    "passed": false,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.7,
+          "reasoning": "The content discusses next steps and overall progress, which relates to project management and tasks."
+        },
+        {
+          "vertical": "GENERAL",
+          "confidence": 0.4,
+          "reasoning": "The content includes general updates and team interactions, which can fit into general memory."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": false,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 14,
+    "name": "AmbiguousQuery_Vague",
+    "passed": true,
+    "raw": {
+      "targets": [],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": true,
+      "disambiguation_options": [
+        "The user might be asking for updates on recent meetings, which would search the Meetings vertical (k1).",
+        "The user could be inquiring about the status of ongoing projects, which would search the Projects vertical (k2).",
+        "The user may want to know about new research findings or papers, which would search the Research vertical (k3)."
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": 15,
+    "name": "AmbiguousQuery_PersonRef",
+    "passed": true,
+    "raw": {
+      "targets": [],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": true,
+      "disambiguation_options": [
+        "The user might be asking about a specific conversation with Sarah, which would involve searching the General memory vertical for conversation history.",
+        "The user could be referring to a meeting where Sarah was present, in which case the Meetings vertical would be relevant to find notes or action items.",
+        "The user might want to know about Sarah's contributions to a project, which would involve searching the Projects vertical for any tasks or updates related to her."
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": 16,
+    "name": "AmbiguousQuery_WithContext",
+    "passed": false,
+    "raw": {
+      "targets": [],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": true,
+      "disambiguation_options": [
+        "The user might be asking for a summary of Sarah's presentation at the team meeting, which would involve searching the Meetings vertical (k1) for notes or action items.",
+        "The user could be looking for specific research findings that Sarah presented, which would require querying the Research notes vertical (k3) for relevant papers or findings.",
+        "Alternatively, the user might want to know about Sarah's general contributions to the project, which could involve searching the Projects vertical (k2) for any related tasks or milestones."
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": 17,
+    "name": "AmbiguousQuery_Temporal",
+    "passed": true,
+    "raw": {
+      "targets": [],
+      "primary_vertical": "GENERAL",
+      "requires_fanout": false,
+      "ambiguous": true,
+      "disambiguation_options": [
+        "The user might be asking about meetings that took place last week, which would involve searching the Meetings vertical (k1).",
+        "The user could be inquiring about project updates or tasks completed last week, which would require querying the Projects vertical (k2).",
+        "The user may also be looking for general personal updates or events from last week, which would relate to the General memory vertical (k4)."
+      ]
+    },
+    "error": null
+  },
+  {
+    "id": 18,
+    "name": "CrossDomain_MeetingResearch",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "MEETINGS",
+          "confidence": 0.7,
+          "reasoning": "The query specifically mentions a project kickoff meeting, which falls under meetings and scheduling."
+        },
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.6,
+          "reasoning": "The query refers to research findings, which are relevant to the research notes and findings vertical."
+        }
+      ],
+      "primary_vertical": "MEETINGS",
+      "requires_fanout": true,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 19,
+    "name": "CrossDomain_ProjectMeeting",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "MEETINGS",
+          "confidence": 0.9,
+          "reasoning": "The query specifically mentions a meeting (sprint planning) and is asking for action items, which directly relates to meeting notes and outcomes."
+        },
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.7,
+          "reasoning": "The query also pertains to project management, as action items from a sprint planning meeting are typically related to tasks and project deliverables."
+        }
+      ],
+      "primary_vertical": "MEETINGS",
+      "requires_fanout": true,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 20,
+    "name": "CrossDomain_AllVerticals",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.7,
+          "reasoning": "The query likely pertains to a project involving the DataVault migration, which would include tasks, milestones, and project status."
+        },
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.5,
+          "reasoning": "There may be research notes or findings related to the DataVault migration that could provide insights into the process and methodologies used."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": true,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 21,
+    "name": "CrossDomain_ResearchProject",
+    "passed": true,
+    "raw": {
+      "targets": [
+        {
+          "vertical": "PROJECTS",
+          "confidence": 0.8,
+          "reasoning": "The query specifically mentions a deliverable related to the ML pipeline, which falls under projects, tasks, and deliverables."
+        },
+        {
+          "vertical": "RESEARCH",
+          "confidence": 0.6,
+          "reasoning": "The query refers to experiments, which are relevant to research notes and findings related to the ML pipeline."
+        }
+      ],
+      "primary_vertical": "PROJECTS",
+      "requires_fanout": true,
+      "ambiguous": false,
+      "disambiguation_options": null
+    },
+    "error": null
+  },
+  {
+    "id": 22,
+    "name": "Rerank_HighRelevance",
+    "passed": true,
+    "raw": {
+      "scored_results": [
+        {
+          "id": "1",
+          "relevance": 1.0,
+          "keep": true,
+          "reasoning": "This result provides a clear and detailed summary of the actions that came out of the Monday standup, directly answering the user's query."
+        },
+        {
+          "id": "2",
+          "relevance": 1.0,
+          "keep": true,
+          "reasoning": "This result also lists the action items from the Monday standup, effectively addressing the user's request for information on the actions taken."
+        }
+      ],
+      "total_input": 2,
+      "total_kept": 2
+    },
+    "error": null
+  },
+  {
+    "id": 23,
+    "name": "Rerank_LowRelevance",
+    "passed": true,
+    "raw": {
+      "scored_results": [],
+      "total_input": 3,
+      "total_kept": 0
+    },
+    "error": null
+  },
+  {
+    "id": 24,
+    "name": "Rerank_MixedRelevance",
+    "passed": true,
+    "raw": {
+      "scored_results": [
+        {
+          "id": "1",
+          "relevance": 1.0,
+          "keep": true,
+          "reasoning": "This result directly lists the actions that came out of the Monday standup, making it highly relevant to the query."
+        }
+      ],
+      "total_input": 4,
+      "total_kept": 1
+    },
+    "error": null
+  },
+  {
+    "id": 25,
+    "name": "Rerank_NoRelevant",
+    "passed": true,
+    "raw": {
+      "scored_results": [],
+      "total_input": 3,
+      "total_kept": 0
+    },
+    "error": null
+  }
+]
