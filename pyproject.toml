@@ -16,8 +16,6 @@ neo4j-memory-mcp = "neo4j_agent_memory.mcp.server:main"
 
 [dependency-groups]
 dev = [
-    "jupyter>=1.1.1",
-    "nbformat>=5.10.4",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
