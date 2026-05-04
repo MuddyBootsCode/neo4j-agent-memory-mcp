@@ -12,7 +12,7 @@ from neo4j_agent_memory.extraction.base import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BAML_CLIENT = "OpenAI"
+DEFAULT_BAML_CLIENT = "Bedrock"
 DEFAULT_ENTITY_TYPES = ["PERSON", "ORGANIZATION", "LOCATION", "EVENT", "OBJECT"]
 
 
@@ -24,7 +24,7 @@ class BamlEntityExtractor:
     fallback chains.
 
     Provider selection:
-        - Set ``client_name`` to choose: "OpenAI", "Anthropic", "Gemini", "Resilient"
+        - Set ``client_name`` to choose: "Bedrock", "OpenAI", "Anthropic", "Gemini", "Resilient"
         - Pass a ``ClientRegistry`` for runtime provider switching
     """
 
@@ -85,7 +85,7 @@ class BamlEntityExtractor:
             result = await b.ExtractEntities(
                 text=text,
                 entity_types=entity_types_str,
-                **(self._baml_options if self._baml_options else {}),
+                baml_options=self._baml_options if self._baml_options else {},
             )
 
             entities = [

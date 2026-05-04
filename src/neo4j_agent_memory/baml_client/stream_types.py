@@ -23,8 +23,20 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (8)
+# Generated classes (25)
 # #########################################################################
+
+class CandidateFact(BaseModel):
+    idx: typing.Optional[int] = Field(default=None, description='Index of this fact in the candidates list')
+    subject: typing.Optional[str] = None
+    predicate: typing.Optional[str] = None
+    object: typing.Optional[str] = None
+    confidence: typing.Optional[float] = None
+
+class ContradictionResult(BaseModel):
+    contradicted_indices: typing.List[int] = Field(description='Indices of candidate facts that are contradicted by the new fact. Empty if no contradictions.')
+    contradiction_type: typing.Optional[str] = Field(default=None, description='Type: \'direct_supersession\' (same subject, updated value), \'negation\' (opposite claim), \'refinement\' (more specific version), or \'none\'')
+    reasoning: typing.Optional[str] = Field(default=None, description='Brief explanation of why these facts are contradicted')
 
 class ExtractedEntity(BaseModel):
     name: typing.Optional[str] = Field(default=None, description='The entity name as it appears in text')
@@ -56,6 +68,40 @@ class ExtractionOutput(BaseModel):
     relations: typing.List["ExtractedRelation"]
     preferences: typing.List["ExtractedPreference"]
 
+class MeetingEntity(BaseModel):
+    name: typing.Optional[str] = Field(default=None, description='Entity name as it appears in text')
+    type: typing.Optional[types.MeetingEntityType] = None
+    date: typing.Optional[str] = Field(default=None, description='Date/time if mentioned, ISO format preferred')
+    status: typing.Optional[str] = Field(default=None, description='Status: scheduled, completed, cancelled, recurring')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence 0.0 to 1.0')
+
+class MeetingExtractionOutput(BaseModel):
+    entities: typing.List["MeetingEntity"]
+    relations: typing.List["MeetingRelation"]
+
+class MeetingRelation(BaseModel):
+    source: typing.Optional[str] = Field(default=None, description='Source entity name')
+    target: typing.Optional[str] = Field(default=None, description='Target entity name')
+    relation_type: typing.Optional[str] = Field(default=None, description='Relationship: ATTENDED, PRESENTED, ASSIGNED_TO, DISCUSSED, FOLLOW_UP, DECIDED_IN, SCHEDULED_FOR, BLOCKED_BY')
+    confidence: typing.Optional[float] = None
+
+class ProjectEntity(BaseModel):
+    name: typing.Optional[str] = Field(default=None, description='Entity name as it appears in text')
+    type: typing.Optional[types.ProjectEntityType] = None
+    status: typing.Optional[str] = Field(default=None, description='Status: active, completed, blocked, planned, cancelled')
+    priority: typing.Optional[str] = Field(default=None, description='Priority: critical, high, medium, low')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence 0.0 to 1.0')
+
+class ProjectExtractionOutput(BaseModel):
+    entities: typing.List["ProjectEntity"]
+    relations: typing.List["ProjectRelation"]
+
+class ProjectRelation(BaseModel):
+    source: typing.Optional[str] = Field(default=None, description='Source entity name')
+    target: typing.Optional[str] = Field(default=None, description='Target entity name')
+    relation_type: typing.Optional[str] = Field(default=None, description='Relationship: DEPENDS_ON, ASSIGNED_TO, BLOCKED_BY, DELIVERS, PART_OF, OWNS, CONTRIBUTES_TO, TRACKS')
+    confidence: typing.Optional[float] = None
+
 class ReasoningChainInput(BaseModel):
     task: typing.Optional[str] = Field(default=None, description='The task that was solved')
     steps: typing.List["ReasoningStepInput"] = Field(description='The reasoning steps taken')
@@ -71,6 +117,56 @@ class ReasoningStepInput(BaseModel):
     thought: typing.Optional[str] = Field(default=None, description='Why this action was chosen')
     action: typing.Optional[str] = Field(default=None, description='What was done')
     observation: typing.Optional[str] = Field(default=None, description='What was learned')
+
+class RerankOutput(BaseModel):
+    scored_results: typing.List["ScoredResult"] = Field(description='Results scored and filtered, ordered by relevance descending')
+    total_input: typing.Optional[int] = Field(default=None, description='Number of results received')
+    total_kept: typing.Optional[int] = Field(default=None, description='Number of results kept after filtering')
+
+class ResearchEntity(BaseModel):
+    name: typing.Optional[str] = Field(default=None, description='Entity name as it appears in text')
+    type: typing.Optional[types.ResearchEntityType] = None
+    status: typing.Optional[str] = Field(default=None, description='Status: draft, validated, refuted, in_progress')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence 0.0 to 1.0')
+
+class ResearchExtractionOutput(BaseModel):
+    entities: typing.List["ResearchEntity"]
+    relations: typing.List["ResearchRelation"]
+
+class ResearchRelation(BaseModel):
+    source: typing.Optional[str] = Field(default=None, description='Source entity name')
+    target: typing.Optional[str] = Field(default=None, description='Target entity name')
+    relation_type: typing.Optional[str] = Field(default=None, description='Relationship: CITES, SUPPORTS, CONTRADICTS, BUILDS_ON, EXPLORES, PRODUCED_BY, RELATED_TOPIC, VALIDATES')
+    confidence: typing.Optional[float] = None
+
+class ResultItem(BaseModel):
+    id: typing.Optional[str] = Field(default=None, description='Result ID')
+    content: typing.Optional[str] = Field(default=None, description='The result content or summary')
+    source_db: typing.Optional[str] = Field(default=None, description='Which database this came from')
+    result_type: typing.Optional[str] = Field(default=None, description='Type: message, entity, preference, trace')
+
+class RoutingDecision(BaseModel):
+    targets: typing.List["RoutingTarget"] = Field(description='Verticals to query, ordered by confidence descending. Only include verticals with confidence > 0.3')
+    primary_vertical: typing.Optional[types.QueryVertical] = Field(default=None, description='The single most relevant vertical')
+    requires_fanout: typing.Optional[bool] = Field(default=None, description='True if multiple verticals must be queried to fully answer the query')
+    ambiguous: typing.Optional[bool] = Field(default=None, description='True if the query is too vague to route confidently. Set true when no vertical has confidence > 0.6 or the query lacks specificity')
+    disambiguation_options: typing.Optional[typing.List[str]] = Field(default=None, description='If ambiguous, provide 2-3 concrete interpretations of what the user might mean, each mentioning which vertical it would search. Only populate when ambiguous is true.')
+
+class RoutingTarget(BaseModel):
+    vertical: typing.Optional[types.QueryVertical] = Field(default=None, description='The database vertical to query')
+    confidence: typing.Optional[float] = Field(default=None, description='Confidence this vertical is relevant, 0.0 to 1.0')
+    reasoning: typing.Optional[str] = Field(default=None, description='Brief explanation of why this vertical is relevant')
+
+class ScoredResult(BaseModel):
+    id: typing.Optional[str] = Field(default=None, description='Result ID (pass through from input)')
+    relevance: typing.Optional[float] = Field(default=None, description='Relevance to the original query, 0.0 to 1.0')
+    keep: typing.Optional[bool] = Field(default=None, description='True if this result is relevant enough to show to the user')
+    reasoning: typing.Optional[str] = Field(default=None, description='Brief explanation of relevance assessment')
+
+class TemporalExtraction(BaseModel):
+    valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')
+    temporal_qualifier: typing.Optional[str] = Field(default=None, description='Temporal qualifier: \'since\', \'until\', \'as_of\', \'formerly\', \'currently\', or null')
+    is_current_state: typing.Optional[bool] = Field(default=None, description='True if this describes the current state of affairs, false if explicitly past tense')
 
 # #########################################################################
 # Generated type aliases (0)

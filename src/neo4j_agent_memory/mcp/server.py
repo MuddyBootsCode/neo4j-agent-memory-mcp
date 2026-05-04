@@ -50,14 +50,19 @@ try:
 
             @asynccontextmanager
             async def lifespan(server: FastMCP):  # noqa: E303
-                """Manage Docker container and MemoryClient lifecycle."""
+                """Manage Docker container and multi-database MemoryClient lifecycle."""
                 import os
 
                 from neo4j_agent_memory import MemoryClient as _MemoryClient
+                from neo4j_agent_memory.config.settings import Neo4jConfig
+                from neo4j_agent_memory.mcp._database_init import (
+                    ensure_databases_exist,
+                )
                 from neo4j_agent_memory.mcp._docker import (
                     Neo4jDockerManager,
                     connect_with_retry,
                 )
+                from neo4j_agent_memory.mcp._registry import ClientRegistry
 
                 # Patch factory to support BAML extraction [RFI-R1]
                 import neo4j_agent_memory.extraction.factory as _factory_mod
@@ -67,6 +72,54 @@ try:
 
                 _factory_mod.create_extractor = _ext_create_extractor
                 logger.info("Extraction factory patched with BAML support")
+
+                # Patch embedder factory to support Bedrock
+                def _create_embedder_extended(self):
+                    """Extended _create_embedder with Bedrock support."""
+                    from neo4j_agent_memory.config.settings import EmbeddingProvider
+
+                    config = self._settings.embedding
+
+                    if config.provider == EmbeddingProvider.OPENAI:
+                        from neo4j_agent_memory.embeddings.openai import OpenAIEmbedder
+
+                        return OpenAIEmbedder(
+                            model=config.model,
+                            api_key=config.api_key.get_secret_value() if config.api_key else None,
+                            dimensions=config.dimensions if config.dimensions != 1536 else None,
+                            batch_size=config.batch_size,
+                        )
+                    elif config.provider == EmbeddingProvider.SENTENCE_TRANSFORMERS:
+                        from neo4j_agent_memory.embeddings.sentence_transformers import (
+                            SentenceTransformerEmbedder,
+                        )
+
+                        return SentenceTransformerEmbedder(
+                            model_name=config.model,
+                            device=config.device,
+                        )
+                    elif config.provider == EmbeddingProvider.BEDROCK:
+                        from neo4j_agent_memory.embeddings.bedrock import BedrockEmbedder
+
+                        logger.info(
+                            "Creating Bedrock embedder (model=%s, region=%s)",
+                            config.model,
+                            config.aws_region,
+                        )
+                        return BedrockEmbedder(
+                            model=config.model,
+                            region_name=config.aws_region,
+                            profile_name=config.aws_profile,
+                            batch_size=config.batch_size,
+                        )
+                    else:
+                        return None
+
+                try:
+                    _MemoryClient._create_embedder = _create_embedder_extended
+                    logger.info("Embedder factory patched with Bedrock support")
+                except Exception as e:
+                    logger.error("Failed to patch embedder factory: %s", e)
 
                 # Phase 1: Ensure Neo4j container is running
                 docker_cfg = getattr(settings, "_docker_config", {})
@@ -78,8 +131,10 @@ try:
                     compose_file=docker_cfg.get("compose_file"),
                 )
 
+                registry = ClientRegistry()
+
                 async with docker_mgr:
-                    # Phase 2: Connect MemoryClient with retries
+                    # Phase 2: Connect general MemoryClient with retries
                     try:
                         client, client_cm = await connect_with_retry(
                             lambda: _MemoryClient(settings),
@@ -93,8 +148,67 @@ try:
                             "reachable: %s",
                             exc,
                         )
-                        yield {"client": None}
+                        yield {"client": None, "registry": None, "router": None, "reranker": None}
                         return
+
+                    registry.register("neo4j", client, client_cm)
+
+                    # Phase 3: Ensure vertical databases exist
+                    try:
+                        driver = client.graph._driver
+                        verticals = await ensure_databases_exist(driver)
+                    except Exception as e:
+                        logger.warning(
+                            "Could not create vertical databases: %s. "
+                            "Continuing with general DB only.", e
+                        )
+                        verticals = []
+
+                    # Phase 4: Create clients for each vertical
+                    for db_name in verticals:
+                        try:
+                            from pydantic import SecretStr
+
+                            vertical_settings = type(settings)(
+                                neo4j=Neo4jConfig(
+                                    uri=neo4j_cfg.uri,
+                                    username=neo4j_cfg.username,
+                                    password=neo4j_cfg.password,
+                                    database=db_name,
+                                ),
+                                embedding=settings.embedding,
+                            )
+                            v_client, v_cm = await connect_with_retry(
+                                lambda s=vertical_settings: _MemoryClient(s),
+                                max_attempts=3,
+                                delay=2.0,
+                            )
+                            registry.register(db_name, v_client, v_cm)
+                            logger.info("Client ready for database '%s'", db_name)
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to connect to '%s': %s", db_name, e
+                            )
+
+                    # Phase 5: Create router and reranker
+                    router = None
+                    reranker = None
+                    try:
+                        from neo4j_agent_memory.routing.router import (
+                            QueryRouter,
+                            ResultReranker,
+                        )
+
+                        router = QueryRouter(available_databases=registry.databases)
+                        reranker = ResultReranker(enabled=True)
+                        logger.info("Query router ready for databases: %s", registry.databases)
+                    except Exception as e:
+                        logger.warning("Could not initialize router: %s", e)
+
+                    logger.info(
+                        "ClientRegistry ready with databases: %s",
+                        registry.databases,
+                    )
 
                     try:
                         # Verify BAML patch took effect [RFI-R1]
@@ -115,9 +229,14 @@ try:
                                     _ext_name,
                                 )
 
-                        yield {"client": client}
+                        yield {
+                            "client": client,
+                            "registry": registry,
+                            "router": router,
+                            "reranker": reranker,
+                        }
                     finally:
-                        await client_cm.__aexit__(None, None, None)
+                        await registry.close_all()
 
         mcp = FastMCP(
             server_name,
@@ -230,10 +349,33 @@ try:
             docker_startup_timeout: Max seconds to wait for Neo4j startup.
             compose_file: Path to docker-compose.yml (auto-detected if None).
         """
+        import os
+
         from pydantic import SecretStr
 
         from neo4j_agent_memory import MemorySettings
-        from neo4j_agent_memory.config.settings import Neo4jConfig
+        from neo4j_agent_memory.config.settings import EmbeddingConfig, Neo4jConfig
+
+        # Build embedding config from env vars — defaults to Bedrock
+        embedding_provider = os.environ.get("NAM_EMBEDDING_PROVIDER", "bedrock")
+        embedding_kwargs: dict[str, Any] = {
+            "provider": embedding_provider,
+        }
+        if embedding_provider == "bedrock":
+            embedding_kwargs.update({
+                "model": os.environ.get(
+                    "NAM_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0"
+                ),
+                "dimensions": int(os.environ.get("NAM_EMBEDDING_DIMENSIONS", "1024")),
+                "aws_region": os.environ.get("AWS_REGION", "us-east-1"),
+                "aws_profile": os.environ.get("AWS_PROFILE"),
+            })
+        elif embedding_provider == "openai":
+            embedding_kwargs.update({
+                "model": os.environ.get(
+                    "NAM_EMBEDDING_MODEL", "text-embedding-3-small"
+                ),
+            })
 
         settings = MemorySettings(
             neo4j=Neo4jConfig(
@@ -241,7 +383,8 @@ try:
                 username=neo4j_user,
                 password=SecretStr(neo4j_password),
                 database=neo4j_database,
-            )
+            ),
+            embedding=EmbeddingConfig(**embedding_kwargs),
         )
 
         # Attach Docker config as private attr for lifespan to read
@@ -281,6 +424,10 @@ def main() -> None:
     import argparse
     import os
 
+    from neo4j_agent_memory.mcp._logging import configure_logging
+
+    configure_logging()
+
     parser = argparse.ArgumentParser(description="Neo4j Agent Memory MCP Server")
     parser.add_argument(
         "--neo4j-uri",
@@ -305,19 +452,19 @@ def main() -> None:
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "http"],
-        default="stdio",
-        help="MCP transport type",
+        default=os.environ.get("MCP_TRANSPORT", "stdio"),
+        help="MCP transport type (env: MCP_TRANSPORT)",
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="Host for network transports (use 0.0.0.0 to expose on all interfaces)",
+        default=os.environ.get("MCP_HOST", "127.0.0.1"),
+        help="Host for network transports (env: MCP_HOST)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8080,
-        help="Port for network transports",
+        default=int(os.environ.get("MCP_PORT", "8080")),
+        help="Port for network transports (env: MCP_PORT)",
     )
     parser.add_argument(
         "--neo4j-docker-auto",

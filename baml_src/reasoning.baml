@@ -15,7 +15,7 @@ class ReasoningExtractionOutput {
 }
 
 function ExtractReasoning(text: string) -> ReasoningExtractionOutput {
-  client Anthropic
+  client Bedrock
   prompt #"
     Analyze the following conversation or text and extract the reasoning chain.
 
@@ -54,7 +54,7 @@ class ReasoningStepInput {
 }
 
 function SynthesizeExplanation(chain: ReasoningChainInput) -> string {
-  client Anthropic
+  client Bedrock
   prompt #"
     Given the following reasoning chain from an AI agent's problem-solving process,
     produce a clear, natural-language explanation of WHY the agent came to its conclusion.

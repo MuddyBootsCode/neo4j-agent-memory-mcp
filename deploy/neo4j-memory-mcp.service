@@ -1,0 +1,32 @@
+# deploy/neo4j-memory-mcp.service
+# Install: sudo cp deploy/neo4j-memory-mcp.service /etc/systemd/system/
+# Enable:  sudo systemctl daemon-reload && sudo systemctl enable neo4j-memory-mcp
+# Start:   sudo systemctl start neo4j-memory-mcp
+# Logs:    journalctl -u neo4j-memory-mcp -f
+
+[Unit]
+Description=Neo4j Agent Memory MCP Server
+After=docker.service
+Requires=docker.service
+Documentation=https://github.com/graphable-ai/neo4j-agent-memory-mcp
+
+[Service]
+Type=simple
+User=centos
+WorkingDirectory=/opt/neo4j-agent-memory-mcp
+EnvironmentFile=/opt/neo4j-agent-memory-mcp/deploy/.env
+Environment=PYTHONPATH=/opt/neo4j-agent-memory-mcp/src
+ExecStart=/opt/neo4j-agent-memory-mcp/.venv/bin/python -m neo4j_agent_memory.mcp.server --transport http --host 0.0.0.0 --port 8082
+Restart=always
+RestartSec=5
+
+# Logging to journald (viewable via journalctl)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=neo4j-memory-mcp
+
+# Security hardening (compatible with CentOS 7 systemd)
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,245 @@
+{
+  "_description": "Golden dataset for entity extraction and resolution accuracy testing. Each conversation has hand-labeled expected entities, relationships, and preferences. Used to track extraction quality over time.",
+  "_version": "1.0",
+  "conversations": [
+    {
+      "id": "conv_001",
+      "category": "simple_person_org",
+      "text": "Michael is VP of Engineering at Graphable.",
+      "expected_entities": [
+        {"name": "Michael", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Graphable", "type": "ORGANIZATION", "min_confidence": 0.8}
+      ],
+      "expected_relations": [
+        {"source": "Michael", "target": "Graphable", "relation_contains": "WORK"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_002",
+      "category": "simple_person_org",
+      "text": "Raj Patel is the CTO of DataVault Solutions.",
+      "expected_entities": [
+        {"name": "Raj Patel", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "DataVault Solutions", "type": "ORGANIZATION", "min_confidence": 0.8}
+      ],
+      "expected_relations": [
+        {"source": "Raj Patel", "target": "DataVault Solutions", "relation_contains": "WORK"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_003",
+      "category": "simple_person_org",
+      "text": "Sarah is a data scientist at Graphable.",
+      "expected_entities": [
+        {"name": "Sarah", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Graphable", "type": "ORGANIZATION", "min_confidence": 0.8}
+      ],
+      "expected_relations": [
+        {"source": "Sarah", "target": "Graphable", "relation_contains": "WORK"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_004",
+      "category": "multi_entity_relations",
+      "text": "Michael drives a Tesla Model 3 and lives in Austin, Texas.",
+      "expected_entities": [
+        {"name": "Michael", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Tesla Model 3", "type": "OBJECT", "min_confidence": 0.7},
+        {"name": "Austin", "type": "LOCATION", "min_confidence": 0.7}
+      ],
+      "expected_relations": [
+        {"source": "Michael", "target": "Tesla Model 3", "relation_contains": "OWN|DRIVE"},
+        {"source": "Michael", "target": "Austin", "relation_contains": "LIVE"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_005",
+      "category": "multi_entity_relations",
+      "text": "Alice works at DataVault Solutions in the Denver office. She reports to Raj Patel.",
+      "expected_entities": [
+        {"name": "Alice", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "DataVault Solutions", "type": "ORGANIZATION", "min_confidence": 0.8},
+        {"name": "Denver", "type": "LOCATION", "min_confidence": 0.7},
+        {"name": "Raj Patel", "type": "PERSON", "min_confidence": 0.7}
+      ],
+      "expected_relations": [
+        {"source": "Alice", "target": "DataVault Solutions", "relation_contains": "WORK"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_006",
+      "category": "preferences",
+      "text": "Raj prefers Hyatt hotels when traveling and is vegetarian.",
+      "expected_entities": [
+        {"name": "Raj", "type": "PERSON", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": [
+        {"category_contains": "travel|hotel", "preference_contains": "hyatt"},
+        {"category_contains": "food|diet", "preference_contains": "vegetarian"}
+      ]
+    },
+    {
+      "id": "conv_007",
+      "category": "preferences",
+      "text": "Michael prefers morning meetings and communicates best over Slack.",
+      "expected_entities": [
+        {"name": "Michael", "type": "PERSON", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": [
+        {"category_contains": "schedul|meeting|communicat", "preference_contains": "morning"},
+        {"category_contains": "communicat|tool", "preference_contains": "slack"}
+      ]
+    },
+    {
+      "id": "conv_008",
+      "category": "temporal",
+      "text": "Alice used to work at Acme Corp before joining Graphable in 2024.",
+      "expected_entities": [
+        {"name": "Alice", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Acme Corp", "type": "ORGANIZATION", "min_confidence": 0.7},
+        {"name": "Graphable", "type": "ORGANIZATION", "min_confidence": 0.8}
+      ],
+      "expected_relations": [
+        {"source": "Alice", "target": "Graphable", "relation_contains": "WORK|JOIN"}
+      ],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_009",
+      "category": "temporal",
+      "text": "Since March 2025, Bob has been leading the infrastructure migration project.",
+      "expected_entities": [
+        {"name": "Bob", "type": "PERSON", "min_confidence": 0.8}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_010",
+      "category": "meeting_vertical",
+      "text": "In the Monday standup, Sarah demoed the new dashboard. Marcus raised a blocker on the API integration. Action item: Sarah to send API specs to Marcus by Thursday.",
+      "expected_entities": [
+        {"name": "Sarah", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Marcus", "type": "PERSON", "min_confidence": 0.8}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_011",
+      "category": "meeting_vertical",
+      "text": "The quarterly planning meeting included Michael, Raj, and Alice. They discussed the Q4 roadmap and budget allocation for the DataVault integration.",
+      "expected_entities": [
+        {"name": "Michael", "type": "PERSON", "min_confidence": 0.7},
+        {"name": "Raj", "type": "PERSON", "min_confidence": 0.7},
+        {"name": "Alice", "type": "PERSON", "min_confidence": 0.7},
+        {"name": "DataVault", "type": "ORGANIZATION", "min_confidence": 0.6}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_012",
+      "category": "project_vertical",
+      "text": "Sprint 12 update: The migration task moved to in-progress. Milestone 2 deadline pushed to March 15. The embedding pipeline deliverable is 80% complete.",
+      "expected_entities": [],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_013",
+      "category": "project_vertical",
+      "text": "Alice finished the graph-based RAG implementation. Bob is now blocked on AWS credentials from DataVault. The deliverable is due next Friday.",
+      "expected_entities": [
+        {"name": "Alice", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Bob", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "DataVault", "type": "ORGANIZATION", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_014",
+      "category": "research_vertical",
+      "text": "Chen et al. 2024 found that graph-based RAG outperforms vector-only retrieval by 23% on multi-hop questions. This supports our hypothesis about knowledge graphs improving agent memory.",
+      "expected_entities": [],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_015",
+      "category": "research_vertical",
+      "text": "Priya's experiment with BERT embeddings shows they outperform word2vec for our entity linking use case. She recommends switching to the all-MiniLM-L6-v2 model.",
+      "expected_entities": [
+        {"name": "Priya", "type": "PERSON", "min_confidence": 0.8}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_016",
+      "category": "name_variation",
+      "text": "Raj mentioned he'll be traveling next week.",
+      "expected_entities": [
+        {"name": "Raj", "type": "PERSON", "min_confidence": 0.8}
+      ],
+      "expected_relations": [],
+      "expected_preferences": [],
+      "_note": "Tests name variation: 'Raj' vs 'Raj Patel' from conv_002"
+    },
+    {
+      "id": "conv_017",
+      "category": "name_variation",
+      "text": "Mr. Patel confirmed the DataVault contract renewal.",
+      "expected_entities": [
+        {"name": "Mr. Patel", "type": "PERSON", "min_confidence": 0.7},
+        {"name": "DataVault", "type": "ORGANIZATION", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": [],
+      "_note": "Tests name variation: 'Mr. Patel' should ideally resolve to 'Raj Patel'"
+    },
+    {
+      "id": "conv_018",
+      "category": "complex_multi_entity",
+      "text": "Marcus signed the lease for the new Denver office on Larimer Street. The office will serve as the western hub for Graphable's consulting practice.",
+      "expected_entities": [
+        {"name": "Marcus", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Denver", "type": "LOCATION", "min_confidence": 0.7},
+        {"name": "Larimer Street", "type": "LOCATION", "min_confidence": 0.6},
+        {"name": "Graphable", "type": "ORGANIZATION", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_019",
+      "category": "complex_multi_entity",
+      "text": "Sarah and Bob presented findings from the NLP research project to the DataVault engineering team at their San Antonio office.",
+      "expected_entities": [
+        {"name": "Sarah", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "Bob", "type": "PERSON", "min_confidence": 0.8},
+        {"name": "DataVault", "type": "ORGANIZATION", "min_confidence": 0.7},
+        {"name": "San Antonio", "type": "LOCATION", "min_confidence": 0.7}
+      ],
+      "expected_relations": [],
+      "expected_preferences": []
+    },
+    {
+      "id": "conv_020",
+      "category": "edge_case",
+      "text": "The team discussed next steps for the project.",
+      "expected_entities": [],
+      "expected_relations": [],
+      "expected_preferences": [],
+      "_note": "Vague content with no specific named entities — should extract nothing or minimal"
+    }
+  ]
+}

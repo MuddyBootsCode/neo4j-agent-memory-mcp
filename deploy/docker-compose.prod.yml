@@ -1,0 +1,39 @@
+# deploy/docker-compose.prod.yml
+# Production Neo4j config for hume-prod (r5a.4xlarge, 128GB RAM)
+# Usage: cd /opt/neo4j-agent-memory-mcp/deploy && docker compose -f docker-compose.prod.yml up -d
+
+services:
+  neo4j:
+    image: neo4j:5-enterprise
+    container_name: neo4j-agent-memory
+    restart: unless-stopped
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_dbms_security_procedures_allowlist: "apoc.*"
+      # Sized for 128GB instance — Neo4j gets ~40GB total
+      NEO4J_server_memory_heap_initial__size: "8g"
+      NEO4J_server_memory_heap_max__size: "16g"
+      NEO4J_server_memory_pagecache_size: "12g"
+      NEO4J_dbms_memory_transaction_total_max: "4g"
+    volumes:
+      - neo4j-data:/data
+      - ../neo4j-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD} "RETURN 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 40g
+
+volumes:
+  neo4j-data:

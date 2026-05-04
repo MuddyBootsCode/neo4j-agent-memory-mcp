@@ -74,6 +74,15 @@ def mock_reasoning_client(monkeypatch):
         lambda ctx: mock_client,
     )
 
+    # Ensure multi-DB helpers fall back to single-client mode
+    def _no_registry(ctx):
+        raise RuntimeError("No registry in test")
+
+    monkeypatch.setattr(
+        "neo4j_agent_memory.mcp._tools.get_registry",
+        _no_registry,
+    )
+
     return mock_client, mock_reasoning
 
 
@@ -598,16 +607,28 @@ class TestMemorySearchDefaultTypes:
         mock_entities = AsyncMock(return_value=[])
         mock_preferences = AsyncMock(return_value=[])
         mock_traces = AsyncMock(return_value=[])
+        mock_facts = AsyncMock(return_value=[])
 
         mock_client = MagicMock()
         mock_client.short_term.search_messages = mock_messages
         mock_client.long_term.search_entities = mock_entities
         mock_client.long_term.search_preferences = mock_preferences
         mock_client.reasoning.get_similar_traces = mock_traces
+        mock_client.long_term.search_facts = mock_facts
+        mock_client.graph.execute_read = AsyncMock(return_value=[])
 
         monkeypatch.setattr(
             "neo4j_agent_memory.mcp._tools.get_client",
             lambda ctx: mock_client,
+        )
+
+        # Ensure multi-DB helpers fall back to single-client mode
+        def _no_registry(ctx):
+            raise RuntimeError("No registry in test")
+
+        monkeypatch.setattr(
+            "neo4j_agent_memory.mcp._tools.get_registry",
+            _no_registry,
         )
 
         from neo4j_agent_memory.mcp._tools import register_tools

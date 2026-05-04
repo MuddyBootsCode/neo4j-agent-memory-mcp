@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, 'feature/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Run unit tests
+        run: uv run pytest tests/ -v --ignore=tests/test_routing_eval.py
+
+  routing-eval:
+    runs-on: ubuntu-latest
+    # Only run on changes to BAML routing prompts or eval harness
+    if: >
+      contains(github.event.head_commit.message, '[eval]') ||
+      github.event_name == 'pull_request'
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Run routing eval
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: uv run python tests/test_routing_eval.py --client OpenAI --threshold 0.80
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-eval-results
+          path: tests/routing_eval_*.csv

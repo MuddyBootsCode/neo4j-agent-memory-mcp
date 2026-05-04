@@ -1,10 +1,10 @@
 // POLE+O Entity Types
 enum EntityType {
-  PERSON @description("Individuals, people mentioned by name or role")
-  ORGANIZATION @description("Companies, groups, institutions")
-  LOCATION @description("Places, addresses, geographic areas, landmarks")
-  EVENT @description("Incidents, meetings, transactions, things that happened")
-  OBJECT @description("Physical or digital items: vehicles, phones, documents, devices")
+  PERSON @description("Individuals mentioned by name. DO NOT extract unnamed roles ('the engineer'), collective nouns ('the team', 'staff'), or pronouns")
+  ORGANIZATION @description("Companies, institutions, named groups. DO NOT extract departments ('engineering team'), project names ('migration project'), or informal groups")
+  LOCATION @description("Geographic places, named addresses, landmarks. DO NOT extract relative positions ('the office') unless preceded by a proper place name")
+  EVENT @description("Specific incidents or calendar events with a date or proper name. DO NOT extract: meetings, calls, reviews, tasks, sprints, deployments, migrations, integrations, or any process noun")
+  OBJECT @description("Branded or model-specific items only. DO NOT extract: pipelines, frameworks, approaches, embeddings, APIs, systems, databases, documents, tools, or any technical concept")
 }
 
 class ExtractedEntity {
@@ -35,7 +35,7 @@ class ExtractionOutput {
 }
 
 function ExtractEntities(text: string, entity_types: string) -> ExtractionOutput {
-  client Anthropic
+  client Bedrock
   prompt #"
     Extract entities, relationships, and preferences from the following text.
 

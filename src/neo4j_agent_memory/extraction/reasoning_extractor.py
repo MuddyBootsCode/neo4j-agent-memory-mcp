@@ -50,7 +50,7 @@ class BamlReasoningExtractor:
 
         result = await b.ExtractReasoning(
             text=text,
-            **(self._baml_options if self._baml_options else {}),
+            baml_options=self._baml_options if self._baml_options else {},
         )
 
         return {
@@ -106,5 +106,5 @@ class BamlReasoningExtractor:
 
         return await b.SynthesizeExplanation(
             chain=chain,
-            **(self._baml_options if self._baml_options else {}),
+            baml_options=self._baml_options if self._baml_options else {},
         )
