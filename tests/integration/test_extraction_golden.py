@@ -13,7 +13,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pytest
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 GOLDEN_PATH = FIXTURES_DIR / "golden_conversations.json"
@@ -238,14 +237,22 @@ class TestExtractionGoldenDataset:
         os.environ.setdefault("AWS_REGION", "us-east-1")
         os.environ.setdefault("AWS_PROFILE", "graphable-aws")
 
-        from neo4j_agent_memory.extraction.baml_extractor import BamlEntityExtractor
+        from types import SimpleNamespace
 
-        extractor = BamlEntityExtractor(client_name="Bedrock")
+        from neo4j_agent_memory.extraction.unified import extract_memory
+
         conversations = _load_golden_dataset()
         metrics = ExtractionMetrics()
 
         for conv in conversations:
-            result = await extractor.extract(conv["text"])
+            raw = await extract_memory(conv["text"])
+            # Adapt the unified dict output to the attribute shape the
+            # evaluator expects (.entities/.relations/.preferences of objects).
+            result = SimpleNamespace(
+                entities=[SimpleNamespace(**e) for e in raw["entities"]],
+                relations=[SimpleNamespace(**r) for r in raw["relations"]],
+                preferences=[SimpleNamespace(**p) for p in raw["preferences"]],
+            )
             eval_result = _evaluate_conversation(conv, result)
 
             metrics.entity_true_positives += eval_result["entity_tp"]

@@ -5,7 +5,6 @@ Neo4j connection → test database → MemoryClient → Bedrock embeddings
 → BAML entity extraction via Bedrock.
 """
 
-import pytest
 
 
 class TestFixtureChain:

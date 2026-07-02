@@ -1,7 +1,6 @@
 """Tests for contradiction detection and Phase 2 temporal features."""
 
 import json
-import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -257,55 +256,6 @@ class TestMigration:
         assert result["valid_from_backfilled"] == 0
 
 
-# ── _merge.py temporal sorting ──────────────────────────────────────
-
-
-class TestTemporalMerge:
-    def test_active_facts_sorted_first(self):
-        from neo4j_agent_memory.mcp._merge import merge_search_results
-
-        per_db = {
-            "neo4j": {
-                "facts": [
-                    {"id": "f1", "temporal_status": "expired", "similarity": 0.95},
-                    {"id": "f2", "temporal_status": "active", "similarity": 0.80},
-                    {"id": "f3", "temporal_status": "active", "similarity": 0.90},
-                ]
-            }
-        }
-
-        merged = merge_search_results(per_db)
-        facts = merged["facts"]
-
-        # Active facts should come first
-        assert facts[0]["temporal_status"] == "active"
-        assert facts[1]["temporal_status"] == "active"
-        assert facts[2]["temporal_status"] == "expired"
-
-        # Within active, higher similarity first
-        assert facts[0]["similarity"] == 0.90
-        assert facts[1]["similarity"] == 0.80
-
-    def test_no_temporal_status_treated_as_active(self):
-        from neo4j_agent_memory.mcp._merge import merge_search_results
-
-        per_db = {
-            "neo4j": {
-                "facts": [
-                    {"id": "f1", "similarity": 0.9},  # no temporal_status
-                    {"id": "f2", "temporal_status": "expired", "similarity": 0.95},
-                ]
-            }
-        }
-
-        merged = merge_search_results(per_db)
-        facts = merged["facts"]
-
-        # No-status treated as active, should be first
-        assert facts[0]["id"] == "f1"
-        assert facts[1]["id"] == "f2"
-
-
 # ── knowledge_state tool ────────────────────────────────────────────
 
 
@@ -340,10 +290,6 @@ def mock_knowledge_client(monkeypatch):
     def _no_registry(ctx):
         raise RuntimeError("No registry")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
     return mock_client
 
