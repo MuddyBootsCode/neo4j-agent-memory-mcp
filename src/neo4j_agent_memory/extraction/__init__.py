@@ -1,9 +1,9 @@
 """Extraction subpackage overlay — extends installed package with BAML support.
 
 This module replicates the __path__ extension trick from the top-level
-neo4j_agent_memory/__init__.py so that BOTH overlay modules (baml_extractor,
-baml_config, factory_ext) AND base package modules (base, factory,
-llm_extractor, spacy_extractor, etc.) remain importable.
+neo4j_agent_memory/__init__.py so that BOTH overlay modules (unified,
+reasoning_extractor) AND base package modules (base, factory, llm_extractor,
+spacy_extractor, etc.) remain importable.
 
 Without this, creating any .py file in this directory would shadow the
 entire installed extraction package. See RFI-I1.

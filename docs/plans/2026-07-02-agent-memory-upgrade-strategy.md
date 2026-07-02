@@ -6,6 +6,37 @@
 
 ---
 
+## Implementation update (2026-07-02)
+
+The architectural decision in Part 1 was taken: **the multi-database vertical
+split was removed (R25) in favor of a single graph with domain entity types as
+labels.** Landed in the same pass:
+
+- **R25** — verticals/router/registry/merge/proxy deleted; one graph.
+- **R2** — the broken ProxyRef feature removed entirely (no more orphan nodes).
+- **R1** — fact `valid_from`/`valid_until` unified to epoch millis; point-in-time
+  queries now round-trip (regression test added).
+- **R3** — `graph_query` read-only enforced via READ-access-mode transaction (prior commit).
+- **R4** — retired Sonnet 4 Bedrock pin rotated to Sonnet 4.5; extraction failure
+  made non-fatal to `memory_store`.
+- **R9** — `entity_lookup` `entity_type` validated via `sanitize_label` (injection sink closed).
+- **R17/R18** — relation-type collapse and arbitrary name-fallback fixed in the new
+  unified persistence.
+- **R28** — double extraction eliminated (one unified `ExtractMemory` pass; router LLM off the hot path).
+- **Ontology** — consolidated + enriched: POLE+O core + meetings/projects/research
+  types as labels, cross-domain relations, ATTENDEE→Person and TEAM→Organization.
+- **Tests** — obsolete multi-db/routing/extractor tests removed; real-Neo4j E2E suite
+  added (`tests/integration/test_memory_e2e.py`) covering store→search, the temporal
+  round trip, supersession, and the injection guard. Unit suite: 112 passing.
+
+**Still open** from the list below: R5–R8 (supersession atomicity/semantics),
+R10 (HTTP auth), R11–R13 no longer apply (router removed), R26/R27 (overlay
+packaging), R30 (migration is now moot — greenfield), R32 (CI Neo4j service),
+and the read-only Neo4j account (RBAC). The status column in Part 2 predates
+this update; treat this note as authoritative where they differ.
+
+---
+
 ## Part 1 — Is this a good memory system? (Reasoned opinion)
 
 Short version: **the design instincts are good and above the median for this class of project, but it is not yet a trustworthy memory system, because several of its headline primitives are verifiably broken end-to-end and the test strategy is structurally unable to notice.** The gap is not vision — it's the seam between the code and the database.
