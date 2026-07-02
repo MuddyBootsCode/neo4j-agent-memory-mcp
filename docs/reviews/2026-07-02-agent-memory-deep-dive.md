@@ -88,12 +88,20 @@ Result: every vertical `memory_store` leaks an orphan node into the general DB; 
 Three compounding issues:
 
 1. **`execute_read` does not enforce read-only.** The comment at `_tools.py:76-77` ("The database itself will reject writes when executed via execute_read()") is false — upstream `execute_read` is a bare `session.run()` in a default write-capable session (verified: `.venv/.../graph/client.py:104-107`). The regex in `_is_read_only_query` is the *only* guard.
-2. **The regex is bypassable.** `WRITE_PATTERNS` (`_tools.py:78-90`) deliberately allows `CALL apoc.*` — `CALL apoc.create.node(...)` or `apoc.periodic.iterate(...)` executes as a write on Neo4j Enterprise with APOC (which the compose file enables).
+2. **The regex is bypassable.** `WRITE_PATTERNS` (`_tools.py:78-90`) deliberately allows `CALL <procedure>` (the intent, per the comment at `_tools.py:74-77`, is to permit read procedures like `db.index.vector.queryNodes` and `apoc.meta.data`). But it only blocks `CALL {` subqueries — any *write* APOC procedure passes: `apoc.create.node(...)`, `apoc.merge.*`, `apoc.refactor.*`, `apoc.periodic.iterate(...)`, `apoc.trigger.*`, and notably `apoc.cypher.doIt(...)` (the write-mode sibling of `apoc.cypher.runFirstColumn`). APOC is enabled in the compose file. Enumerating these in the denylist is a losing game — the set changes across APOC versions and any string-built procedure name or comment/casing trick evades a regex over a language the server itself parses.
 3. **`entity_lookup` Cypher injection.** `_tools.py:700-701`: `type_filter = f" AND e:{entity_type}"` — a caller/LLM-controlled string interpolated into the query. `Person WITH e MATCH (n) DETACH DELETE n //` is a valid payload, and because of (1) it mutates the graph.
 
 Plus: **the HTTP transport has no authentication** (`server.py:401-402`), and the README documents `--host 0.0.0.0` and a public IP endpoint. Anyone who can reach the port gets full tool access, including the injection sinks above.
 
-**Fix:** run `graph_query` through an explicit read transaction (`session.execute_read` / `default_access_mode=READ`), validate `entity_type` against the known type allowlist, and put an auth layer (or at least a bearer token + bind guidance) in front of the HTTP transport.
+**Verified:** upstream `execute_read` is byte-for-byte identical to `execute_write` — both call `session.run()` on `_get_session()`, which opens `driver.session(database=...)` with **no `default_access_mode`** (defaults to WRITE). There is zero DB-level read enforcement (`.venv/.../graph/client.py:84-127`).
+
+**Fix — enforcement options, ranked (a denylist regex cannot catch all cases):**
+
+1. **Read-only account / true READ transaction — best, and a genuine catch-all.** Prod runs Neo4j Enterprise (RBAC available), so either give the `graph_query` path a dedicated user with a read-only role, or open the session in read access mode (`driver.session(default_access_mode=neo4j.READ_ACCESS)` / the managed `session.execute_read(...)` transaction function). Key property: a READ-mode transaction rejects not just write *clauses* but any procedure whose declared mode is WRITE/SCHEMA — so `apoc.cypher.doIt` and every other write APOC procedure fails with *"Cannot perform write operation in read access mode"* **without maintaining any list**. This is why it is strictly better than regex or EXPLAIN. (The read-only *account* specifically needs Enterprise — Community has no custom RBAC — which prod has.) Because the overlay already monkeypatches this upstream client, the cleanest place to add a real read-mode `execute_read` is in that patch rather than upstream.
+2. **EXPLAIN-based validation — a real improvement over regex, with one caveat.** `EXPLAIN <query>` never executes (only PROFILE does) and returns a plan the *server* parsed, so you can walk the operator tree for write operators (`CreateNode`, `CreateRelationship`, `SetProperty`, `Delete*`, `Merge`) — this robustly kills the parsing-error class the regex can't. **Caveat:** EXPLAIN does not see inside APOC — `CALL apoc.cypher.doIt(...)` shows only an opaque `ProcedureCall` operator with no write operator in the plan. To close that you'd cross-reference each `ProcedureCall` against `SHOW PROCEDURES` and reject any with `mode` of WRITE/SCHEMA/DBMS — at which point you've rebuilt what option 1 gives for free. Use EXPLAIN only if option 1 is unavailable.
+3. **Keeping the current regex — only as defense-in-depth.** If it stays, at minimum add `apoc.cypher.doIt`, `apoc.cypher.runWrite`, `apoc.create.*`, `apoc.merge.*`, `apoc.refactor.*`, `apoc.periodic.*`, `apoc.trigger.*`, and treat the list as permanently incomplete. Ideally it becomes a cheap first-pass reject in *front* of a read transaction, not the sole gate.
+
+Separately: validate `entity_type` against the known type allowlist (it can't be parameterized as a label, so it must be whitelisted), and put an auth layer (or at least a bearer token + bind guidance) in front of the HTTP transport. Recommended posture: read-only account **and** READ access mode (belt and suspenders), with the regex demoted to a fast-fail nicety.
 
 ### 2.4 Retired model pin + extraction failure semantics = production outage waiting — **CRITICAL (operational)**
 
@@ -193,7 +201,7 @@ Meanwhile CI (`.github/workflows/test.yml`) runs `pytest tests/ --ignore=tests/t
 **P0 — correctness/security (this week):**
 1. Unify temporal property representation (epoch millis), convert at write, migrate existing data, delete the string-means-expired hack (§2.1).
 2. Fix or remove ProxyRef: create the `HAS_REFERENCE` edge keyed on entity identity, or delete the feature (§2.2).
-3. Enforce read-only `graph_query` via read transactions; allowlist-validate `entity_type` in `entity_lookup`; add auth to the HTTP transport (§2.3).
+3. Enforce read-only `graph_query` at the DB layer — a read-only Enterprise account and/or READ-access-mode transactions (which reject write APOC procedures like `apoc.cypher.doIt` for free, unlike the regex or EXPLAIN); allowlist-validate `entity_type` in `entity_lookup`; add auth to the HTTP transport (§2.3).
 4. Rotate the retired Sonnet 4 Bedrock pin; re-baseline golden thresholds; make extraction failure non-fatal to `memory_store` (§2.4).
 
 **P1 — data integrity (next):**
