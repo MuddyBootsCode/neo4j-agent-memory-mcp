@@ -71,10 +71,12 @@ async def _backfill_entity_embeddings(client: Any, message_id: str) -> int:
     return count
 
 
-# Patterns for detecting write operations in Cypher (matched against uppercased query).
-# Note: CALL db.* and CALL apoc.* are allowed since many procedures are read-only
-# (e.g., db.index.vector.queryNodes, apoc.meta.data). The database itself will
-# reject writes when executed via execute_read().
+# Cheap first-pass reject for obvious write clauses (matched against uppercased query).
+# This is DEFENSE-IN-DEPTH ONLY, not the real guard: a keyword denylist cannot catch
+# every case (comments, casing tricks, string-built names, future syntax) and it does
+# NOT catch write-mode APOC procedures like apoc.cypher.doIt. Actual enforcement is at
+# the database layer — _execute_read_only() runs the query in a genuine READ-access-mode
+# transaction, so the server itself rejects both write clauses and write-mode procedures.
 WRITE_PATTERNS = [
     r"\bCREATE\b",
     r"\bMERGE\b",
@@ -91,16 +93,54 @@ WRITE_PATTERNS = [
 
 
 def _is_read_only_query(query: str) -> bool:
-    """Check if a Cypher query is read-only.
+    """Cheap first-pass check for obvious write clauses.
+
+    This is a fast-fail nicety only; the authoritative read-only enforcement is the
+    READ-access-mode transaction in _execute_read_only(). Do not rely on this alone.
 
     Args:
         query: The Cypher query to check.
 
     Returns:
-        True if the query contains no write operations.
+        True if the query contains no obvious write keywords.
     """
     query_upper = query.upper()
     return all(not re.search(pattern, query_upper) for pattern in WRITE_PATTERNS)
+
+
+async def _execute_read_only(
+    client: Any, query: str, parameters: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Run a Cypher query in a genuine READ-access-mode transaction.
+
+    Unlike the upstream ``graph.execute_read`` (which opens a session in the default
+    WRITE access mode, so the server does not restrict writes), this uses a managed
+    read transaction. In a read transaction the Neo4j server rejects any write clause
+    AND any procedure whose declared mode is WRITE/SCHEMA (e.g. ``apoc.cypher.doIt``),
+    raising a ClientError rather than mutating the graph — a catch-all the keyword
+    denylist in ``_is_read_only_query`` cannot provide.
+
+    For deployments that also provision a read-only Neo4j account (recommended,
+    Enterprise RBAC), this remains correct and adds a second, independent layer.
+
+    Args:
+        client: A memory client whose ``.graph`` is the upstream Neo4j client.
+        query: The Cypher query to execute.
+        parameters: Optional query parameters (always passed as bound parameters).
+
+    Returns:
+        The query result rows as a list of dicts.
+    """
+    graph = client.graph
+    driver = graph._ensure_connected()
+    db_name = graph._config.database
+
+    async def _work(tx: Any) -> list[dict[str, Any]]:
+        result = await tx.run(query, parameters or {})
+        return await result.data()
+
+    async with driver.session(database=db_name) as session:
+        return await session.execute_read(_work)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -856,8 +896,10 @@ def register_tools(mcp: FastMCP) -> None:
     ) -> str:
         """Execute a read-only Cypher query against the knowledge graph.
 
-        Only MATCH/RETURN queries are allowed. Write operations
-        (CREATE, MERGE, DELETE, SET, REMOVE) are blocked for safety.
+        Only read queries are allowed. The query runs in a READ-access-mode
+        transaction, so the database itself rejects any write clause
+        (CREATE, MERGE, DELETE, SET, REMOVE, ...) and any write-mode procedure
+        (e.g. apoc.cypher.doIt) — an obvious-keyword pre-check runs first.
 
         Set database to target a specific vertical (meetings, projects,
         research, or neo4j for general).
@@ -882,6 +924,8 @@ def register_tools(mcp: FastMCP) -> None:
         - Preferences are :Preference nodes with category and preference properties
         - ReasoningTrace nodes link to :ReasoningStep via :HAS_STEP, steps link to :ToolCall
         """
+        # First-pass fast fail on obvious write keywords; real enforcement is the
+        # READ-access-mode transaction in _execute_read_only() below.
         if not _is_read_only_query(query):
             return json.dumps(
                 {
@@ -897,7 +941,7 @@ def register_tools(mcp: FastMCP) -> None:
             client = get_client(ctx)
 
         try:
-            records = await client.graph.execute_read(query, parameters or {})
+            records = await _execute_read_only(client, query, parameters or {})
             return json.dumps(
                 {
                     "success": True,
