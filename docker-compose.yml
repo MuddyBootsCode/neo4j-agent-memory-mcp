@@ -17,7 +17,6 @@ services:
       NEO4J_dbms_memory_transaction_total_max: "1g"
     volumes:
       - neo4j-data:/data
-      - ./neo4j-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-graphmemory} "RETURN 1"
       interval: 10s

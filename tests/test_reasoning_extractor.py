@@ -161,7 +161,7 @@ class TestBamlReasoningExtractorClientOptions:
         from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
-        assert extractor._client_name == "Anthropic"
+        assert extractor._client_name == "Bedrock"
         assert extractor._baml_options == {}
 
     def test_custom_client_registry(self):

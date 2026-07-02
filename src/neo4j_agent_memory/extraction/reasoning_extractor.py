@@ -16,7 +16,7 @@ class BamlReasoningExtractor:
     def __init__(
         self,
         *,
-        client_name: str = "Anthropic",
+        client_name: str = "Bedrock",
         client_registry: Any | None = None,
     ):
         self._client_name = client_name
@@ -24,7 +24,7 @@ class BamlReasoningExtractor:
 
         if client_registry:
             self._baml_options["client_registry"] = client_registry
-        elif client_name != "Anthropic":
+        elif client_name != "Bedrock":
             try:
                 from baml_py import ClientRegistry
 

@@ -4,7 +4,6 @@ Verifies that the overlay extraction __init__.py correctly extends
 __path__ so both overlay modules and base package modules are importable.
 """
 
-import pytest
 
 
 def test_base_extraction_imports_still_work():

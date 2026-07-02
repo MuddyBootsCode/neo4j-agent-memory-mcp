@@ -274,23 +274,8 @@ def mock_fact_client(monkeypatch):
         lambda ctx: mock_client,
     )
 
-    def _no_registry(ctx):
-        raise RuntimeError("No registry in test")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
-    mock_router = MagicMock()
-    mock_route = MagicMock()
-    mock_route.primary_database = "neo4j"
-    mock_route.to_metadata.return_value = {"primary": "neo4j"}
-    mock_router.route_storage = AsyncMock(return_value=mock_route)
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_router",
-        lambda ctx: mock_router,
-    )
 
     return mock_client, mock_fact
 
@@ -330,13 +315,15 @@ async def test_memory_store_fact_with_temporal_params(mock_fact_client):
     assert result["stored"] is True
     assert result["type"] == "fact"
     assert result["confidence"] == 0.9
-    assert result["valid_from"] == "2026-03-01T00:00:00Z"
+    # R1: valid_from is normalized to epoch millis (not an ISO string).
+    assert isinstance(result["valid_from"], int) and result["valid_from"] > 0
     assert result["superseded_facts"] == 1  # SPO supersession ran
 
-    # Verify add_fact was called with temporal params
+    # add_fact is called WITHOUT datetimes (upstream would serialize them to
+    # ISO strings); the epoch valid_from is written via a follow-up SET.
     add_fact_call = mock_client.long_term.add_fact.call_args
     assert add_fact_call.kwargs["confidence"] == 0.9
-    assert add_fact_call.kwargs["valid_from"] is not None
+    assert "valid_from" not in add_fact_call.kwargs
 
 
 # ── memory_search temporal filtering ────────────────────────────────
@@ -390,19 +377,8 @@ def mock_search_client(monkeypatch):
         lambda ctx: mock_client,
     )
 
-    def _no_registry(ctx):
-        raise RuntimeError("No registry in test")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
-    mock_router = MagicMock()
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_router",
-        lambda ctx: mock_router,
-    )
 
     return mock_client
 
@@ -429,7 +405,6 @@ async def test_memory_search_annotates_temporal_status(mock_search_client):
         ctx,
         query="Alice works",
         memory_types=["facts"],
-        database="neo4j",
     )
 
     result = json.loads(result_str)
@@ -466,7 +441,6 @@ async def test_memory_search_exclude_expired(mock_search_client):
         ctx,
         query="Alice works",
         memory_types=["facts"],
-        database="neo4j",
         include_expired=False,
     )
 
@@ -481,20 +455,18 @@ async def test_memory_search_exclude_expired(mock_search_client):
 
 class TestTemporalIndexes:
     @pytest.mark.asyncio
-    async def test_ensure_temporal_indexes(self):
-        from neo4j_agent_memory.mcp._database_init import ensure_temporal_indexes
+    async def test_ensure_indexes(self):
+        from neo4j_agent_memory.mcp._database_init import ensure_indexes
 
-        mock_session = AsyncMock()
-        mock_session.run = AsyncMock()
+        mock_graph = MagicMock()
+        mock_graph.execute_write = AsyncMock()
 
-        mock_driver = MagicMock()
-        mock_driver.session = MagicMock(return_value=mock_session)
+        await ensure_indexes(mock_graph)
 
-        # Make the context manager work
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-
-        await ensure_temporal_indexes(mock_driver, ["neo4j"])
-
-        # Should have called run for each index statement
-        assert mock_session.run.call_count == 6  # 6 index statements
+        # One write per temporal index statement (Fact valid_from/until/etc.)
+        assert mock_graph.execute_write.await_count >= 6
+        stmts = " ".join(
+            call.args[0] for call in mock_graph.execute_write.await_args_list
+        )
+        assert "f.valid_from" in stmts
+        assert "f.subject, f.predicate" in stmts

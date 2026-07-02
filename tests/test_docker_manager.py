@@ -1,6 +1,5 @@
 """Tests for Neo4jDockerManager (docker compose based)."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 

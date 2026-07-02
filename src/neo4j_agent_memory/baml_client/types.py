@@ -15,10 +15,9 @@ import typing_extensions
 from enum import Enum
 
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
-import baml_py
 
 CheckT = typing_extensions.TypeVar('CheckT')
 CheckName = typing_extensions.TypeVar('CheckName', bound=str)

@@ -75,13 +75,7 @@ def mock_reasoning_client(monkeypatch):
     )
 
     # Ensure multi-DB helpers fall back to single-client mode
-    def _no_registry(ctx):
-        raise RuntimeError("No registry in test")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
     return mock_client, mock_reasoning
 
@@ -623,13 +617,7 @@ class TestMemorySearchDefaultTypes:
         )
 
         # Ensure multi-DB helpers fall back to single-client mode
-        def _no_registry(ctx):
-            raise RuntimeError("No registry in test")
 
-        monkeypatch.setattr(
-            "neo4j_agent_memory.mcp._tools.get_registry",
-            _no_registry,
-        )
 
         from neo4j_agent_memory.mcp._tools import register_tools
         from fastmcp import FastMCP
