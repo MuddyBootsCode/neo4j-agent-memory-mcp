@@ -29,23 +29,11 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="DetectContradictions", llm_response=llm_response, mode="request")
         return typing.cast(types.ContradictionResult, __result__)
 
-    def ExtractEntities(
+    def ExtractMemory(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.ExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractEntities", llm_response=llm_response, mode="request")
-        return typing.cast(types.ExtractionOutput, __result__)
-
-    def ExtractMeetingEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.MeetingExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMeetingEntities", llm_response=llm_response, mode="request")
-        return typing.cast(types.MeetingExtractionOutput, __result__)
-
-    def ExtractProjectEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.ProjectExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractProjectEntities", llm_response=llm_response, mode="request")
-        return typing.cast(types.ProjectExtractionOutput, __result__)
+    ) -> types.MemoryExtraction:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="request")
+        return typing.cast(types.MemoryExtraction, __result__)
 
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -53,35 +41,11 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractReasoning", llm_response=llm_response, mode="request")
         return typing.cast(types.ReasoningExtractionOutput, __result__)
 
-    def ExtractResearchEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.ResearchExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractResearchEntities", llm_response=llm_response, mode="request")
-        return typing.cast(types.ResearchExtractionOutput, __result__)
-
     def ExtractTemporalContext(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="request")
         return typing.cast(types.TemporalExtraction, __result__)
-
-    def RerankResults(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.RerankOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RerankResults", llm_response=llm_response, mode="request")
-        return typing.cast(types.RerankOutput, __result__)
-
-    def RouteQuery(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.RoutingDecision:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RouteQuery", llm_response=llm_response, mode="request")
-        return typing.cast(types.RoutingDecision, __result__)
-
-    def RouteStorage(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.RoutingDecision:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RouteStorage", llm_response=llm_response, mode="request")
-        return typing.cast(types.RoutingDecision, __result__)
 
     def SynthesizeExplanation(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -103,23 +67,11 @@ class LlmStreamParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="DetectContradictions", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.ContradictionResult, __result__)
 
-    def ExtractEntities(
+    def ExtractMemory(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.ExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractEntities", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.ExtractionOutput, __result__)
-
-    def ExtractMeetingEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.MeetingExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMeetingEntities", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.MeetingExtractionOutput, __result__)
-
-    def ExtractProjectEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.ProjectExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractProjectEntities", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.ProjectExtractionOutput, __result__)
+    ) -> stream_types.MemoryExtraction:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.MemoryExtraction, __result__)
 
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -127,35 +79,11 @@ class LlmStreamParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractReasoning", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.ReasoningExtractionOutput, __result__)
 
-    def ExtractResearchEntities(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.ResearchExtractionOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractResearchEntities", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.ResearchExtractionOutput, __result__)
-
     def ExtractTemporalContext(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> stream_types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.TemporalExtraction, __result__)
-
-    def RerankResults(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.RerankOutput:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RerankResults", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.RerankOutput, __result__)
-
-    def RouteQuery(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.RoutingDecision:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RouteQuery", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.RoutingDecision, __result__)
-
-    def RouteStorage(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.RoutingDecision:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RouteStorage", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.RoutingDecision, __result__)
 
     def SynthesizeExplanation(
         self, llm_response: str, baml_options: BamlCallOptions = {},

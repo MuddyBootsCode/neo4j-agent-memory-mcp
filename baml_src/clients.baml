@@ -18,7 +18,10 @@ client<llm> Bedrock {
   provider aws-bedrock
   retry_policy StandardRetry
   options {
-    model "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    // Sonnet 4.5 cross-region inference profile (active; replaces retired Sonnet 4).
+    // To move to Sonnet 5, confirm the Bedrock inference-profile ID and that model
+    // access is enabled for it in your AWS account, then swap this one line.
+    model "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     region env.AWS_REGION
     inference_configuration {
       temperature 0
