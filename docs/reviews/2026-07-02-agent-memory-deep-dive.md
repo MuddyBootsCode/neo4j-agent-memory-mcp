@@ -103,6 +103,8 @@ Plus: **the HTTP transport has no authentication** (`server.py:401-402`), and th
 
 Separately: validate `entity_type` against the known type allowlist (it can't be parameterized as a label, so it must be whitelisted), and put an auth layer (or at least a bearer token + bind guidance) in front of the HTTP transport. Recommended posture: read-only account **and** READ access mode (belt and suspenders), with the regex demoted to a fast-fail nicety.
 
+**Status (2026-07-02):** Option 1 (READ access mode) implemented for `graph_query` — `_execute_read_only` in `mcp/_tools.py` now runs the query in a managed read transaction, and the regex is demoted to an explicit first-pass check. Unit tests cover the keyword pre-check (previously untested), the read-transaction wiring, and the APOC-write gap; an integration test (`tests/integration/test_graph_query_readonly.py`) proves a live server rejects both a plain `CREATE` and a parameter-smuggled `apoc.cypher.doIt` write. **Still open:** provisioning a read-only Neo4j account (deployment/RBAC), the `entity_type` allowlist in `entity_lookup`, and HTTP transport auth.
+
 ### 2.4 Retired model pin + extraction failure semantics = production outage waiting — **CRITICAL (operational)**
 
 - `clients.baml:21` pins `us.anthropic.claude-sonnet-4-20250514-v1:0` — deprecated with retirement **June 15, 2026**, which has passed. When Bedrock stops serving it, every extraction/routing/reranking call fails.
