@@ -10,7 +10,8 @@
 # BAML files and re-generate this code using: baml-cli generate
 # baml-cli is available with the baml package.
 
-from typing import Callable, Any, Protocol, Generic, TypeVar
+from typing import Callable, Any, Protocol, Generic, TypeVar, overload, Literal
+import threading
 
 T = TypeVar("T")
 
