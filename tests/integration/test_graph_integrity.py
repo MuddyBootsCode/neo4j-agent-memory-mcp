@@ -79,9 +79,11 @@ class TestNodeIntegrity:
         )
 
     async def test_entity_types_are_valid(self, populated_graph):
-        """Entity types should be from the POLE+O model."""
+        """Entity types should be from the unified ontology (POLE+O + domain types)."""
+        from neo4j_agent_memory.baml_client.types import EntityType
+
         client = populated_graph
-        valid_types = {"PERSON", "ORGANIZATION", "LOCATION", "EVENT", "OBJECT"}
+        valid_types = {t.value for t in EntityType}
 
         rows = await client.graph.execute_read(
             "MATCH (e:Entity) RETURN DISTINCT e.type AS type", {},
