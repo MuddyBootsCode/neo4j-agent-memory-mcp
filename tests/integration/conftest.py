@@ -209,15 +209,19 @@ class _EnvContext:
 
 
 def _apply_patches():
-    """Apply the Bedrock embedder patch.
+    """Apply the Bedrock embedder + unified BAML extractor patches.
 
-    Safe to call multiple times — idempotent. Entity extraction is owned by the
-    MCP tools (unified ExtractMemory), so no extractor-factory patch is needed.
-    Does NOT set env vars — use _EnvContext for that.
+    Safe to call multiple times — idempotent. The extractor patch routes
+    ``add_message(extract_entities=True)`` through the same unified
+    ExtractMemory call the MCP tools use (gated on NAM_EXTRACTION__BAML_ENABLED,
+    read at extractor-creation time). Does NOT set env vars — use _EnvContext
+    for that.
     """
     from neo4j_agent_memory.mcp._embedder_patch import patch_embedder_factory
+    from neo4j_agent_memory.mcp._extractor_patch import patch_extractor_factory
 
     patch_embedder_factory()
+    patch_extractor_factory()
 
 
 def _create_client_settings(test_database: str):
