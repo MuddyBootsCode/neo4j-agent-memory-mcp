@@ -93,12 +93,14 @@ async def _fallback_subject_predicate_match(
     predicate: str,
     new_fact_id: str,
 ) -> list[dict[str, Any]]:
-    """Fallback: find candidates by exact subject+predicate match."""
+    """Fallback: find candidates by normalized subject+predicate match."""
+    from neo4j_agent_memory.temporal.lifecycle import normalize_term
+
     rows = await client.graph.execute_read(
         """
         MATCH (f:Fact)
-        WHERE f.subject = $subject
-          AND f.predicate = $predicate
+        WHERE toLower(trim(f.subject)) = $subject_norm
+          AND toLower(trim(f.predicate)) = $predicate_norm
           AND f.id <> $new_fact_id
           AND f.valid_until IS NULL
         RETURN f.id AS id,
@@ -109,7 +111,11 @@ async def _fallback_subject_predicate_match(
         ORDER BY f.confidence DESC, f.created_at DESC
         LIMIT 10
         """,
-        {"subject": subject, "predicate": predicate, "new_fact_id": new_fact_id},
+        {
+            "subject_norm": normalize_term(subject),
+            "predicate_norm": normalize_term(predicate),
+            "new_fact_id": new_fact_id,
+        },
     )
     return [
         {
@@ -186,10 +192,13 @@ async def detect_and_invalidate(
         logger.warning(
             "BAML contradiction detection failed: %s — falling back to SPO match", e
         )
-        # Fallback: simple subject+predicate match supersession
+        # Fallback: normalized subject+predicate match supersession
+        from neo4j_agent_memory.temporal.lifecycle import normalize_term
+
         contradicted_indices = [
             c["idx"] for c in candidates
-            if c["subject"] == subject and c["predicate"] == predicate
+            if normalize_term(c["subject"]) == normalize_term(subject)
+            and normalize_term(c["predicate"]) == normalize_term(predicate)
         ]
         contradiction_type = "direct_supersession" if contradicted_indices else "none"
         reasoning = f"BAML unavailable, fell back to SPO match (error: {e})"
@@ -206,7 +215,10 @@ async def detect_and_invalidate(
     # Step 3: Invalidate contradicted facts
     invalidated = 0
     for idx in contradicted_indices:
-        if idx < len(candidates):
+        # Bounds check BOTH ends: LLMs occasionally emit negative or
+        # out-of-range indices — a bare `idx < len` lets -1 silently
+        # invalidate the LAST candidate via Python's negative indexing.
+        if 0 <= idx < len(candidates):
             old_fact_id = candidates[idx]["id"]
             try:
                 result = await client.graph.execute_write(
