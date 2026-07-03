@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import TYPE_CHECKING, Any
+
+from neo4j import AsyncGraphDatabase
 
 from fastmcp import Context
 
@@ -108,6 +111,68 @@ def _is_read_only_query(query: str) -> bool:
     return all(not re.search(pattern, query_upper) for pattern in WRITE_PATTERNS)
 
 
+# ---------------------------------------------------------------------------
+# Dedicated read-only Neo4j account (RBAC) — defense-in-depth for graph_query
+# ---------------------------------------------------------------------------
+#
+# The READ-access-mode transaction below (_execute_read_only) is the primary
+# guard: the Neo4j server itself rejects write clauses and write-mode
+# procedures regardless of which account runs the query. On top of that, if a
+# dedicated least-privilege Neo4j account is configured via
+# NAM_NEO4J_READONLY_USERNAME / NAM_NEO4J_READONLY_PASSWORD, graph_query
+# authenticates as that account instead of the primary (read-write)
+# credentials the rest of the server uses. This is optional and requires
+# Neo4j Enterprise (custom RBAC roles) — see README "Read-only account (RBAC)"
+# for the Cypher/admin commands to provision it. When unset, behavior is
+# unchanged from before this was added.
+
+_READONLY_DRIVER: Any = None
+_READONLY_DRIVER_KEY: tuple[str, str, str] | None = None
+
+
+def _read_only_account_config() -> tuple[str, str] | None:
+    """Read the optional dedicated read-only Neo4j account from the environment.
+
+    Returns:
+        (username, password), or None if not configured (both must be set).
+    """
+    username = os.environ.get("NAM_NEO4J_READONLY_USERNAME")
+    password = os.environ.get("NAM_NEO4J_READONLY_PASSWORD")
+    if username and password:
+        return username, password
+    return None
+
+
+def _build_readonly_driver(uri: str, username: str, password: str) -> Any:
+    """Create an AsyncDriver authenticated as the dedicated read-only account."""
+    return AsyncGraphDatabase.driver(uri, auth=(username, password))
+
+
+def _get_read_only_driver(graph: Any) -> Any:
+    """Return the driver graph_query should use.
+
+    Uses the dedicated read-only account's driver (cached for the process
+    lifetime) if NAM_NEO4J_READONLY_USERNAME/PASSWORD are configured, otherwise
+    falls back to the primary client driver — identical to the pre-RBAC
+    behavior.
+    """
+    global _READONLY_DRIVER, _READONLY_DRIVER_KEY
+
+    creds = _read_only_account_config()
+    if creds is None:
+        return graph._ensure_connected()
+
+    username, password = creds
+    uri = graph._config.uri
+    key = (uri, username, password)
+
+    if _READONLY_DRIVER is None or _READONLY_DRIVER_KEY != key:
+        _READONLY_DRIVER = _build_readonly_driver(uri, username, password)
+        _READONLY_DRIVER_KEY = key
+
+    return _READONLY_DRIVER
+
+
 async def _execute_read_only(
     client: Any, query: str, parameters: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
@@ -120,8 +185,10 @@ async def _execute_read_only(
     raising a ClientError rather than mutating the graph — a catch-all the keyword
     denylist in ``_is_read_only_query`` cannot provide.
 
-    For deployments that also provision a read-only Neo4j account (recommended,
-    Enterprise RBAC), this remains correct and adds a second, independent layer.
+    The driver used is selected by ``_get_read_only_driver``: a dedicated
+    read-only Neo4j account when configured (recommended, Enterprise RBAC),
+    otherwise the primary client driver. Either way this transaction remains a
+    second, independent enforcement layer.
 
     Args:
         client: A memory client whose ``.graph`` is the upstream Neo4j client.
@@ -132,7 +199,7 @@ async def _execute_read_only(
         The query result rows as a list of dicts.
     """
     graph = client.graph
-    driver = graph._ensure_connected()
+    driver = _get_read_only_driver(graph)
     db_name = graph._config.database
 
     async def _work(tx: Any) -> list[dict[str, Any]]:

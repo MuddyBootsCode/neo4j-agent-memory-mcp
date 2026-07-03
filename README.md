@@ -139,8 +139,11 @@ uv run baml-cli generate
 # stdio (for Claude Desktop / local MCP clients)
 uv run neo4j-memory-mcp
 
-# HTTP (for remote / cloud deployment)
-uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
+# HTTP (for remote / cloud deployment) — a bearer token is REQUIRED whenever
+# --host is not a loopback address (127.0.0.1 / localhost / ::1); the server
+# refuses to start otherwise. See "Security" below.
+NAM_HTTP_TOKEN=$(openssl rand -hex 32) \
+  uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
 ```
 
 ## MCP Tools
@@ -156,6 +159,78 @@ uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
 | `explain_reasoning` | Retrieve and explain past reasoning chains. Supports semantic search. |
 | `extract_reasoning` | Extract structured reasoning from conversation text via LLM. |
 | `temporal_query` | Point-in-time fact queries -- "what was true on date X?" |
+
+## Security
+
+### HTTP/SSE transport authentication
+
+The `http`/`sse` transports are gated by a static bearer token. Set
+`NAM_HTTP_TOKEN` (or pass `--http-token`) and clients must send
+`Authorization: Bearer <token>` on every request; requests without it, or with
+the wrong token, get `401 Unauthorized` before reaching any tool.
+
+**The server refuses to start** if `--host`/`MCP_HOST` is anything other than
+a loopback address (`127.0.0.1`, `localhost`, `::1`) and no token is
+configured — this closes the gap where the server previously documented
+binding `0.0.0.0` with no authentication at all. Loopback binds (e.g. behind
+an authenticating reverse proxy or an SSH tunnel) are still allowed without a
+token.
+
+```bash
+export NAM_HTTP_TOKEN=$(openssl rand -hex 32)
+uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
+```
+
+Clients then connect with `http://<host>:<port>/mcp` and an
+`Authorization: Bearer $NAM_HTTP_TOKEN` header.
+
+### Read-only account for `graph_query` (RBAC)
+
+`graph_query` already runs every query in a genuine Neo4j READ-access-mode
+transaction (`_execute_read_only` in `mcp/_tools.py`), so the server itself
+rejects write clauses and write-mode procedures (e.g. `apoc.cypher.doIt`)
+regardless of which account is used. As defense-in-depth on top of that, the
+`graph_query` path can additionally authenticate as a **dedicated read-only
+Neo4j account** instead of the primary read-write credentials the rest of the
+server uses.
+
+Configure it via:
+
+```env
+NAM_NEO4J_READONLY_USERNAME=nam_readonly
+NAM_NEO4J_READONLY_PASSWORD=<a strong, dedicated password>
+```
+
+When both are set, `graph_query` connects with those credentials; when unset
+(the default), it falls back to the primary connection — no behavior change.
+
+This requires **Neo4j Enterprise** (custom RBAC roles aren't available on
+Community). Provision the account with `cypher-shell` or the Neo4j Browser,
+connected as an admin:
+
+```cypher
+// Create a role restricted to read-only Cypher on the target database
+CREATE ROLE nam_readonly_role IF NOT EXISTS;
+GRANT ACCESS ON DATABASE neo4j TO nam_readonly_role;
+GRANT MATCH {*} ON GRAPH neo4j TO nam_readonly_role;
+GRANT TRAVERSE ON GRAPH neo4j TO nam_readonly_role;
+DENY WRITE ON GRAPH neo4j TO nam_readonly_role;
+
+// Create the user and assign the role (drop the default admin roles)
+CREATE USER nam_readonly IF NOT EXISTS
+  SET PASSWORD '<a strong, dedicated password>' CHANGE NOT REQUIRED;
+GRANT ROLE nam_readonly_role TO nam_readonly;
+```
+
+Verify the account is actually write-blocked before wiring it in:
+
+```cypher
+:param user => 'nam_readonly';
+:param password => '<a strong, dedicated password>';
+// connect as nam_readonly, then:
+CREATE (n:ProvisioningTest) RETURN n;
+// expected: "PermissionDenied" / "Write operations are not allowed"
+```
 
 ## AWS Bedrock Integration
 
@@ -354,7 +429,11 @@ NAM_EMBEDDING_PROVIDER=bedrock
 MCP_TRANSPORT=sse
 MCP_HOST=0.0.0.0
 MCP_PORT=8082
+NAM_HTTP_TOKEN=<strong random token — required, MCP_HOST is non-loopback>
 NEO4J_DOCKER_AUTO=false
+# Defense-in-depth for graph_query — see "Security" above (optional, Enterprise only)
+NAM_NEO4J_READONLY_USERNAME=nam_readonly
+NAM_NEO4J_READONLY_PASSWORD=<a strong, dedicated password>
 ```
 
 ## Configuration Reference
@@ -375,6 +454,9 @@ NEO4J_DOCKER_AUTO=false
 | `MCP_TRANSPORT` | `stdio` | Transport: stdio, sse, http |
 | `MCP_HOST` | `127.0.0.1` | Bind host for network transports |
 | `MCP_PORT` | `8080` | Bind port for network transports |
+| `NAM_HTTP_TOKEN` | -- | Bearer token for HTTP/SSE transport. **Required** whenever `MCP_HOST` is non-loopback — the server refuses to bind otherwise. |
+| `NAM_NEO4J_READONLY_USERNAME` | -- | Dedicated read-only Neo4j account username for `graph_query` (optional, Enterprise RBAC — see "Security") |
+| `NAM_NEO4J_READONLY_PASSWORD` | -- | Dedicated read-only Neo4j account password (both must be set to take effect) |
 | `NEO4J_DOCKER_AUTO` | `true` | Auto-manage Neo4j Docker container |
 | `LOG_LEVEL` | `INFO` | Log level |
 | `LOG_FORMAT` | `text` | Log format: text, json |

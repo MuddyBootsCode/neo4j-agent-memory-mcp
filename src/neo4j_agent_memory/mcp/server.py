@@ -17,7 +17,78 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
+    import hmac
+
     from fastmcp import FastMCP
+    from starlette.middleware import Middleware
+    from starlette.responses import JSONResponse
+
+    # -----------------------------------------------------------------------
+    # HTTP/SSE transport authentication (R10)
+    # -----------------------------------------------------------------------
+    #
+    # The HTTP transport previously had no authentication at all: anyone who
+    # could reach the port got full, unauthenticated tool access (see
+    # docs/reviews/2026-07-02-agent-memory-deep-dive.md §2.3). BearerAuthMiddleware
+    # gates every HTTP request on a static bearer token configured via
+    # NAM_HTTP_TOKEN (or --http-token). assert_safe_http_bind refuses to start
+    # a non-loopback bind with no token configured at all, so an operator
+    # cannot silently ship an unauthenticated public endpoint.
+
+    _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+    class BearerAuthMiddleware:
+        """ASGI middleware enforcing a static bearer token on every request.
+
+        Applied to the FastMCP HTTP/SSE ASGI app. Requests missing a valid
+        ``Authorization: Bearer <token>`` header receive a 401 before the
+        request reaches the MCP application.
+        """
+
+        def __init__(self, app: Any, token: str) -> None:
+            self.app = app
+            self._expected = f"Bearer {token}"
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            if scope.get("type") != "http":
+                await self.app(scope, receive, send)
+                return
+
+            headers = dict(scope.get("headers") or [])
+            provided = headers.get(b"authorization", b"").decode("latin-1")
+
+            if not provided or not hmac.compare_digest(provided, self._expected):
+                response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+                await response(scope, receive, send)
+                return
+
+            await self.app(scope, receive, send)
+
+    def assert_safe_http_bind(*, host: str, token: str | None) -> None:
+        """Refuse a non-loopback HTTP/SSE bind when no bearer token is configured.
+
+        Binding a non-loopback host (e.g. ``0.0.0.0``) with no token means
+        anyone who can reach the port gets full, unauthenticated tool access.
+        Loopback binds remain allowed without a token (e.g. behind an
+        authenticating reverse proxy or SSH tunnel on localhost).
+
+        Raises:
+            RuntimeError: if host is non-loopback and no token is configured.
+        """
+        if host in _LOOPBACK_HOSTS:
+            return
+        if not token:
+            raise RuntimeError(
+                f"Refusing to bind HTTP/SSE transport to non-loopback host "
+                f"{host!r} with no bearer token configured. Set NAM_HTTP_TOKEN "
+                "(or pass --http-token) before binding a non-loopback address."
+            )
+
+    def _http_auth_middleware(token: str | None) -> list[Middleware]:
+        """Build the ASGI middleware stack for the HTTP/SSE app."""
+        if not token:
+            return []
+        return [Middleware(BearerAuthMiddleware, token=token)]
 
     def create_mcp_server(
         settings: Any = None,
@@ -246,6 +317,7 @@ try:
         docker_auto: bool = True,
         docker_startup_timeout: int = 60,
         compose_file: str | None = None,
+        http_token: str | None = None,
     ) -> None:
         """Run the MCP server with Neo4j connection.
 
@@ -262,6 +334,8 @@ try:
             docker_auto: Enable automatic Docker container management.
             docker_startup_timeout: Max seconds to wait for Neo4j startup.
             compose_file: Path to docker-compose.yml (auto-detected if None).
+            http_token: Bearer token required for HTTP/SSE transport (env:
+                NAM_HTTP_TOKEN). Required when binding a non-loopback host.
         """
         import os
 
@@ -310,10 +384,14 @@ try:
 
         server = create_mcp_server(settings, server_name="neo4j-agent-memory")
 
-        if transport == "sse":
-            await server.run_async(transport="sse", host=host, port=port)
-        elif transport == "http":
-            await server.run_async(transport="http", host=host, port=port)
+        http_token = http_token or os.environ.get("NAM_HTTP_TOKEN")
+
+        if transport in ("sse", "http"):
+            assert_safe_http_bind(host=host, token=http_token)
+            middleware = _http_auth_middleware(http_token)
+            await server.run_async(
+                transport=transport, host=host, port=port, middleware=middleware
+            )
         else:
             await server.run_async(transport="stdio")
 
@@ -381,6 +459,14 @@ def main() -> None:
         help="Port for network transports (env: MCP_PORT)",
     )
     parser.add_argument(
+        "--http-token",
+        default=os.environ.get("NAM_HTTP_TOKEN"),
+        help=(
+            "Bearer token required for HTTP/SSE transport (env: NAM_HTTP_TOKEN). "
+            "Required when --host is not a loopback address."
+        ),
+    )
+    parser.add_argument(
         "--neo4j-docker-auto",
         default=os.environ.get("NEO4J_DOCKER_AUTO", "true").lower()
         in ("true", "1", "yes"),
@@ -413,6 +499,7 @@ def main() -> None:
             docker_auto=args.neo4j_docker_auto,
             docker_startup_timeout=args.neo4j_docker_startup_timeout,
             compose_file=args.compose_file,
+            http_token=args.http_token,
         )
     )
 
