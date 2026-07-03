@@ -67,11 +67,11 @@ class TestSupersedeMatchingFacts:
         )
         assert count == 2
 
-        # Verify the Cypher was called with correct params
+        # Verify the Cypher was called with normalized match params (R14)
         call_args = mock_client.graph.execute_write.call_args
         params = call_args[0][1]
-        assert params["subject"] == "Alice"
-        assert params["predicate"] == "WORKS_AT"
+        assert params["subject_norm"] == "alice"
+        assert params["predicate_norm"] == "works_at"
         assert params["new_fact_id"] == "new-fact-123"
 
     @pytest.mark.asyncio
@@ -252,18 +252,25 @@ class TestTemporalFactQuery:
 
 @pytest.fixture
 def mock_fact_client(monkeypatch):
-    """Mock client for memory_store fact tests."""
-    mock_fact = MagicMock()
-    mock_fact.id = uuid.uuid4()
-    mock_fact.subject = "Alice"
-    mock_fact.predicate = "WORKS_AT"
-    mock_fact.object = "Globex"
+    """Mock client for memory_store fact tests (atomic store path)."""
+    fact_id = str(uuid.uuid4())
 
     mock_long_term = MagicMock()
-    mock_long_term.add_fact = AsyncMock(return_value=mock_fact)
+    mock_long_term._embedder = MagicMock()
+    mock_long_term._embedder.embed = AsyncMock(return_value=[0.1] * 8)
 
+    march_epoch = int(datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
     mock_graph = MagicMock()
-    mock_graph.execute_write = AsyncMock(return_value=[{"superseded_count": 1}])
+    mock_graph.execute_write = AsyncMock(
+        return_value=[
+            {
+                "fact_id": fact_id,
+                "refreshed": False,
+                "superseded_count": 1,
+                "valid_from": march_epoch,
+            }
+        ]
+    )
 
     mock_client = MagicMock()
     mock_client.long_term = mock_long_term
@@ -274,22 +281,21 @@ def mock_fact_client(monkeypatch):
         lambda ctx: mock_client,
     )
 
-
-
-
-    return mock_client, mock_fact
+    return mock_client, fact_id
 
 
 @pytest.mark.asyncio
-async def test_memory_store_fact_with_temporal_params(mock_fact_client):
-    """memory_store passes temporal params to add_fact and runs supersession."""
+async def test_memory_store_fact_with_temporal_params(mock_fact_client, monkeypatch):
+    """memory_store runs one atomic create+supersede write with epoch params."""
     from neo4j_agent_memory.mcp._tools import register_tools
     from fastmcp import FastMCP
+
+    monkeypatch.setenv("NAM_CONTRADICTION_DETECTION", "false")
 
     mcp = FastMCP("test")
     register_tools(mcp)
 
-    mock_client, mock_fact = mock_fact_client
+    mock_client, fact_id = mock_fact_client
     ctx = MagicMock()
 
     # Get the memory_store function
@@ -314,16 +320,23 @@ async def test_memory_store_fact_with_temporal_params(mock_fact_client):
     result = json.loads(result_str)
     assert result["stored"] is True
     assert result["type"] == "fact"
+    assert result["id"] == fact_id
     assert result["confidence"] == 0.9
     # R1: valid_from is normalized to epoch millis (not an ISO string).
     assert isinstance(result["valid_from"], int) and result["valid_from"] > 0
     assert result["superseded_facts"] == 1  # SPO supersession ran
+    assert result["refreshed"] is False
 
-    # add_fact is called WITHOUT datetimes (upstream would serialize them to
-    # ISO strings); the epoch valid_from is written via a follow-up SET.
-    add_fact_call = mock_client.long_term.add_fact.call_args
-    assert add_fact_call.kwargs["confidence"] == 0.9
-    assert "valid_from" not in add_fact_call.kwargs
+    # R5: exactly ONE write — create + supersession are a single atomic
+    # Cypher statement, with epoch-millis temporal params.
+    assert mock_client.graph.execute_write.await_count == 1
+    params = mock_client.graph.execute_write.call_args[0][1]
+    assert params["confidence"] == 0.9
+    march_epoch = int(datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    assert params["valid_from"] == march_epoch
+    assert params["valid_until"] is None
+    assert params["can_supersede"] is True
+    assert params["subject_norm"] == "alice"
 
 
 # ── memory_search temporal filtering ────────────────────────────────
@@ -367,18 +380,36 @@ def mock_search_client(monkeypatch):
     mock_reasoning = MagicMock()
     mock_reasoning.get_similar_traces = AsyncMock(return_value=[])
 
+    # Temporal fields are read straight from the graph (the upstream Fact
+    # model can't round-trip epoch ints), so serve them via execute_read.
+    mock_graph = MagicMock()
+    mock_graph.execute_read = AsyncMock(
+        return_value=[
+            {
+                "id": str(mock_active_fact.id),
+                "valid_from": None,
+                "valid_until": None,
+                "superseded_by": None,
+            },
+            {
+                "id": str(mock_expired_fact.id),
+                "valid_from": None,
+                "valid_until": 1709827200000,  # epoch millis in past
+                "superseded_by": None,
+            },
+        ]
+    )
+
     mock_client = MagicMock()
     mock_client.long_term = mock_long_term
     mock_client.short_term = mock_short_term
     mock_client.reasoning = mock_reasoning
+    mock_client.graph = mock_graph
 
     monkeypatch.setattr(
         "neo4j_agent_memory.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
-
-
-
 
     return mock_client
 
@@ -470,3 +501,171 @@ class TestTemporalIndexes:
         )
         assert "f.valid_from" in stmts
         assert "f.subject, f.predicate" in stmts
+
+
+# ── R16: portable Z-suffix parsing ──────────────────────────────────
+
+
+class TestParseIsoZSuffixPortable:
+    def test_uppercase_z_suffix(self):
+        result = parse_iso_datetime("2026-03-09T12:00:00Z")
+        assert result == datetime(2026, 3, 9, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_lowercase_z_suffix(self):
+        # datetime.fromisoformat rejects a lowercase 'z' (and rejects 'Z'
+        # entirely on Python 3.10) — parse must normalize it portably.
+        result = parse_iso_datetime("2026-03-09T12:00:00z")
+        assert result == datetime(2026, 3, 9, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_z_suffix_with_millis(self):
+        result = parse_iso_datetime("2026-03-09T12:00:00.500Z")
+        assert result == datetime(
+            2026, 3, 9, 12, 0, 0, 500000, tzinfo=timezone.utc
+        )
+
+
+# ── R5/R6/R7: store_fact_atomic parameter gating ────────────────────
+
+
+def _atomic_client(row=None):
+    mock_client = MagicMock()
+    mock_client.long_term._embedder = MagicMock()
+    mock_client.long_term._embedder.embed = AsyncMock(return_value=[0.1] * 8)
+    mock_client.graph.execute_write = AsyncMock(
+        return_value=[
+            row
+            or {
+                "fact_id": "new-id",
+                "refreshed": False,
+                "superseded_count": 0,
+                "valid_from": None,
+            }
+        ]
+    )
+    return mock_client
+
+
+class TestStoreFactAtomic:
+    @pytest.mark.asyncio
+    async def test_single_write_and_normalized_params(self):
+        """R5/R14: exactly one write; normalized match params passed."""
+        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+
+        client = _atomic_client()
+        outcome = await store_fact_atomic(
+            client,
+            subject="  Alice ",
+            predicate="WORKS_AT",
+            obj="Globex",
+            confidence=0.9,
+        )
+
+        assert client.graph.execute_write.await_count == 1
+        params = client.graph.execute_write.call_args[0][1]
+        assert params["subject_norm"] == "alice"
+        assert params["predicate_norm"] == "works_at"
+        assert params["object_norm"] == "globex"
+        assert params["can_supersede"] is True
+        assert outcome["fact_id"] == "new-id"
+        assert outcome["refreshed"] is False
+
+    @pytest.mark.asyncio
+    async def test_bounded_valid_until_disables_supersession(self):
+        """R6: a fact with a bounded valid_until must not supersede."""
+        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+
+        client = _atomic_client()
+        await store_fact_atomic(
+            client,
+            subject="Alice",
+            predicate="WORKS_AT",
+            obj="Acme",
+            valid_until_epoch=1_600_000_000_000,
+        )
+        params = client.graph.execute_write.call_args[0][1]
+        assert params["can_supersede"] is False
+        assert params["allow_refresh"] is False
+
+    @pytest.mark.asyncio
+    async def test_non_current_state_disables_supersession(self):
+        """R6: is_current_state=False (historical phrasing) must not supersede."""
+        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+
+        client = _atomic_client()
+        await store_fact_atomic(
+            client,
+            subject="Alice",
+            predicate="WORKS_AT",
+            obj="Acme",
+            is_current_state=False,
+        )
+        params = client.graph.execute_write.call_args[0][1]
+        assert params["can_supersede"] is False
+
+    @pytest.mark.asyncio
+    async def test_embedding_failure_stores_without_embedding(self):
+        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+
+        client = _atomic_client()
+        client.long_term._embedder.embed = AsyncMock(
+            side_effect=RuntimeError("bedrock down")
+        )
+        outcome = await store_fact_atomic(
+            client, subject="Alice", predicate="WORKS_AT", obj="Acme"
+        )
+        params = client.graph.execute_write.call_args[0][1]
+        assert params["embedding"] is None
+        assert outcome["fact_id"] == "new-id"
+
+    @pytest.mark.asyncio
+    async def test_explicit_supersedes_id_passed_through(self):
+        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+
+        client = _atomic_client()
+        await store_fact_atomic(
+            client,
+            subject="Alice",
+            predicate="WORKS_AT",
+            obj="Acme",
+            supersedes_id="old-42",
+        )
+        params = client.graph.execute_write.call_args[0][1]
+        assert params["supersedes_id"] == "old-42"
+        # Explicit supersession must not silently turn into a refresh.
+        assert params["allow_refresh"] is False
+
+
+# ── R8/R14: legacy supersede helpers set expired_at + normalize ─────
+
+
+class TestSupersedeSetsExpiredAtAndNormalizes:
+    @pytest.mark.asyncio
+    async def test_supersede_matching_facts_sets_expired_at(self):
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(
+            return_value=[{"superseded_count": 1}]
+        )
+        await supersede_matching_facts(mock_client, "Alice", "WORKS_AT", "new-1")
+        query = mock_client.graph.execute_write.call_args[0][0]
+        assert "expired_at" in query, "R8: SPO supersession must set expired_at"
+
+    @pytest.mark.asyncio
+    async def test_supersede_matching_facts_normalizes_match(self):
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(
+            return_value=[{"superseded_count": 0}]
+        )
+        await supersede_matching_facts(mock_client, "  Alice ", "Works_At", "new-1")
+        params = mock_client.graph.execute_write.call_args[0][1]
+        assert params["subject_norm"] == "alice"
+        assert params["predicate_norm"] == "works_at"
+
+    @pytest.mark.asyncio
+    async def test_supersede_fact_by_id_sets_expired_at(self):
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(
+            return_value=[{"superseded_count": 1}]
+        )
+        await supersede_fact_by_id(mock_client, "old-1", "new-1")
+        query = mock_client.graph.execute_write.call_args[0][0]
+        assert "expired_at" in query, "R8: explicit supersession must set expired_at"
