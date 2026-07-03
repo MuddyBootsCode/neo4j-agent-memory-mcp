@@ -16,6 +16,112 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ── Startup preflight: Resilient BAML fallback chain credentials (R31) ────
+#
+# `baml_src/clients.baml` defines `Resilient` as a fallback chain
+# Bedrock -> OpenAI -> Gemini. Bedrock is the primary provider used in
+# production; OpenAI/Gemini only matter if Bedrock is unreachable. Checking
+# this at server startup means a misconfiguration surfaces immediately and
+# legibly instead of as an opaque BAML failure on the first extraction call.
+
+
+def _check_bedrock_available() -> tuple[bool, str | None]:
+    """Return (available, reason) for the Bedrock provider.
+
+    Bedrock requires ``AWS_REGION`` (the BAML client binds ``region
+    env.AWS_REGION`` — see ``clients.baml``) and boto3-resolvable AWS
+    credentials (env vars, shared config/credentials files, SSO, or
+    instance/container metadata). No network calls are made; this only
+    resolves credentials, matching the cheap check already used by the
+    integration test fixtures.
+    """
+    import os
+
+    region = os.environ.get("AWS_REGION")
+    if not region:
+        return False, "AWS_REGION is not set"
+
+    try:
+        import boto3
+
+        session = boto3.Session(region_name=region)
+        if session.get_credentials() is None:
+            return False, (
+                "boto3 could not resolve AWS credentials (checked env vars, "
+                "shared config/credentials files, SSO, and instance metadata)"
+            )
+    except Exception as exc:  # pragma: no cover - defensive, boto3 misconfig
+        return False, f"boto3 credential resolution failed: {exc}"
+
+    return True, None
+
+
+def _check_openai_available() -> tuple[bool, str | None]:
+    """Return (available, reason) for the OpenAI fallback provider."""
+    import os
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        return False, "OPENAI_API_KEY is not set"
+    return True, None
+
+
+def _check_gemini_available() -> tuple[bool, str | None]:
+    """Return (available, reason) for the Gemini fallback provider."""
+    import os
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        return False, "GEMINI_API_KEY is not set"
+    return True, None
+
+
+def check_resilient_provider_credentials() -> None:
+    """Validate credentials for the `Resilient` BAML fallback chain at startup.
+
+    Bedrock is the primary provider and is expected to be configured, so its
+    absence is only a warning (extraction still works if a fallback is
+    usable). OpenAI and Gemini are fallbacks only, so their absence is also
+    just a warning. Raises ``RuntimeError`` only when *none* of the three
+    providers in the chain is usable — in that case every BAML call
+    (extraction, reasoning) would fail outright, so we fail loudly at
+    startup instead of on the first request.
+    """
+    bedrock_ok, bedrock_reason = _check_bedrock_available()
+    openai_ok, openai_reason = _check_openai_available()
+    gemini_ok, gemini_reason = _check_gemini_available()
+
+    if not bedrock_ok:
+        logger.warning(
+            "Bedrock (primary LLM provider for the Resilient fallback chain) "
+            "is not usable at startup: %s. Extraction/reasoning calls will "
+            "fall back to OpenAI/Gemini if configured.",
+            bedrock_reason,
+        )
+    if not openai_ok:
+        logger.warning(
+            "OpenAI (fallback LLM provider) is not usable at startup: %s. "
+            "This only matters if Bedrock also fails.",
+            openai_reason,
+        )
+    if not gemini_ok:
+        logger.warning(
+            "Gemini (fallback LLM provider) is not usable at startup: %s. "
+            "This only matters if Bedrock and OpenAI both fail.",
+            gemini_reason,
+        )
+
+    if not (bedrock_ok or openai_ok or gemini_ok):
+        raise RuntimeError(
+            "No usable LLM provider found for the Resilient BAML fallback "
+            "chain (Bedrock, OpenAI, Gemini). Extraction and reasoning calls "
+            "would fail on every request. Fix at least one: set AWS_REGION "
+            "with resolvable AWS credentials for Bedrock, or set "
+            "OPENAI_API_KEY, or set GEMINI_API_KEY. "
+            f"Details — bedrock: {bedrock_reason}; openai: {openai_reason}; "
+            f"gemini: {gemini_reason}"
+        )
+
+
 try:
     from fastmcp import FastMCP
 
@@ -62,6 +168,11 @@ try:
                     Neo4jDockerManager,
                     connect_with_retry,
                 )
+
+                # Phase 0: Validate LLM provider credentials for the Resilient
+                # BAML fallback chain before doing anything else. Raises
+                # loudly if no provider in the chain is usable at all.
+                check_resilient_provider_credentials()
 
                 # Patch embedder factory to support Bedrock
                 def _create_embedder_extended(self):
