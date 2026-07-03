@@ -343,3 +343,146 @@ async def test_knowledge_state_invalid_datetime(mock_knowledge_client):
     result_str = await ks_fn(ctx, as_of="not-a-date")
     result = json.loads(result_str)
     assert "error" in result
+
+
+# ── R15/R14: index bounds + normalization in detect_and_invalidate ──
+
+
+def _make_candidates():
+    return [
+        {
+            "id": "old-1",
+            "idx": 0,
+            "subject": "Alice",
+            "predicate": "WORKS_AT",
+            "object": "Acme",
+            "confidence": 0.9,
+            "similarity": None,
+        },
+        {
+            "id": "old-2",
+            "idx": 1,
+            "subject": "Alice",
+            "predicate": "LIVES_IN",
+            "object": "Denver",
+            "confidence": 0.8,
+            "similarity": None,
+        },
+    ]
+
+
+def _fake_baml_module(detect_mock):
+    import types
+
+    module = types.ModuleType("baml_client")
+    b = MagicMock()
+    b.DetectContradictions = detect_mock
+    module.b = b
+    return module
+
+
+class TestContradictionIndexBounds:
+    @pytest.mark.asyncio
+    async def test_negative_llm_index_is_ignored(self, monkeypatch):
+        """R15: a negative index from the LLM must NOT invalidate the last
+        candidate (Python's -1 resolves to the tail of the list)."""
+        import sys
+
+        result_obj = MagicMock()
+        result_obj.contradicted_indices = [-1]
+        result_obj.contradiction_type = "direct_contradiction"
+        result_obj.reasoning = "hallucinated index"
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        with patch(
+            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=_make_candidates(),
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["facts_invalidated"] == 0
+        mock_client.graph.execute_write.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_llm_index_is_ignored(self, monkeypatch):
+        """An index past the candidate list must be ignored, not crash."""
+        import sys
+
+        result_obj = MagicMock()
+        result_obj.contradicted_indices = [5]
+        result_obj.contradiction_type = "direct_contradiction"
+        result_obj.reasoning = "hallucinated index"
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        with patch(
+            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=_make_candidates(),
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["facts_invalidated"] == 0
+        mock_client.graph.execute_write.assert_not_called()
+
+
+class TestSpoFallbackNormalization:
+    @pytest.mark.asyncio
+    async def test_spo_fallback_matches_case_and_whitespace_insensitively(
+        self, monkeypatch
+    ):
+        """R14: the BAML-failure SPO fallback must normalize (casefold+trim)
+        subject/predicate before comparing."""
+        import sys
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(side_effect=RuntimeError("baml down"))),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        candidates = [
+            {
+                "id": "old-1",
+                "idx": 0,
+                "subject": "  alice ",
+                "predicate": "works_at",
+                "object": "Acme",
+                "confidence": 0.9,
+                "similarity": None,
+            }
+        ]
+        with patch(
+            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=candidates,
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["contradiction_type"] == "direct_supersession"
+        assert result["facts_invalidated"] == 1
