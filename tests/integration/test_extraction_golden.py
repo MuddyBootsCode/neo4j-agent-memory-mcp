@@ -231,7 +231,7 @@ def _evaluate_conversation(conv: dict, result) -> dict:
 class TestExtractionGoldenDataset:
     """Run extraction against all golden conversations and compute metrics."""
 
-    async def test_extraction_accuracy(self):
+    async def test_extraction_accuracy(self, bedrock_credentials):
         """Extraction precision and recall meet minimum thresholds."""
         import os
 

@@ -233,7 +233,7 @@ async def _run_variant(name: str, conversations: list[dict]) -> Metrics:
 class TestBAMLVariants:
     """Test 3 EntityType description variants against the golden dataset."""
 
-    async def test_compare_variants(self):
+    async def test_compare_variants(self, bedrock_credentials):
         """Run baseline + 3 variants, report comparative metrics, pick winner."""
         os.environ.setdefault("AWS_REGION", "us-east-1")
         os.environ.setdefault("AWS_PROFILE", "graphable-aws")
