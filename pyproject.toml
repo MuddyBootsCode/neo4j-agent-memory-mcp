@@ -30,7 +30,7 @@ packages = ["src/neo4j_agent_memory"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-norecursedirs = [".venv", "node_modules", ".git", "build", "dist"]
+norecursedirs = [".*", ".venv", "node_modules", ".git", "build", "dist"]
 markers = [
     "integration: requires running Neo4j instance (deselect with '-m not integration')",
     "eval: requires live LLM API keys (deselect with '-m not eval')",
