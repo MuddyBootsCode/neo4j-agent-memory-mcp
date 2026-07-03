@@ -269,7 +269,7 @@ def register_tools(mcp: FastMCP) -> None:
 
                     def _to_epoch(v):
                         # valid_from/valid_until are stored as epoch millis; be
-                        # tolerant of a datetime coming back from the client model.
+                        # tolerant of a datetime from legacy data.
                         if v is None:
                             return None
                         if isinstance(v, (int, float)):
@@ -279,10 +279,29 @@ def register_tools(mcp: FastMCP) -> None:
                         except AttributeError:
                             return None
 
+                    # Read temporal fields straight from the graph: the upstream
+                    # Fact model mangles epoch-int valid_from/valid_until (its
+                    # parser replaces unparseable values with utcnow()), which
+                    # made superseded facts annotate as "active".
+                    temporal_by_id: dict[str, dict[str, Any]] = {}
+                    if facts:
+                        temporal_rows = await client.graph.execute_read(
+                            """
+                            MATCH (f:Fact) WHERE f.id IN $ids
+                            RETURN f.id AS id,
+                                   f.valid_from AS valid_from,
+                                   f.valid_until AS valid_until,
+                                   f.superseded_by AS superseded_by
+                            """,
+                            {"ids": [str(f.id) for f in facts]},
+                        )
+                        temporal_by_id = {row["id"]: row for row in temporal_rows}
+
                     fact_results = []
                     for fact in facts:
-                        valid_from_val = _to_epoch(fact.valid_from)
-                        valid_until_val = _to_epoch(fact.valid_until)
+                        temporal = temporal_by_id.get(str(fact.id), {})
+                        valid_from_val = _to_epoch(temporal.get("valid_from"))
+                        valid_until_val = _to_epoch(temporal.get("valid_until"))
 
                         # Expired when valid_until is set and in the past.
                         is_expired = (
@@ -290,7 +309,7 @@ def register_tools(mcp: FastMCP) -> None:
                         )
                         temporal_status = "expired" if is_expired else "active"
 
-                        superseded_by = getattr(fact, "superseded_by", None)
+                        superseded_by = temporal.get("superseded_by")
                         if superseded_by is None and fact.metadata:
                             superseded_by = fact.metadata.get("superseded_by")
 
@@ -462,12 +481,12 @@ def register_tools(mcp: FastMCP) -> None:
                 # Parse temporal params
                 from neo4j_agent_memory.temporal.lifecycle import (
                     parse_iso_datetime,
-                    supersede_fact_by_id,
-                    supersede_matching_facts,
+                    store_fact_atomic,
                 )
 
                 parsed_valid_from = parse_iso_datetime(valid_from)
                 parsed_valid_until = parse_iso_datetime(valid_until)
+                is_current_state = True
 
                 # Attempt temporal extraction from content if valid_from not provided
                 import os
@@ -483,54 +502,43 @@ def register_tools(mcp: FastMCP) -> None:
                                 metadata = {}
                             metadata["temporal_qualifier"] = temporal_ctx["temporal_qualifier"]
                             metadata["is_current_state"] = temporal_ctx["is_current_state"]
+                            is_current_state = bool(temporal_ctx["is_current_state"])
                     except Exception:
                         pass  # Non-critical — proceed without temporal extraction
-
-                # Store the fact WITHOUT passing datetimes (upstream serializes
-                # those to ISO strings). We normalize valid_from/valid_until to
-                # epoch millis below so all temporal writes use one representation
-                # (matching supersession, contradiction, and point-in-time query).
-                fact = await client.long_term.add_fact(
-                    subject=subject,
-                    predicate=predicate,
-                    obj=object_value,
-                    confidence=confidence,
-                )
-
-                fact_id = str(fact.id) if hasattr(fact, "id") else None
 
                 def _epoch(dt):
                     return int(dt.timestamp() * 1000) if dt is not None else None
 
                 from_epoch = _epoch(parsed_valid_from)
                 until_epoch = _epoch(parsed_valid_until)
-                if fact_id and (from_epoch is not None or until_epoch is not None):
-                    await client.graph.execute_write(
-                        """
-                        MATCH (f:Fact {id: $id})
-                        SET f.valid_from = coalesce($from_epoch, f.valid_from),
-                            f.valid_until = coalesce($until_epoch, f.valid_until)
-                        """,
-                        {"id": fact_id, "from_epoch": from_epoch, "until_epoch": until_epoch},
-                    )
 
-                # Supersede old facts with same subject+predicate (excluding this new one)
-                superseded_count = 0
-                if fact_id:
-                    if supersedes:
-                        # Explicit supersession
-                        superseded_count = await supersede_fact_by_id(
-                            client, supersedes, fact_id
-                        )
-                    else:
-                        # Auto-supersede: invalidate older facts with same subject+predicate
-                        superseded_count = await supersede_matching_facts(
-                            client, subject, predicate, fact_id
-                        )
+                # Create the fact and supersede matching facts in ONE atomic
+                # Cypher write (epoch-millis temporal representation throughout).
+                # Supersession only runs when this fact is a current, open-ended
+                # assertion — historical facts must not invalidate the current
+                # one. Re-affirming an identical fact refreshes the existing
+                # node (preserving valid_from) instead of duplicating it.
+                outcome = await store_fact_atomic(
+                    client,
+                    subject=subject,
+                    predicate=predicate,
+                    obj=object_value,
+                    confidence=confidence,
+                    valid_from_epoch=from_epoch,
+                    valid_until_epoch=until_epoch,
+                    is_current_state=is_current_state,
+                    supersedes_id=supersedes,
+                    metadata=metadata,
+                )
+                fact_id = outcome["fact_id"]
+                superseded_count = outcome["superseded_count"]
+                refreshed = outcome["refreshed"]
 
-                # Phase 2: LLM contradiction detection (semantic, beyond SPO match)
+                # Phase 2: LLM contradiction detection (semantic, beyond SPO
+                # match). Skipped on a refresh — the identical fact was already
+                # screened when first stored.
                 contradiction_result = None
-                if fact_id and os.environ.get("NAM_CONTRADICTION_DETECTION", "true").lower() != "false":
+                if fact_id and not refreshed and os.environ.get("NAM_CONTRADICTION_DETECTION", "true").lower() != "false":
                     try:
                         from neo4j_agent_memory.temporal.contradiction import detect_and_invalidate
 
@@ -546,9 +554,10 @@ def register_tools(mcp: FastMCP) -> None:
                     "id": fact_id,
                     "triple": f"{subject} -> {predicate} -> {object_value}",
                     "confidence": confidence,
-                    "valid_from": from_epoch,
+                    "valid_from": outcome["valid_from"],
                     "valid_until": until_epoch,
                     "superseded_facts": superseded_count,
+                    "refreshed": refreshed,
                 }
 
                 if contradiction_result:

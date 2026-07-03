@@ -168,3 +168,217 @@ async def test_entity_lookup_type_filter_and_injection_guard(tools):
         )
     )
     assert "error" in rejected
+
+
+# ── Temporal correctness (R5-R8, R14) ────────────────────────────────
+#
+# These tests disable the LLM contradiction/temporal-extraction passes so
+# they exercise exactly the SPO supersession path in the fact branch.
+
+
+@pytest.fixture
+def temporal_only(monkeypatch):
+    """Disable LLM contradiction detection + temporal extraction."""
+    monkeypatch.setenv("NAM_CONTRADICTION_DETECTION", "false")
+    monkeypatch.setenv("NAM_TEMPORAL_EXTRACTION", "false")
+
+
+async def test_concurrent_contradicting_stores_do_not_mutually_invalidate(
+    tools, memory_client, cypher_session, temporal_only, monkeypatch
+):
+    """R5: two concurrent contradicting stores must not invalidate each other.
+
+    Before the atomic create+supersede fix, add_fact and the supersession ran
+    as separate transactions: interleaved stores of the same subject+predicate
+    superseded each other, leaving a supersession cycle and ZERO active facts.
+    """
+    import asyncio
+
+    mcp, ctx = tools
+    store = _tool(mcp, "memory_store")
+
+    # Barrier on the embedder so both stores embed together, maximizing the
+    # window where both facts exist before either supersession pass runs.
+    embedder = memory_client.long_term._embedder
+    orig_embed = embedder.embed
+    release = asyncio.Event()
+    pending = {"count": 0}
+
+    async def synced_embed(text):
+        pending["count"] += 1
+        if pending["count"] >= 2:
+            release.set()
+        await release.wait()
+        return await orig_embed(text)
+
+    monkeypatch.setattr(embedder, "embed", synced_embed)
+
+    await asyncio.gather(
+        store(
+            ctx, memory_type="fact", subject="Racer", predicate="WORKS_AT",
+            object_value="Acme", content="Racer works at Acme",
+        ),
+        store(
+            ctx, memory_type="fact", subject="Racer", predicate="WORKS_AT",
+            object_value="Globex", content="Racer works at Globex",
+        ),
+    )
+
+    rows = await cypher_session.execute_read(
+        """
+        MATCH (f:Fact)
+        WHERE toLower(trim(f.subject)) = 'racer'
+        RETURN f.id AS id, f.object AS object,
+               f.valid_until AS valid_until, f.superseded_by AS superseded_by
+        """,
+        {},
+    )
+    active = [r for r in rows if r["valid_until"] is None]
+    assert len(active) >= 1, f"all facts mutually invalidated: {rows}"
+
+    # No supersession cycle: a superseded fact's successor must not itself
+    # be superseded by the fact it replaced.
+    by_id = {r["id"]: r for r in rows}
+    for r in rows:
+        successor = r["superseded_by"]
+        if successor is not None and successor in by_id:
+            assert by_id[successor]["superseded_by"] != r["id"], (
+                f"supersession cycle between {r['id']} and {successor}: {rows}"
+            )
+
+
+async def test_historical_fact_does_not_supersede_current(
+    tools, cypher_session, temporal_only
+):
+    """R6: a bounded (historical) fact must NOT supersede the current one."""
+    mcp, ctx = tools
+    store = _tool(mcp, "memory_store")
+
+    await store(
+        ctx, memory_type="fact", subject="Carol", predicate="WORKS_AT",
+        object_value="Initech", content="Carol works at Initech",
+    )
+    second = json.loads(
+        await store(
+            ctx, memory_type="fact", subject="Carol", predicate="WORKS_AT",
+            object_value="Hooli", content="Carol worked at Hooli until mid-2020",
+            valid_from="2015-01-01T00:00:00Z",
+            valid_until="2020-06-01T00:00:00Z",
+        )
+    )
+    assert second["superseded_facts"] == 0
+
+    rows = await cypher_session.execute_read(
+        """
+        MATCH (f:Fact {subject: 'Carol'})
+        WHERE f.valid_until IS NULL
+        RETURN f.object AS object
+        """,
+        {},
+    )
+    assert [r["object"] for r in rows] == ["Initech"]
+
+
+async def test_identical_reaffirm_refreshes_and_preserves_valid_from(
+    tools, cypher_session, temporal_only
+):
+    """R7: re-affirming an identical fact refreshes it — no supersession,
+    no duplicate node, and valid_from ("known since") is preserved."""
+    from datetime import datetime, timezone
+
+    mcp, ctx = tools
+    store = _tool(mcp, "memory_store")
+
+    first = json.loads(
+        await store(
+            ctx, memory_type="fact", subject="Erin", predicate="ROLE",
+            object_value="Engineer", content="Erin is an Engineer",
+            valid_from="2026-03-01T00:00:00Z",
+        )
+    )
+    second = json.loads(
+        await store(
+            ctx, memory_type="fact", subject="Erin", predicate="ROLE",
+            object_value="Engineer", content="Erin is an Engineer",
+        )
+    )
+
+    assert second.get("refreshed") is True
+    assert second["superseded_facts"] == 0
+    assert second["id"] == first["id"]
+
+    rows = await cypher_session.execute_read(
+        """
+        MATCH (f:Fact {subject: 'Erin', predicate: 'ROLE'})
+        RETURN f.valid_from AS valid_from, f.valid_until AS valid_until
+        """,
+        {},
+    )
+    assert len(rows) == 1, f"expected one fact node, got {rows}"
+    assert rows[0]["valid_until"] is None
+    march = int(datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    assert rows[0]["valid_from"] == march
+
+
+async def test_expired_at_set_on_spo_supersession(
+    tools, cypher_session, temporal_only
+):
+    """R8: the plain SPO supersession path must set expired_at (not just the
+    contradiction path) so knowledge_state stops showing dead facts."""
+    mcp, ctx = tools
+    store = _tool(mcp, "memory_store")
+
+    await store(
+        ctx, memory_type="fact", subject="Frank", predicate="WORKS_AT",
+        object_value="Acme", content="Frank works at Acme",
+    )
+    second = json.loads(
+        await store(
+            ctx, memory_type="fact", subject="Frank", predicate="WORKS_AT",
+            object_value="Globex", content="Frank works at Globex",
+        )
+    )
+    assert second["superseded_facts"] == 1
+
+    rows = await cypher_session.execute_read(
+        """
+        MATCH (f:Fact {subject: 'Frank', object: 'Acme'})
+        RETURN f.valid_until AS valid_until, f.expired_at AS expired_at,
+               f.superseded_by AS superseded_by
+        """,
+        {},
+    )
+    assert len(rows) == 1
+    assert rows[0]["valid_until"] is not None
+    assert rows[0]["expired_at"] is not None, "expired_at not set on SPO supersession"
+    assert rows[0]["superseded_by"] == second["id"]
+
+
+async def test_supersession_is_case_and_whitespace_insensitive(
+    tools, cypher_session, temporal_only
+):
+    """R14: subject/predicate matching must normalize case + whitespace."""
+    mcp, ctx = tools
+    store = _tool(mcp, "memory_store")
+
+    await store(
+        ctx, memory_type="fact", subject="Grace", predicate="WORKS_AT",
+        object_value="Acme", content="Grace works at Acme",
+    )
+    second = json.loads(
+        await store(
+            ctx, memory_type="fact", subject="  grace  ", predicate="works_at",
+            object_value="Globex", content="grace works at Globex now",
+        )
+    )
+    assert second["superseded_facts"] == 1
+
+    rows = await cypher_session.execute_read(
+        """
+        MATCH (f:Fact)
+        WHERE toLower(trim(f.subject)) = 'grace' AND f.valid_until IS NULL
+        RETURN f.object AS object
+        """,
+        {},
+    )
+    assert [r["object"] for r in rows] == ["Globex"]
