@@ -413,10 +413,10 @@ graph TB
 
 The deploy script:
 1. Pulls latest code via git
-2. Runs `uv sync --frozen --no-dev`
+2. Runs `uv sync --frozen --no-dev` (installs `agent_memory_mcp` like any
+   normal package — no site-packages copying)
 3. Regenerates BAML client
-4. Syncs overlay files to site-packages
-5. Restarts the systemd service
+4. Restarts the systemd service
 
 ### Production Environment
 
@@ -490,13 +490,15 @@ baml_src/
   temporal.baml             # Contradiction detection + temporal extraction
   reasoning.baml            # Reasoning chain extraction + synthesis
 
-src/neo4j_agent_memory/
-  mcp/
-    server.py               # Server creation, lifespan, Bedrock embedder patch
+src/agent_memory_mcp/       # Own namespace — does NOT shadow upstream
+  mcp/                      #   neo4j_agent_memory (pinned dependency)
+    server.py               # Server creation, lifespan, transports
+    _bootstrap.py           # Fail-loud upstream patch bootstrap (all paths)
+    _embedder_patch.py      # Bedrock embedder factory patch
+    _extractor_patch.py     # BAML extractor factory patch (library callers)
     _tools.py               # 9 MCP tool implementations
     _database_init.py       # Index creation (single graph)
     _docker.py              # Docker compose management
-    _embedder_patch.py      # Bedrock embedder factory patch
   extraction/
     unified.py              # Unified single-pass extraction + persistence
     reasoning_extractor.py  # Reasoning chain extraction

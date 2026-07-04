@@ -10,7 +10,7 @@ Requires a running Neo4j (see tests/integration/conftest.py).
 
 import pytest
 
-from neo4j_agent_memory.mcp._tools import _execute_read_only, _is_read_only_query
+from agent_memory_mcp.mcp._tools import _execute_read_only, _is_read_only_query
 
 pytestmark = pytest.mark.asyncio
 

@@ -46,7 +46,7 @@ class BamlReasoningExtractor:
         if not text or not text.strip():
             return {"task": "", "steps": [], "final_conclusion": "", "success": False}
 
-        from neo4j_agent_memory.baml_client.async_client import b
+        from agent_memory_mcp.baml_client.async_client import b
 
         result = await b.ExtractReasoning(
             text=text,
@@ -85,8 +85,8 @@ class BamlReasoningExtractor:
         Returns:
             Natural-language explanation string.
         """
-        from neo4j_agent_memory.baml_client.async_client import b
-        from neo4j_agent_memory.baml_client.types import (
+        from agent_memory_mcp.baml_client.async_client import b
+        from agent_memory_mcp.baml_client.types import (
             ReasoningChainInput,
             ReasoningStepInput,
         )

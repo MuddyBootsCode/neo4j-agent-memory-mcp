@@ -43,7 +43,7 @@ async def _run_extraction(text: str) -> dict:
     os.environ.setdefault("AWS_REGION", "us-east-1")
     os.environ.setdefault("AWS_PROFILE", "graphable-aws")
 
-    from neo4j_agent_memory.extraction.unified import extract_memory
+    from agent_memory_mcp.extraction.unified import extract_memory
 
     return await extract_memory(text)
 

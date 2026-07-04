@@ -31,10 +31,10 @@ def tools(memory_client, monkeypatch):
     """Register the MCP tools wired to the real test-DB client."""
     from fastmcp import FastMCP
 
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client", lambda _ctx: memory_client
+        "agent_memory_mcp.mcp._tools.get_client", lambda _ctx: memory_client
     )
     mcp = FastMCP("e2e")
     register_tools(mcp)

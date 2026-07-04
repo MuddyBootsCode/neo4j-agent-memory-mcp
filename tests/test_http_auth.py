@@ -19,7 +19,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from neo4j_agent_memory.mcp.server import (
+from agent_memory_mcp.mcp.server import (
     BearerAuthMiddleware,
     assert_safe_http_bind,
 )

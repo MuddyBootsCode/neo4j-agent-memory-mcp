@@ -239,7 +239,7 @@ class TestExtractionGoldenDataset:
 
         from types import SimpleNamespace
 
-        from neo4j_agent_memory.extraction.unified import extract_memory
+        from agent_memory_mcp.extraction.unified import extract_memory
 
         conversations = _load_golden_dataset()
         metrics = ExtractionMetrics()

@@ -41,7 +41,7 @@ async def extract_memory(text: str) -> dict[str, list[dict[str, Any]]]:
     if not text or not text.strip():
         return {"entities": [], "relations": [], "preferences": []}
 
-    from neo4j_agent_memory.baml_client.async_client import b
+    from agent_memory_mcp.baml_client.async_client import b
 
     result = await b.ExtractMemory(text=text)
 
@@ -97,7 +97,7 @@ class UnifiedBamlExtractor:
     Restores the client-level extraction hook the single-graph refactor severed:
     ``MemoryClient.short_term.add_message(extract_entities=True)`` looks up its
     extractor through the upstream factory, which only knows spaCy/GLiNER/OpenAI.
-    Wired in via :func:`neo4j_agent_memory.mcp._extractor_patch.patch_extractor_factory`,
+    Wired in via :func:`agent_memory_mcp.mcp._extractor_patch.patch_extractor_factory`,
     this adapter runs the same single-pass BAML ``ExtractMemory`` call used by the
     MCP ``memory_store`` tool and hands the result to the upstream persistence
     pipeline (Entity MERGE on name+type, MENTIONS links, RELATED_TO edges).

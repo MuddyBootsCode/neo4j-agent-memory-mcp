@@ -23,8 +23,8 @@ from neo4j import AsyncGraphDatabase
 
 from fastmcp import Context
 
-from neo4j_agent_memory.mcp._common import get_client
-from neo4j_agent_memory.mcp._logging import log_tool_call
+from agent_memory_mcp.mcp._common import get_client
+from agent_memory_mcp.mcp._logging import log_tool_call
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -500,7 +500,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Unified extraction — never fatal to the stored message.
                 extraction_counts = None
                 try:
-                    from neo4j_agent_memory.extraction.unified import (
+                    from agent_memory_mcp.extraction.unified import (
                         extract_memory,
                         persist_memory,
                     )
@@ -546,7 +546,7 @@ def register_tools(mcp: FastMCP) -> None:
                     )
 
                 # Parse temporal params
-                from neo4j_agent_memory.temporal.lifecycle import (
+                from agent_memory_mcp.temporal.lifecycle import (
                     parse_iso_datetime,
                     store_fact_atomic,
                 )
@@ -559,7 +559,7 @@ def register_tools(mcp: FastMCP) -> None:
                 import os
                 if parsed_valid_from is None and os.environ.get("NAM_TEMPORAL_EXTRACTION", "true").lower() != "false":
                     try:
-                        from neo4j_agent_memory.temporal.extraction import extract_temporal_context
+                        from agent_memory_mcp.temporal.extraction import extract_temporal_context
 
                         temporal_ctx = await extract_temporal_context(content)
                         if temporal_ctx["valid_at"]:
@@ -607,7 +607,7 @@ def register_tools(mcp: FastMCP) -> None:
                 contradiction_result = None
                 if fact_id and not refreshed and os.environ.get("NAM_CONTRADICTION_DETECTION", "true").lower() != "false":
                     try:
-                        from neo4j_agent_memory.temporal.contradiction import detect_and_invalidate
+                        from agent_memory_mcp.temporal.contradiction import detect_and_invalidate
 
                         contradiction_result = await detect_and_invalidate(
                             client, subject, predicate, object_value, fact_id
@@ -1065,7 +1065,7 @@ def register_tools(mcp: FastMCP) -> None:
             # Optional: synthesize a natural-language explanation
             if synthesize and trace.steps:
                 try:
-                    from neo4j_agent_memory.extraction.reasoning_extractor import (
+                    from agent_memory_mcp.extraction.reasoning_extractor import (
                         BamlReasoningExtractor,
                     )
 
@@ -1116,7 +1116,7 @@ def register_tools(mcp: FastMCP) -> None:
         client = get_client(ctx)
 
         try:
-            from neo4j_agent_memory.extraction.reasoning_extractor import (
+            from agent_memory_mcp.extraction.reasoning_extractor import (
                 BamlReasoningExtractor,
             )
 
@@ -1184,7 +1184,7 @@ def register_tools(mcp: FastMCP) -> None:
             predicate: Optional — filter to facts with this predicate.
             limit: Maximum results (default 20).
         """
-        from neo4j_agent_memory.temporal.lifecycle import (
+        from agent_memory_mcp.temporal.lifecycle import (
             parse_iso_datetime,
             temporal_fact_query,
         )
@@ -1227,7 +1227,7 @@ def register_tools(mcp: FastMCP) -> None:
             predicate: Optional — filter to a specific relationship type.
             limit: Maximum results (default 50).
         """
-        from neo4j_agent_memory.temporal.lifecycle import get_fact_evolution
+        from agent_memory_mcp.temporal.lifecycle import get_fact_evolution
 
         client = get_client(ctx)
 
@@ -1274,7 +1274,7 @@ def register_tools(mcp: FastMCP) -> None:
             limit: Maximum results (default 20).
             database: Target database vertical.
         """
-        from neo4j_agent_memory.temporal.lifecycle import parse_iso_datetime
+        from agent_memory_mcp.temporal.lifecycle import parse_iso_datetime
 
         as_of_dt = parse_iso_datetime(as_of)
         if not as_of_dt:

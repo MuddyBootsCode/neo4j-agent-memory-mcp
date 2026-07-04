@@ -216,12 +216,20 @@ try:
 
         Example:
             from neo4j_agent_memory import MemorySettings
-            from neo4j_agent_memory.mcp import create_mcp_server
+            from agent_memory_mcp.mcp import create_mcp_server
 
             settings = MemorySettings(...)
             server = create_mcp_server(settings)
             server.run()
         """
+        # Apply the upstream monkeypatches (Bedrock embedder, BAML extractor
+        # factory) on EVERY construction path — including settings=None —
+        # before any client can be built. Raises BootstrapError if a patch
+        # target changed upstream; never a silent no-op (R27).
+        from agent_memory_mcp.mcp._bootstrap import bootstrap_upstream_patches
+
+        bootstrap_upstream_patches()
+
         lifespan = None
         if settings is not None:
 
@@ -229,13 +237,14 @@ try:
             async def lifespan(server: FastMCP):  # noqa: E303
                 """Manage the Docker container and single MemoryClient lifecycle.
 
-                Entity/relation/preference extraction is owned by the MCP tools
-                (unified ExtractMemory pass), so no upstream extractor factory
-                patch is needed — only the Bedrock embedder patch.
+                The upstream monkeypatches are applied by
+                ``bootstrap_upstream_patches()`` in ``create_mcp_server``,
+                before this lifespan runs, so the client constructed here
+                always sees the patched factories.
                 """
                 from neo4j_agent_memory import MemoryClient as _MemoryClient
-                from neo4j_agent_memory.mcp._database_init import ensure_indexes
-                from neo4j_agent_memory.mcp._docker import (
+                from agent_memory_mcp.mcp._database_init import ensure_indexes
+                from agent_memory_mcp.mcp._docker import (
                     Neo4jDockerManager,
                     connect_with_retry,
                 )
@@ -244,54 +253,6 @@ try:
                 # BAML fallback chain before doing anything else. Raises
                 # loudly if no provider in the chain is usable at all.
                 check_resilient_provider_credentials()
-
-                # Patch embedder factory to support Bedrock
-                def _create_embedder_extended(self):
-                    """Extended _create_embedder with Bedrock support."""
-                    from neo4j_agent_memory.config.settings import EmbeddingProvider
-
-                    config = self._settings.embedding
-
-                    if config.provider == EmbeddingProvider.OPENAI:
-                        from neo4j_agent_memory.embeddings.openai import OpenAIEmbedder
-
-                        return OpenAIEmbedder(
-                            model=config.model,
-                            api_key=config.api_key.get_secret_value() if config.api_key else None,
-                            dimensions=config.dimensions if config.dimensions != 1536 else None,
-                            batch_size=config.batch_size,
-                        )
-                    elif config.provider == EmbeddingProvider.SENTENCE_TRANSFORMERS:
-                        from neo4j_agent_memory.embeddings.sentence_transformers import (
-                            SentenceTransformerEmbedder,
-                        )
-
-                        return SentenceTransformerEmbedder(
-                            model_name=config.model,
-                            device=config.device,
-                        )
-                    elif config.provider == EmbeddingProvider.BEDROCK:
-                        from neo4j_agent_memory.embeddings.bedrock import BedrockEmbedder
-
-                        logger.info(
-                            "Creating Bedrock embedder (model=%s, region=%s)",
-                            config.model,
-                            config.aws_region,
-                        )
-                        return BedrockEmbedder(
-                            model=config.model,
-                            region_name=config.aws_region,
-                            profile_name=config.aws_profile,
-                            batch_size=config.batch_size,
-                        )
-                    else:
-                        return None
-
-                try:
-                    _MemoryClient._create_embedder = _create_embedder_extended
-                    logger.info("Embedder factory patched with Bedrock support")
-                except Exception as e:
-                    logger.error("Failed to patch embedder factory: %s", e)
 
                 # Phase 1: Ensure Neo4j container is running
                 docker_cfg = getattr(settings, "_docker_config", {})
@@ -339,9 +300,9 @@ try:
             lifespan=lifespan,
         )
 
-        from neo4j_agent_memory.mcp._prompts import register_prompts
-        from neo4j_agent_memory.mcp._resources import register_resources
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._prompts import register_prompts
+        from agent_memory_mcp.mcp._resources import register_resources
+        from agent_memory_mcp.mcp._tools import register_tools
 
         register_tools(mcp)
         register_resources(mcp)
@@ -357,7 +318,7 @@ try:
 
         Example:
             from neo4j_agent_memory import MemoryClient, MemorySettings
-            from neo4j_agent_memory.mcp import Neo4jMemoryMCPServer
+            from agent_memory_mcp.mcp import Neo4jMemoryMCPServer
 
             settings = MemorySettings(...)
             async with MemoryClient(settings) as client:
@@ -384,6 +345,12 @@ try:
                 memory_client: Connected MemoryClient instance.
                 server_name: Server name for MCP registration.
             """
+            # Ensure the upstream monkeypatches are applied on this
+            # construction path too (fail-loud, idempotent — R27).
+            from agent_memory_mcp.mcp._bootstrap import bootstrap_upstream_patches
+
+            bootstrap_upstream_patches()
+
             self._client = memory_client
 
             @asynccontextmanager
@@ -395,9 +362,9 @@ try:
                 lifespan=_preconnected_lifespan,
             )
 
-            from neo4j_agent_memory.mcp._prompts import register_prompts
-            from neo4j_agent_memory.mcp._resources import register_resources
-            from neo4j_agent_memory.mcp._tools import register_tools
+            from agent_memory_mcp.mcp._prompts import register_prompts
+            from agent_memory_mcp.mcp._resources import register_resources
+            from agent_memory_mcp.mcp._tools import register_tools
 
             register_tools(self._mcp)
             register_resources(self._mcp)
@@ -527,7 +494,7 @@ def main() -> None:
     import argparse
     import os
 
-    from neo4j_agent_memory.mcp._logging import configure_logging
+    from agent_memory_mcp.mcp._logging import configure_logging
 
     configure_logging()
 

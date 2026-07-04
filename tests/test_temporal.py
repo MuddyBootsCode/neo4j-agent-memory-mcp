@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from neo4j_agent_memory.temporal.lifecycle import (
+from agent_memory_mcp.temporal.lifecycle import (
     get_fact_evolution,
     parse_iso_datetime,
     supersede_fact_by_id,
@@ -277,7 +277,7 @@ def mock_fact_client(monkeypatch):
     mock_client.graph = mock_graph
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
 
@@ -287,7 +287,7 @@ def mock_fact_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_memory_store_fact_with_temporal_params(mock_fact_client, monkeypatch):
     """memory_store runs one atomic create+supersede write with epoch params."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     monkeypatch.setenv("NAM_CONTRADICTION_DETECTION", "false")
@@ -407,7 +407,7 @@ def mock_search_client(monkeypatch):
     mock_client.graph = mock_graph
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
 
@@ -417,7 +417,7 @@ def mock_search_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_memory_search_annotates_temporal_status(mock_search_client):
     """memory_search annotates facts with temporal_status field."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -454,7 +454,7 @@ async def test_memory_search_annotates_temporal_status(mock_search_client):
 @pytest.mark.asyncio
 async def test_memory_search_exclude_expired(mock_search_client):
     """memory_search with include_expired=False filters out expired facts."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -487,7 +487,7 @@ async def test_memory_search_exclude_expired(mock_search_client):
 class TestTemporalIndexes:
     @pytest.mark.asyncio
     async def test_ensure_indexes(self):
-        from neo4j_agent_memory.mcp._database_init import ensure_indexes
+        from agent_memory_mcp.mcp._database_init import ensure_indexes
 
         mock_graph = MagicMock()
         mock_graph.execute_write = AsyncMock()
@@ -549,7 +549,7 @@ class TestStoreFactAtomic:
     @pytest.mark.asyncio
     async def test_single_write_and_normalized_params(self):
         """R5/R14: exactly one write; normalized match params passed."""
-        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+        from agent_memory_mcp.temporal.lifecycle import store_fact_atomic
 
         client = _atomic_client()
         outcome = await store_fact_atomic(
@@ -572,7 +572,7 @@ class TestStoreFactAtomic:
     @pytest.mark.asyncio
     async def test_bounded_valid_until_disables_supersession(self):
         """R6: a fact with a bounded valid_until must not supersede."""
-        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+        from agent_memory_mcp.temporal.lifecycle import store_fact_atomic
 
         client = _atomic_client()
         await store_fact_atomic(
@@ -589,7 +589,7 @@ class TestStoreFactAtomic:
     @pytest.mark.asyncio
     async def test_non_current_state_disables_supersession(self):
         """R6: is_current_state=False (historical phrasing) must not supersede."""
-        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+        from agent_memory_mcp.temporal.lifecycle import store_fact_atomic
 
         client = _atomic_client()
         await store_fact_atomic(
@@ -604,7 +604,7 @@ class TestStoreFactAtomic:
 
     @pytest.mark.asyncio
     async def test_embedding_failure_stores_without_embedding(self):
-        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+        from agent_memory_mcp.temporal.lifecycle import store_fact_atomic
 
         client = _atomic_client()
         client.long_term._embedder.embed = AsyncMock(
@@ -619,7 +619,7 @@ class TestStoreFactAtomic:
 
     @pytest.mark.asyncio
     async def test_explicit_supersedes_id_passed_through(self):
-        from neo4j_agent_memory.temporal.lifecycle import store_fact_atomic
+        from agent_memory_mcp.temporal.lifecycle import store_fact_atomic
 
         client = _atomic_client()
         await store_fact_atomic(

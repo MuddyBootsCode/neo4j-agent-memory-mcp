@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastmcp import FastMCP
 
-from neo4j_agent_memory.mcp._tools import register_tools
+from agent_memory_mcp.mcp._tools import register_tools
 
 
 # ── BAML Mocking ─────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ def mock_baml_extract(monkeypatch):
 
     mock_fn = AsyncMock(return_value=mock_result)
     monkeypatch.setattr(
-        "neo4j_agent_memory.baml_client.async_client.b.ExtractMemory",
+        "agent_memory_mcp.baml_client.async_client.b.ExtractMemory",
         mock_fn,
     )
     return mock_fn, mock_result
@@ -47,11 +47,11 @@ def mock_baml_reasoning(monkeypatch):
     mock_synthesize = AsyncMock(return_value="Synthesized explanation")
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
+        "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
         mock_extract,
     )
     monkeypatch.setattr(
-        "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
+        "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
         mock_synthesize,
     )
     return mock_extract, mock_synthesize
@@ -144,7 +144,7 @@ def mock_mcp_context(mock_memory_client, monkeypatch):
     ctx = MagicMock()
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda _ctx: mock_memory_client,
     )
 
