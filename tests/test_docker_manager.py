@@ -1,6 +1,5 @@
 """Tests for Neo4jDockerManager (docker compose based)."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -38,9 +37,9 @@ class TestProbeNeo4j:
     """Tests for the _probe_bolt helper."""
 
     async def test_probe_returns_true_when_reachable(self):
-        from neo4j_agent_memory.mcp._docker import _probe_bolt
+        from agent_memory_mcp.mcp._docker import _probe_bolt
 
-        with patch("neo4j_agent_memory.mcp._docker.asyncio.open_connection") as mock_conn:
+        with patch("agent_memory_mcp.mcp._docker.asyncio.open_connection") as mock_conn:
             mock_reader = MagicMock()
             mock_writer = MagicMock()
             mock_writer.close = MagicMock()
@@ -51,10 +50,10 @@ class TestProbeNeo4j:
             assert result is True
 
     async def test_probe_returns_false_when_unreachable(self):
-        from neo4j_agent_memory.mcp._docker import _probe_bolt
+        from agent_memory_mcp.mcp._docker import _probe_bolt
 
         with patch(
-            "neo4j_agent_memory.mcp._docker.asyncio.open_connection",
+            "agent_memory_mcp.mcp._docker.asyncio.open_connection",
             side_effect=OSError("Connection refused"),
         ):
             result = await _probe_bolt("localhost", 7687)
@@ -65,7 +64,7 @@ class TestFindComposeFile:
     """Tests for _find_compose_file helper."""
 
     def test_finds_compose_file_in_ancestor(self, tmp_path):
-        from neo4j_agent_memory.mcp._docker import _find_compose_file
+        from agent_memory_mcp.mcp._docker import _find_compose_file
 
         compose = tmp_path / "docker-compose.yml"
         compose.write_text("services: {}")
@@ -78,7 +77,7 @@ class TestFindComposeFile:
 
         # Patch __file__ on the module so _find_compose_file walks up from tmp_path
         with patch(
-            "neo4j_agent_memory.mcp._docker.__file__",
+            "agent_memory_mcp.mcp._docker.__file__",
             str(fake_file),
         ):
             result = _find_compose_file()
@@ -86,10 +85,10 @@ class TestFindComposeFile:
             assert result == compose
 
     def test_returns_none_when_not_found(self):
-        from neo4j_agent_memory.mcp._docker import _find_compose_file
+        from agent_memory_mcp.mcp._docker import _find_compose_file
 
         with patch(
-            "neo4j_agent_memory.mcp._docker.__file__",
+            "agent_memory_mcp.mcp._docker.__file__",
             "/nonexistent/deep/path/mod.py",
         ):
             # The function walks up from __file__, won't find compose in /nonexistent
@@ -103,18 +102,18 @@ class TestNeo4jDockerManager:
 
     async def test_skips_docker_when_neo4j_reachable(self, docker_config):
         """If Neo4j is already up, don't touch Docker at all."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         mgr = Neo4jDockerManager(**docker_config)
 
-        with patch("neo4j_agent_memory.mcp._docker._probe_bolt", return_value=True):
+        with patch("agent_memory_mcp.mcp._docker._probe_bolt", return_value=True):
             async with mgr:
                 assert mgr._compose_dir is None
                 assert mgr._we_started is False
 
     async def test_skips_when_docker_auto_false(self, docker_config):
         """docker_auto=False disables all container management."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         docker_config["docker_auto"] = False
         mgr = Neo4jDockerManager(**docker_config)
@@ -124,12 +123,12 @@ class TestNeo4jDockerManager:
 
     async def test_skips_when_compose_file_not_found(self, docker_config):
         """Gracefully skip if docker-compose.yml cannot be found."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         mgr = Neo4jDockerManager(**docker_config)
 
         with (
-            patch("neo4j_agent_memory.mcp._docker._probe_bolt", return_value=False),
+            patch("agent_memory_mcp.mcp._docker._probe_bolt", return_value=False),
             patch.object(mgr, "_resolve_compose_file", return_value=None),
         ):
             async with mgr:
@@ -138,15 +137,15 @@ class TestNeo4jDockerManager:
 
     async def test_skips_when_docker_not_on_path(self, docker_config, fake_compose_file):
         """Gracefully skip if docker command is not found."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         docker_config["compose_file"] = str(fake_compose_file)
         mgr = Neo4jDockerManager(**docker_config)
 
         with (
-            patch("neo4j_agent_memory.mcp._docker._probe_bolt", return_value=False),
+            patch("agent_memory_mcp.mcp._docker._probe_bolt", return_value=False),
             patch(
-                "neo4j_agent_memory.mcp._docker.asyncio.create_subprocess_exec",
+                "agent_memory_mcp.mcp._docker.asyncio.create_subprocess_exec",
                 side_effect=FileNotFoundError("docker not found"),
             ),
         ):
@@ -157,7 +156,7 @@ class TestNeo4jDockerManager:
         self, docker_config, fake_compose_file
     ):
         """Runs docker compose up -d when Neo4j is not reachable."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         docker_config["compose_file"] = str(fake_compose_file)
         mgr = Neo4jDockerManager(**docker_config)
@@ -168,11 +167,11 @@ class TestNeo4jDockerManager:
 
         with (
             patch(
-                "neo4j_agent_memory.mcp._docker._probe_bolt",
+                "agent_memory_mcp.mcp._docker._probe_bolt",
                 side_effect=probe_results,
             ),
             patch(
-                "neo4j_agent_memory.mcp._docker.asyncio.create_subprocess_exec",
+                "agent_memory_mcp.mcp._docker.asyncio.create_subprocess_exec",
                 return_value=mock_proc,
             ) as mock_exec,
         ):
@@ -187,7 +186,7 @@ class TestNeo4jDockerManager:
 
     async def test_runs_compose_stop_on_exit(self, docker_config, fake_compose_file):
         """Runs docker compose stop when exiting after we started."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         docker_config["compose_file"] = str(fake_compose_file)
         mgr = Neo4jDockerManager(**docker_config)
@@ -196,11 +195,11 @@ class TestNeo4jDockerManager:
 
         with (
             patch(
-                "neo4j_agent_memory.mcp._docker._probe_bolt",
+                "agent_memory_mcp.mcp._docker._probe_bolt",
                 side_effect=[False, True],
             ),
             patch(
-                "neo4j_agent_memory.mcp._docker.asyncio.create_subprocess_exec",
+                "agent_memory_mcp.mcp._docker.asyncio.create_subprocess_exec",
                 return_value=mock_proc,
             ) as mock_exec,
         ):
@@ -216,14 +215,14 @@ class TestNeo4jDockerManager:
 
     async def test_does_not_stop_when_we_did_not_start(self, docker_config):
         """No compose stop when Neo4j was already running."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         mgr = Neo4jDockerManager(**docker_config)
 
         with (
-            patch("neo4j_agent_memory.mcp._docker._probe_bolt", return_value=True),
+            patch("agent_memory_mcp.mcp._docker._probe_bolt", return_value=True),
             patch(
-                "neo4j_agent_memory.mcp._docker.asyncio.create_subprocess_exec",
+                "agent_memory_mcp.mcp._docker.asyncio.create_subprocess_exec",
             ) as mock_exec,
         ):
             async with mgr:
@@ -233,7 +232,7 @@ class TestNeo4jDockerManager:
 
     async def test_compose_up_failure_raises(self, docker_config, fake_compose_file):
         """Raises RuntimeError if docker compose up fails."""
-        from neo4j_agent_memory.mcp._docker import Neo4jDockerManager
+        from agent_memory_mcp.mcp._docker import Neo4jDockerManager
 
         docker_config["compose_file"] = str(fake_compose_file)
         mgr = Neo4jDockerManager(**docker_config)
@@ -252,9 +251,9 @@ class TestNeo4jDockerManager:
             return up_proc  # up -d
 
         with (
-            patch("neo4j_agent_memory.mcp._docker._probe_bolt", return_value=False),
+            patch("agent_memory_mcp.mcp._docker._probe_bolt", return_value=False),
             patch(
-                "neo4j_agent_memory.mcp._docker.asyncio.create_subprocess_exec",
+                "agent_memory_mcp.mcp._docker.asyncio.create_subprocess_exec",
                 side_effect=mock_exec,
             ),
         ):
@@ -267,7 +266,7 @@ class TestConnectWithRetry:
     """Tests for connect_with_retry helper."""
 
     async def test_succeeds_on_first_try(self):
-        from neo4j_agent_memory.mcp._docker import connect_with_retry
+        from agent_memory_mcp.mcp._docker import connect_with_retry
 
         mock_client = MagicMock()
         mock_cm = AsyncMock()
@@ -281,7 +280,7 @@ class TestConnectWithRetry:
         assert factory.call_count == 1
 
     async def test_retries_on_failure_then_succeeds(self):
-        from neo4j_agent_memory.mcp._docker import connect_with_retry
+        from agent_memory_mcp.mcp._docker import connect_with_retry
 
         mock_client = MagicMock()
         mock_cm_good = AsyncMock()
@@ -300,7 +299,7 @@ class TestConnectWithRetry:
         assert factory.call_count == 3
 
     async def test_raises_after_all_retries_exhausted(self):
-        from neo4j_agent_memory.mcp._docker import connect_with_retry
+        from agent_memory_mcp.mcp._docker import connect_with_retry
 
         mock_cm = AsyncMock()
         mock_cm.__aenter__ = AsyncMock(side_effect=Exception("not ready"))
@@ -317,35 +316,35 @@ class TestParseBoltUri:
     """Tests for bolt URI parsing."""
 
     def test_standard_bolt_uri(self):
-        from neo4j_agent_memory.mcp._docker import _parse_bolt_uri
+        from agent_memory_mcp.mcp._docker import _parse_bolt_uri
 
         host, port = _parse_bolt_uri("bolt://localhost:7687")
         assert host == "localhost"
         assert port == 7687
 
     def test_custom_port(self):
-        from neo4j_agent_memory.mcp._docker import _parse_bolt_uri
+        from agent_memory_mcp.mcp._docker import _parse_bolt_uri
 
         host, port = _parse_bolt_uri("bolt://myhost:9999")
         assert host == "myhost"
         assert port == 9999
 
     def test_default_port_when_missing(self):
-        from neo4j_agent_memory.mcp._docker import _parse_bolt_uri
+        from agent_memory_mcp.mcp._docker import _parse_bolt_uri
 
         host, port = _parse_bolt_uri("bolt://myhost")
         assert host == "myhost"
         assert port == 7687
 
     def test_neo4j_scheme(self):
-        from neo4j_agent_memory.mcp._docker import _parse_bolt_uri
+        from agent_memory_mcp.mcp._docker import _parse_bolt_uri
 
         host, port = _parse_bolt_uri("neo4j://db.example.com:7687")
         assert host == "db.example.com"
         assert port == 7687
 
     def test_bolt_plus_s_scheme(self):
-        from neo4j_agent_memory.mcp._docker import _parse_bolt_uri
+        from agent_memory_mcp.mcp._docker import _parse_bolt_uri
 
         host, port = _parse_bolt_uri("bolt+s://secure.example.com:7687")
         assert host == "secure.example.com"

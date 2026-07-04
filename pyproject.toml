@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Standalone MCP server for Neo4j Agent Memory"
 requires-python = ">=3.10"
 dependencies = [
-    "neo4j-agent-memory[mcp,openai]",
+    # Pinned exactly: agent_memory_mcp monkeypatches upstream internals
+    # (MemoryClient._create_embedder, extraction.factory.create_extractor)
+    # and reaches into private attributes. Any upstream bump must be
+    # validated against agent_memory_mcp/mcp/_bootstrap.py before repinning.
+    "neo4j-agent-memory[mcp,openai]==0.0.3",
     "fastmcp>=2.0.0,<3",
     "baml-py>=0.70.0",
     "boto3>=1.42.88",
@@ -12,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-neo4j-memory-mcp = "neo4j_agent_memory.mcp.server:main"
+neo4j-memory-mcp = "agent_memory_mcp.mcp.server:main"
 
 [dependency-groups]
 dev = [
@@ -25,12 +29,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/neo4j_agent_memory"]
+packages = ["src/agent_memory_mcp"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-norecursedirs = [".venv", "node_modules", ".git", "build", "dist"]
+norecursedirs = [".*", ".venv", "node_modules", ".git", "build", "dist"]
 markers = [
     "integration: requires running Neo4j instance (deselect with '-m not integration')",
     "eval: requires live LLM API keys (deselect with '-m not eval')",
