@@ -8,7 +8,7 @@ graph TB
             CreateMCP["create_mcp_server()<br/><i>server.py:22</i>"]
         end
 
-        subgraph "MCP Layer (src/neo4j_agent_memory/mcp/)"
+        subgraph "MCP Layer (src/agent_memory_mcp/mcp/)"
             direction TB
             Server["server.py<br/>FastMCP Server + Lifespan"]
 
@@ -41,7 +41,7 @@ graph TB
             Docker["_docker.py<br/>Neo4jDockerManager<br/>connect_with_retry()"]
         end
 
-        subgraph "Extraction Layer (src/neo4j_agent_memory/extraction/)"
+        subgraph "Extraction Layer (src/agent_memory_mcp/extraction/)"
             direction TB
             BamlExt["baml_extractor.py<br/>BamlEntityExtractor"]
             ReasonExt["reasoning_extractor.py<br/>BamlReasoningExtractor"]

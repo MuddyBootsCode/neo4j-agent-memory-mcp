@@ -12,7 +12,7 @@ The keyword pre-check has been shipping untested; the transaction wiring is new.
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from neo4j_agent_memory.mcp._tools import _execute_read_only, _is_read_only_query
+from agent_memory_mcp.mcp._tools import _execute_read_only, _is_read_only_query
 
 
 def get_tool_fn(mcp, tool_name):
@@ -151,7 +151,7 @@ class TestGraphQueryTool:
         # If the pre-check fails to block, this would be called — assert it isn't.
         sentinel = AsyncMock(return_value=[])
         monkeypatch.setattr(
-            "neo4j_agent_memory.mcp._tools._execute_read_only", sentinel
+            "agent_memory_mcp.mcp._tools._execute_read_only", sentinel
         )
 
         graph_query = get_tool_fn(mcp_app, "graph_query")
@@ -169,7 +169,7 @@ class TestGraphQueryTool:
 
         executor = AsyncMock(return_value=[{"name": "Alice"}])
         monkeypatch.setattr(
-            "neo4j_agent_memory.mcp._tools._execute_read_only", executor
+            "agent_memory_mcp.mcp._tools._execute_read_only", executor
         )
 
         graph_query = get_tool_fn(mcp_app, "graph_query")

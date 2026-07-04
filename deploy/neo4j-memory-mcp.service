@@ -16,7 +16,7 @@ User=centos
 WorkingDirectory=/opt/neo4j-agent-memory-mcp
 EnvironmentFile=/opt/neo4j-agent-memory-mcp/deploy/.env
 Environment=PYTHONPATH=/opt/neo4j-agent-memory-mcp/src
-ExecStart=/opt/neo4j-agent-memory-mcp/.venv/bin/python -m neo4j_agent_memory.mcp.server --transport http --host 0.0.0.0 --port 8082
+ExecStart=/opt/neo4j-agent-memory-mcp/.venv/bin/python -m agent_memory_mcp.mcp.server --transport http --host 0.0.0.0 --port 8082
 Restart=always
 RestartSec=5
 

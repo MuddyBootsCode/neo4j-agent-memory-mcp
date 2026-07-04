@@ -94,7 +94,7 @@ async def _fallback_subject_predicate_match(
     new_fact_id: str,
 ) -> list[dict[str, Any]]:
     """Fallback: find candidates by normalized subject+predicate match."""
-    from neo4j_agent_memory.temporal.lifecycle import normalize_term
+    from agent_memory_mcp.temporal.lifecycle import normalize_term
 
     rows = await client.graph.execute_read(
         """
@@ -193,7 +193,7 @@ async def detect_and_invalidate(
             "BAML contradiction detection failed: %s — falling back to SPO match", e
         )
         # Fallback: normalized subject+predicate match supersession
-        from neo4j_agent_memory.temporal.lifecycle import normalize_term
+        from agent_memory_mcp.temporal.lifecycle import normalize_term
 
         contradicted_indices = [
             c["idx"] for c in candidates

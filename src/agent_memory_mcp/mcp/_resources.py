@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from fastmcp import Context
 
-from neo4j_agent_memory.mcp._common import get_client
+from agent_memory_mcp.mcp._common import get_client
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP

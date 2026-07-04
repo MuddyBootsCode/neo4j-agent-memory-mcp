@@ -12,7 +12,7 @@ import logging
 
 import pytest
 
-from neo4j_agent_memory.mcp import server as server_module
+from agent_memory_mcp.mcp import server as server_module
 
 
 def _clear_provider_env(monkeypatch):
