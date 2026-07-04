@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from neo4j_agent_memory.temporal.contradiction import (
+from agent_memory_mcp.temporal.contradiction import (
     _fallback_subject_predicate_match,
     detect_and_invalidate,
     find_contradiction_candidates,
 )
-from neo4j_agent_memory.temporal.extraction import extract_temporal_context
-from neo4j_agent_memory.temporal.migration import migrate_existing_facts
+from agent_memory_mcp.temporal.extraction import extract_temporal_context
+from agent_memory_mcp.temporal.migration import migrate_existing_facts
 
 
 # ── find_contradiction_candidates ───────────────────────────────────
@@ -171,7 +171,7 @@ class TestDetectAndInvalidate:
 
         # Patch BAML to fail
         with patch(
-            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
             return_value=[
                 {
@@ -283,7 +283,7 @@ def mock_knowledge_client(monkeypatch):
     mock_client.graph = mock_graph
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
 
@@ -297,7 +297,7 @@ def mock_knowledge_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_knowledge_state_returns_facts(mock_knowledge_client):
     """knowledge_state returns facts known at a system time."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -326,7 +326,7 @@ async def test_knowledge_state_returns_facts(mock_knowledge_client):
 @pytest.mark.asyncio
 async def test_knowledge_state_invalid_datetime(mock_knowledge_client):
     """knowledge_state returns error for invalid datetime."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -403,7 +403,7 @@ class TestContradictionIndexBounds:
         mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
 
         with patch(
-            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
             return_value=_make_candidates(),
         ):
@@ -434,7 +434,7 @@ class TestContradictionIndexBounds:
         mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
 
         with patch(
-            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
             return_value=_make_candidates(),
         ):
@@ -476,7 +476,7 @@ class TestSpoFallbackNormalization:
             }
         ]
         with patch(
-            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
             return_value=candidates,
         ):
