@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from neo4j_agent_memory.mcp import _tools
+from agent_memory_mcp.mcp import _tools
 
 
 @pytest.fixture(autouse=True)

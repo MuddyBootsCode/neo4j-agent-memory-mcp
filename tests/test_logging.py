@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from neo4j_agent_memory.mcp._logging import configure_logging, log_tool_call
+from agent_memory_mcp.mcp._logging import configure_logging, log_tool_call
 
 
 @pytest.fixture
