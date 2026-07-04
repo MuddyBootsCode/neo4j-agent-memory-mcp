@@ -1,0 +1,23 @@
+# GitGuardian / ggshield configuration.
+#
+# The paths below contain intentional non-secrets that trip the
+# "Generic Password" detector:
+#   - "graphmemory": throwaway password for the local/CI-only Neo4j container
+#     (binds to localhost, holds disposable test data)
+#   - "secret-token": dummy bearer token used by the HTTP-auth unit tests to
+#     assert 401/200 behavior
+#   - README/deploy docs: placeholder values ("<a strong, dedicated password>")
+#     and `openssl rand -hex 32` examples instructing operators to generate
+#     real ones
+#
+# No real credentials live in this repo: AWS creds come from ~/.aws locally
+# and CI intentionally has no cloud secrets (Bedrock tests skip without them).
+version: 2
+
+secret:
+  ignored_paths:
+    - docker-compose.yml
+    - .github/workflows/test.yml
+    - tests/**
+    - deploy/**
+    - README.md
