@@ -1,19 +1,18 @@
 """Tests for contradiction detection and Phase 2 temporal features."""
 
 import json
-import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from neo4j_agent_memory.temporal.contradiction import (
+from agent_memory_mcp.temporal.contradiction import (
     _fallback_subject_predicate_match,
     detect_and_invalidate,
     find_contradiction_candidates,
 )
-from neo4j_agent_memory.temporal.extraction import extract_temporal_context
-from neo4j_agent_memory.temporal.migration import migrate_existing_facts
+from agent_memory_mcp.temporal.extraction import extract_temporal_context
+from agent_memory_mcp.temporal.migration import migrate_existing_facts
 
 
 # ── find_contradiction_candidates ───────────────────────────────────
@@ -172,7 +171,7 @@ class TestDetectAndInvalidate:
 
         # Patch BAML to fail
         with patch(
-            "neo4j_agent_memory.temporal.contradiction.find_contradiction_candidates",
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
             return_value=[
                 {
@@ -257,55 +256,6 @@ class TestMigration:
         assert result["valid_from_backfilled"] == 0
 
 
-# ── _merge.py temporal sorting ──────────────────────────────────────
-
-
-class TestTemporalMerge:
-    def test_active_facts_sorted_first(self):
-        from neo4j_agent_memory.mcp._merge import merge_search_results
-
-        per_db = {
-            "neo4j": {
-                "facts": [
-                    {"id": "f1", "temporal_status": "expired", "similarity": 0.95},
-                    {"id": "f2", "temporal_status": "active", "similarity": 0.80},
-                    {"id": "f3", "temporal_status": "active", "similarity": 0.90},
-                ]
-            }
-        }
-
-        merged = merge_search_results(per_db)
-        facts = merged["facts"]
-
-        # Active facts should come first
-        assert facts[0]["temporal_status"] == "active"
-        assert facts[1]["temporal_status"] == "active"
-        assert facts[2]["temporal_status"] == "expired"
-
-        # Within active, higher similarity first
-        assert facts[0]["similarity"] == 0.90
-        assert facts[1]["similarity"] == 0.80
-
-    def test_no_temporal_status_treated_as_active(self):
-        from neo4j_agent_memory.mcp._merge import merge_search_results
-
-        per_db = {
-            "neo4j": {
-                "facts": [
-                    {"id": "f1", "similarity": 0.9},  # no temporal_status
-                    {"id": "f2", "temporal_status": "expired", "similarity": 0.95},
-                ]
-            }
-        }
-
-        merged = merge_search_results(per_db)
-        facts = merged["facts"]
-
-        # No-status treated as active, should be first
-        assert facts[0]["id"] == "f1"
-        assert facts[1]["id"] == "f2"
-
-
 # ── knowledge_state tool ────────────────────────────────────────────
 
 
@@ -333,17 +283,13 @@ def mock_knowledge_client(monkeypatch):
     mock_client.graph = mock_graph
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
 
     def _no_registry(ctx):
         raise RuntimeError("No registry")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
     return mock_client
 
@@ -351,7 +297,7 @@ def mock_knowledge_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_knowledge_state_returns_facts(mock_knowledge_client):
     """knowledge_state returns facts known at a system time."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -380,7 +326,7 @@ async def test_knowledge_state_returns_facts(mock_knowledge_client):
 @pytest.mark.asyncio
 async def test_knowledge_state_invalid_datetime(mock_knowledge_client):
     """knowledge_state returns error for invalid datetime."""
-    from neo4j_agent_memory.mcp._tools import register_tools
+    from agent_memory_mcp.mcp._tools import register_tools
     from fastmcp import FastMCP
 
     mcp = FastMCP("test")
@@ -397,3 +343,146 @@ async def test_knowledge_state_invalid_datetime(mock_knowledge_client):
     result_str = await ks_fn(ctx, as_of="not-a-date")
     result = json.loads(result_str)
     assert "error" in result
+
+
+# ── R15/R14: index bounds + normalization in detect_and_invalidate ──
+
+
+def _make_candidates():
+    return [
+        {
+            "id": "old-1",
+            "idx": 0,
+            "subject": "Alice",
+            "predicate": "WORKS_AT",
+            "object": "Acme",
+            "confidence": 0.9,
+            "similarity": None,
+        },
+        {
+            "id": "old-2",
+            "idx": 1,
+            "subject": "Alice",
+            "predicate": "LIVES_IN",
+            "object": "Denver",
+            "confidence": 0.8,
+            "similarity": None,
+        },
+    ]
+
+
+def _fake_baml_module(detect_mock):
+    import types
+
+    module = types.ModuleType("baml_client")
+    b = MagicMock()
+    b.DetectContradictions = detect_mock
+    module.b = b
+    return module
+
+
+class TestContradictionIndexBounds:
+    @pytest.mark.asyncio
+    async def test_negative_llm_index_is_ignored(self, monkeypatch):
+        """R15: a negative index from the LLM must NOT invalidate the last
+        candidate (Python's -1 resolves to the tail of the list)."""
+        import sys
+
+        result_obj = MagicMock()
+        result_obj.contradicted_indices = [-1]
+        result_obj.contradiction_type = "direct_contradiction"
+        result_obj.reasoning = "hallucinated index"
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        with patch(
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=_make_candidates(),
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["facts_invalidated"] == 0
+        mock_client.graph.execute_write.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_out_of_range_llm_index_is_ignored(self, monkeypatch):
+        """An index past the candidate list must be ignored, not crash."""
+        import sys
+
+        result_obj = MagicMock()
+        result_obj.contradicted_indices = [5]
+        result_obj.contradiction_type = "direct_contradiction"
+        result_obj.reasoning = "hallucinated index"
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        with patch(
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=_make_candidates(),
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["facts_invalidated"] == 0
+        mock_client.graph.execute_write.assert_not_called()
+
+
+class TestSpoFallbackNormalization:
+    @pytest.mark.asyncio
+    async def test_spo_fallback_matches_case_and_whitespace_insensitively(
+        self, monkeypatch
+    ):
+        """R14: the BAML-failure SPO fallback must normalize (casefold+trim)
+        subject/predicate before comparing."""
+        import sys
+
+        monkeypatch.setitem(
+            sys.modules,
+            "baml_client",
+            _fake_baml_module(AsyncMock(side_effect=RuntimeError("baml down"))),
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        candidates = [
+            {
+                "id": "old-1",
+                "idx": 0,
+                "subject": "  alice ",
+                "predicate": "works_at",
+                "object": "Acme",
+                "confidence": 0.9,
+                "similarity": None,
+            }
+        ]
+        with patch(
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=candidates,
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        assert result["contradiction_type"] == "direct_supersession"
+        assert result["facts_invalidated"] == 1

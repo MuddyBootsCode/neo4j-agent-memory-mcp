@@ -79,9 +79,11 @@ class TestNodeIntegrity:
         )
 
     async def test_entity_types_are_valid(self, populated_graph):
-        """Entity types should be from the POLE+O model."""
+        """Entity types should be from the unified ontology (POLE+O + domain types)."""
+        from agent_memory_mcp.baml_client.types import EntityType
+
         client = populated_graph
-        valid_types = {"PERSON", "ORGANIZATION", "LOCATION", "EVENT", "OBJECT"}
+        valid_types = {t.value for t in EntityType}
 
         rows = await client.graph.execute_read(
             "MATCH (e:Entity) RETURN DISTINCT e.type AS type", {},
@@ -174,37 +176,37 @@ class TestGraphQuerySafety:
 
     async def test_rejects_create(self, populated_graph):
         """graph_query should reject CREATE statements."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert not _is_read_only_query("CREATE (n:Test {name: 'bad'})")
 
     async def test_rejects_merge(self, populated_graph):
         """graph_query should reject MERGE statements."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert not _is_read_only_query("MERGE (n:Test {name: 'bad'})")
 
     async def test_rejects_delete(self, populated_graph):
         """graph_query should reject DELETE statements."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert not _is_read_only_query("MATCH (n) DELETE n")
 
     async def test_rejects_detach_delete(self, populated_graph):
         """graph_query should reject DETACH DELETE statements."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert not _is_read_only_query("MATCH (n) DETACH DELETE n")
 
     async def test_rejects_set(self, populated_graph):
         """graph_query should reject SET statements."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert not _is_read_only_query("MATCH (n) SET n.name = 'hacked'")
 
     async def test_allows_read(self, populated_graph):
         """graph_query should allow MATCH/RETURN queries."""
-        from neo4j_agent_memory.mcp._tools import _is_read_only_query
+        from agent_memory_mcp.mcp._tools import _is_read_only_query
 
         assert _is_read_only_query("MATCH (n) RETURN count(n)")
         assert _is_read_only_query(

@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastmcp import FastMCP
 
-from neo4j_agent_memory.mcp._tools import register_tools
+from agent_memory_mcp.mcp._tools import register_tools
 
 
 # ── BAML Mocking ─────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ from neo4j_agent_memory.mcp._tools import register_tools
 
 @pytest.fixture
 def mock_baml_extract(monkeypatch):
-    """Patch BAML generated client to avoid live API calls.
+    """Patch the unified BAML extraction to avoid live API calls.
 
     Returns (mock_fn, mock_result) so tests can configure return values.
     """
@@ -31,7 +31,7 @@ def mock_baml_extract(monkeypatch):
 
     mock_fn = AsyncMock(return_value=mock_result)
     monkeypatch.setattr(
-        "neo4j_agent_memory.baml_client.async_client.b.ExtractEntities",
+        "agent_memory_mcp.baml_client.async_client.b.ExtractMemory",
         mock_fn,
     )
     return mock_fn, mock_result
@@ -47,11 +47,11 @@ def mock_baml_reasoning(monkeypatch):
     mock_synthesize = AsyncMock(return_value="Synthesized explanation")
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
+        "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
         mock_extract,
     )
     monkeypatch.setattr(
-        "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
+        "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
         mock_synthesize,
     )
     return mock_extract, mock_synthesize
@@ -136,40 +136,16 @@ def get_tool_fn(mcp: FastMCP, tool_name: str):
 
 @pytest.fixture
 def mock_mcp_context(mock_memory_client, monkeypatch):
-    """Monkeypatch get_client/get_registry/get_router for single-client MCP tests.
+    """Monkeypatch get_client for single-graph MCP tool tests.
 
     Returns (ctx, client) where ctx is a mock Context and client is the
-    mock_memory_client fixture. The registry raises RuntimeError (forcing
-    single-client fallback), and the router returns a default general-db route.
-
-    This replaces the copy-pasted monkeypatch blocks in test_temporal.py,
-    test_contradiction.py, and test_reasoning_tools.py.
+    mock_memory_client fixture.
     """
     ctx = MagicMock()
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda _ctx: mock_memory_client,
-    )
-
-    def _no_registry(_ctx):
-        raise RuntimeError("No registry in test")
-
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
-
-    mock_router = MagicMock()
-    mock_route = MagicMock()
-    mock_route.primary_database = "neo4j"
-    mock_route.to_metadata.return_value = {"primary": "neo4j"}
-    mock_router.route_storage = AsyncMock(return_value=mock_route)
-    mock_router.route_query = AsyncMock(return_value=mock_route)
-
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_router",
-        lambda _ctx: mock_router,
     )
 
     return ctx, mock_memory_client

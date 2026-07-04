@@ -7,7 +7,7 @@ class TestBamlReasoningExtractorEmptyInput:
     """Verify empty/whitespace text returns empty result without calling BAML."""
 
     async def test_empty_string(self):
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning("")
@@ -17,7 +17,7 @@ class TestBamlReasoningExtractorEmptyInput:
         assert result["success"] is False
 
     async def test_whitespace_only(self):
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning("   \n  ")
@@ -25,7 +25,7 @@ class TestBamlReasoningExtractorEmptyInput:
         assert result["steps"] == []
 
     async def test_none_text(self):
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning(None)
@@ -53,11 +53,11 @@ class TestBamlReasoningExtractorExtraction:
 
         mock_fn = AsyncMock(return_value=result_mock)
         monkeypatch.setattr(
-            "neo4j_agent_memory.baml_client.async_client.b.ExtractReasoning",
+            "agent_memory_mcp.baml_client.async_client.b.ExtractReasoning",
             mock_fn,
         )
 
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning("Some conversation text")
@@ -90,11 +90,11 @@ class TestBamlReasoningExtractorExtraction:
         result_mock.success = True
 
         monkeypatch.setattr(
-            "neo4j_agent_memory.baml_client.async_client.b.ExtractReasoning",
+            "agent_memory_mcp.baml_client.async_client.b.ExtractReasoning",
             AsyncMock(return_value=result_mock),
         )
 
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning("test text")
@@ -117,11 +117,11 @@ class TestBamlReasoningExtractorExtraction:
         result_mock.success = True
 
         monkeypatch.setattr(
-            "neo4j_agent_memory.baml_client.async_client.b.ExtractReasoning",
+            "agent_memory_mcp.baml_client.async_client.b.ExtractReasoning",
             AsyncMock(return_value=result_mock),
         )
 
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.extract_reasoning("test text")
@@ -135,11 +135,11 @@ class TestBamlReasoningExtractorSynthesis:
     async def test_synthesize_explanation(self, monkeypatch):
         mock_fn = AsyncMock(return_value="I first checked the config and found a typo.")
         monkeypatch.setattr(
-            "neo4j_agent_memory.baml_client.async_client.b.SynthesizeExplanation",
+            "agent_memory_mcp.baml_client.async_client.b.SynthesizeExplanation",
             mock_fn,
         )
 
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
         result = await extractor.synthesize_explanation(
@@ -158,14 +158,14 @@ class TestBamlReasoningExtractorClientOptions:
     """Verify client name override behavior."""
 
     def test_default_client_name(self):
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         extractor = BamlReasoningExtractor()
-        assert extractor._client_name == "Anthropic"
+        assert extractor._client_name == "Bedrock"
         assert extractor._baml_options == {}
 
     def test_custom_client_registry(self):
-        from neo4j_agent_memory.extraction.reasoning_extractor import BamlReasoningExtractor
+        from agent_memory_mcp.extraction.reasoning_extractor import BamlReasoningExtractor
 
         registry = MagicMock()
         extractor = BamlReasoningExtractor(client_registry=registry)

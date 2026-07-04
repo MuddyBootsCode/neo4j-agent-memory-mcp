@@ -70,18 +70,12 @@ def mock_reasoning_client(monkeypatch):
     mock_client.reasoning = mock_reasoning
 
     monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_client",
+        "agent_memory_mcp.mcp._tools.get_client",
         lambda ctx: mock_client,
     )
 
     # Ensure multi-DB helpers fall back to single-client mode
-    def _no_registry(ctx):
-        raise RuntimeError("No registry in test")
 
-    monkeypatch.setattr(
-        "neo4j_agent_memory.mcp._tools.get_registry",
-        _no_registry,
-    )
 
     return mock_client, mock_reasoning
 
@@ -102,7 +96,7 @@ class TestAddReasoningTraceNewFormat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -150,7 +144,7 @@ class TestAddReasoningTraceNewFormat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -185,7 +179,7 @@ class TestAddReasoningTraceNewFormat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from neo4j_agent_memory.memory.reasoning import ToolCallStatus
         from fastmcp import FastMCP
 
@@ -219,7 +213,7 @@ class TestAddReasoningTraceBackwardCompat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -257,7 +251,7 @@ class TestAddReasoningTraceBackwardCompat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -287,7 +281,7 @@ class TestAddReasoningTraceBackwardCompat:
         mock_reasoning.start_trace.return_value = trace
         mock_reasoning.add_step.return_value = step
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -322,7 +316,7 @@ class TestExplainReasoning:
         trace = _make_trace(steps=[step])
         mock_reasoning.get_trace_with_steps.return_value = trace
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -350,7 +344,7 @@ class TestExplainReasoning:
         mock_reasoning.get_similar_traces.return_value = [trace]
         mock_reasoning.get_trace_with_steps.return_value = trace
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -376,7 +370,7 @@ class TestExplainReasoning:
         mock_reasoning.list_traces.return_value = [trace]
         mock_reasoning.get_trace_with_steps.return_value = trace
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -397,7 +391,7 @@ class TestExplainReasoning:
         )
 
     async def test_no_params_returns_error(self, mock_reasoning_client, mock_ctx):
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -419,7 +413,7 @@ class TestExplainReasoning:
         mock_client, mock_reasoning = mock_reasoning_client
         mock_reasoning.get_similar_traces.return_value = []
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -440,7 +434,7 @@ class TestExplainReasoning:
         mock_client, mock_reasoning = mock_reasoning_client
         mock_reasoning.get_trace_with_steps.return_value = None
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -465,11 +459,11 @@ class TestExplainReasoning:
 
         mock_synthesize = AsyncMock(return_value="I checked the logs and found the error.")
         monkeypatch.setattr(
-            "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
+            "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.synthesize_explanation",
             mock_synthesize,
         )
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -512,11 +506,11 @@ class TestExtractReasoning:
             "success": True,
         })
         monkeypatch.setattr(
-            "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
+            "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
             mock_extract,
         )
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -566,11 +560,11 @@ class TestExtractReasoning:
             "success": True,
         })
         monkeypatch.setattr(
-            "neo4j_agent_memory.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
+            "agent_memory_mcp.extraction.reasoning_extractor.BamlReasoningExtractor.extract_reasoning",
             mock_extract,
         )
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -618,20 +612,14 @@ class TestMemorySearchDefaultTypes:
         mock_client.graph.execute_read = AsyncMock(return_value=[])
 
         monkeypatch.setattr(
-            "neo4j_agent_memory.mcp._tools.get_client",
+            "agent_memory_mcp.mcp._tools.get_client",
             lambda ctx: mock_client,
         )
 
         # Ensure multi-DB helpers fall back to single-client mode
-        def _no_registry(ctx):
-            raise RuntimeError("No registry in test")
 
-        monkeypatch.setattr(
-            "neo4j_agent_memory.mcp._tools.get_registry",
-            _no_registry,
-        )
 
-        from neo4j_agent_memory.mcp._tools import register_tools
+        from agent_memory_mcp.mcp._tools import register_tools
         from fastmcp import FastMCP
 
         mcp = FastMCP("test")

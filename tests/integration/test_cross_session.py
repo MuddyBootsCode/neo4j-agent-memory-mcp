@@ -6,7 +6,6 @@ behavior that makes an agent memory system useful — knowledge persists
 and links grow over time.
 """
 
-import pytest
 
 
 class TestEntityDeduplication:
@@ -197,7 +196,6 @@ class TestRelationshipAccumulation:
             {},
         )
 
-        neighbor_names = {r["neighbor"].lower() for r in sarah_rels}
         # At minimum we should find a relationship to the company
         assert len(sarah_rels) >= 1, (
             f"Expected at least 1 relationship for Sarah, got {len(sarah_rels)}"
@@ -253,10 +251,9 @@ class TestEntityLookupTraversal:
                 "RETURN n.name AS name, r.relation_type AS rel_type",
                 {"id": entity_id},
             )
-            neighbor_names = {n["name"].lower() for n in neighbors}
             # Should have at least Graphable from session-1
             assert len(neighbors) >= 1, (
-                f"Expected neighbors for Marcus, got none"
+                "Expected neighbors for Marcus, got none"
             )
         else:
             # Fallback: check via Cypher directly
@@ -267,7 +264,7 @@ class TestEntityLookupTraversal:
                 {},
             )
             assert len(neighbors) >= 1, (
-                f"Expected neighbors for Marcus via Cypher, got none"
+                "Expected neighbors for Marcus via Cypher, got none"
             )
 
     async def test_lookup_finds_entity_by_name(self, memory_client_no_wipe):
