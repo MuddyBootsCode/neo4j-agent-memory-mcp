@@ -164,7 +164,7 @@ async def detect_and_invalidate(
 
     # Step 2: Call BAML for contradiction detection
     try:
-        from baml_client import b as baml
+        from agent_memory_mcp.baml_client.async_client import b as baml
 
         baml_candidates = [
             {
