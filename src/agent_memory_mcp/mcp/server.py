@@ -374,14 +374,41 @@ try:
             """Run the MCP server using stdio transport."""
             await self._mcp.run_async(transport="stdio")
 
-        async def run_sse(self, host: str = "127.0.0.1", port: int = 8080) -> None:
+        async def run_sse(
+            self,
+            host: str = "127.0.0.1",
+            port: int = 8080,
+            *,
+            http_token: str | None = None,
+        ) -> None:
             """Run the MCP server using SSE transport.
 
+            Applies the same protections as ``run_server``: binding a
+            non-loopback host with no bearer token configured raises before
+            binding, and when a token is configured every request must send
+            ``Authorization: Bearer <token>`` (otherwise HTTP 401).
+
             Args:
-                host: Host to bind to.
+                host: Host to bind to. Loopback hosts (127.0.0.1, localhost,
+                    ::1) may run without a token; any other host requires one.
                 port: Port to listen on.
+                http_token: Bearer token required for the SSE transport.
+                    Falls back to the ``NAM_HTTP_TOKEN`` environment variable.
+
+            Raises:
+                RuntimeError: If ``host`` is non-loopback and no token is
+                    configured (neither ``http_token`` nor ``NAM_HTTP_TOKEN``).
             """
-            await self._mcp.run_async(transport="sse", host=host, port=port)
+            import os
+
+            token = http_token or os.environ.get("NAM_HTTP_TOKEN")
+            assert_safe_http_bind(host=host, token=token)
+            await self._mcp.run_async(
+                transport="sse",
+                host=host,
+                port=port,
+                middleware=_http_auth_middleware(token),
+            )
 
     async def run_server(
         neo4j_uri: str,
