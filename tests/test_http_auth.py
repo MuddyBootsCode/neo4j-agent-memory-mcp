@@ -87,3 +87,95 @@ class TestAssertSafeHttpBind:
     def test_non_loopback_with_token_allowed(self, host):
         # Should not raise once a token is configured.
         assert_safe_http_bind(host=host, token="secret-token")
+
+
+class TestRunSseWrapper:
+    """Regression tests for the Neo4jMemoryMCPServer.run_sse wrapper.
+
+    The wrapper previously called ``FastMCP.run_async`` directly, bypassing
+    both ``assert_safe_http_bind`` and ``BearerAuthMiddleware`` — so
+    ``await server.run_sse(host="0.0.0.0")`` exposed the full tool surface
+    with no authentication (GitHub issue #6). These tests mock out
+    ``run_async`` (no real sockets) and assert the same guard + middleware
+    behavior as the ``run_server`` path.
+    """
+
+    @pytest.fixture()
+    def server(self, monkeypatch):
+        """A wrapper server with bootstrap and run_async mocked out."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        import agent_memory_mcp.mcp._bootstrap as bootstrap_mod
+        from agent_memory_mcp.mcp.server import Neo4jMemoryMCPServer
+
+        monkeypatch.setattr(
+            bootstrap_mod, "bootstrap_upstream_patches", MagicMock()
+        )
+        monkeypatch.delenv("NAM_HTTP_TOKEN", raising=False)
+
+        srv = Neo4jMemoryMCPServer(MagicMock())
+        srv._mcp.run_async = AsyncMock()
+        return srv
+
+    @staticmethod
+    def _middleware_of(server):
+        """Extract the middleware kwarg passed to the mocked run_async."""
+        return server._mcp.run_async.call_args.kwargs["middleware"]
+
+    async def test_non_loopback_without_token_raises_before_binding(
+        self, server
+    ):
+        with pytest.raises(RuntimeError, match="(?i)token"):
+            await server.run_sse(host="0.0.0.0")
+
+        server._mcp.run_async.assert_not_awaited()
+
+    async def test_non_loopback_with_explicit_token_installs_auth(self, server):
+        await server.run_sse(host="0.0.0.0", port=9090, http_token="secret")
+
+        server._mcp.run_async.assert_awaited_once()
+        kwargs = server._mcp.run_async.call_args.kwargs
+        assert kwargs["transport"] == "sse"
+        assert kwargs["host"] == "0.0.0.0"
+        assert kwargs["port"] == 9090
+
+        (mw,) = self._middleware_of(server)
+        assert mw.cls is BearerAuthMiddleware
+        assert mw.kwargs == {"token": "secret"}
+
+    async def test_env_token_fallback(self, server, monkeypatch):
+        monkeypatch.setenv("NAM_HTTP_TOKEN", "env-secret")
+
+        await server.run_sse(host="0.0.0.0")
+
+        (mw,) = self._middleware_of(server)
+        assert mw.cls is BearerAuthMiddleware
+        assert mw.kwargs == {"token": "env-secret"}
+
+    async def test_explicit_token_wins_over_env(self, server, monkeypatch):
+        monkeypatch.setenv("NAM_HTTP_TOKEN", "env-secret")
+
+        await server.run_sse(host="0.0.0.0", http_token="explicit")
+
+        (mw,) = self._middleware_of(server)
+        assert mw.kwargs == {"token": "explicit"}
+
+    async def test_loopback_default_without_token_runs_unauthenticated(
+        self, server
+    ):
+        # Backward-compatible: default loopback bind needs no token.
+        await server.run_sse()
+
+        server._mcp.run_async.assert_awaited_once()
+        kwargs = server._mcp.run_async.call_args.kwargs
+        assert kwargs["transport"] == "sse"
+        assert kwargs["host"] == "127.0.0.1"
+        assert kwargs["port"] == 8080
+        assert kwargs["middleware"] == []
+
+    async def test_loopback_with_token_still_installs_auth(self, server):
+        await server.run_sse(http_token="secret")
+
+        (mw,) = self._middleware_of(server)
+        assert mw.cls is BearerAuthMiddleware
+        assert mw.kwargs == {"token": "secret"}
