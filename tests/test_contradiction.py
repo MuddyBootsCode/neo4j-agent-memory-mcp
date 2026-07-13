@@ -149,7 +149,7 @@ class TestDetectAndInvalidate:
         assert result["facts_invalidated"] == 0
 
     @pytest.mark.asyncio
-    async def test_baml_failure_falls_back_to_spo(self):
+    async def test_baml_failure_falls_back_to_spo(self, monkeypatch):
         """When BAML fails, falls back to SPO match for contradiction."""
         mock_client = MagicMock()
         mock_client.long_term._embedder = None
@@ -169,7 +169,12 @@ class TestDetectAndInvalidate:
             return_value=[{"c": 1}]
         )
 
-        # Patch BAML to fail
+        # Patch the real BAML call to fail, triggering the SPO fallback
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.DetectContradictions",
+            AsyncMock(side_effect=RuntimeError("baml down")),
+        )
+
         with patch(
             "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
             new_callable=AsyncMock,
@@ -185,7 +190,6 @@ class TestDetectAndInvalidate:
                 }
             ],
         ):
-            # BAML import will fail, triggering fallback
             result = await detect_and_invalidate(
                 mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
             )
@@ -214,21 +218,30 @@ class TestDetectAndInvalidate:
 
 class TestExtractTemporalContext:
     @pytest.mark.asyncio
-    async def test_returns_defaults_on_baml_failure(self):
-        """When BAML is unavailable, returns safe defaults."""
+    async def test_returns_defaults_on_baml_failure(self, monkeypatch):
+        """When the BAML call fails, returns safe defaults."""
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.ExtractTemporalContext",
+            AsyncMock(side_effect=RuntimeError("baml down")),
+        )
         result = await extract_temporal_context("Alice works at Globex")
-        # BAML won't be available in tests, so we get defaults
         assert result["is_current_state"] is True
         assert result["valid_at"] is None
         assert result["temporal_qualifier"] is None
 
     @pytest.mark.asyncio
-    async def test_with_custom_reference_time(self):
-        """Accepts custom reference time."""
+    async def test_with_custom_reference_time(self, monkeypatch):
+        """Accepts custom reference time and forwards it to BAML."""
+        mock_fn = AsyncMock(side_effect=RuntimeError("baml down"))
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.ExtractTemporalContext",
+            mock_fn,
+        )
         ref = datetime(2026, 3, 1, tzinfo=timezone.utc)
         result = await extract_temporal_context("some text", reference_time=ref)
-        # Should not raise, returns defaults since BAML not available
+        # Should not raise; falls back to defaults on failure
         assert isinstance(result, dict)
+        assert mock_fn.call_args.kwargs["reference_time"] == ref.isoformat()
 
 
 # ── migrate_existing_facts ──────────────────────────────────────────
@@ -345,6 +358,85 @@ async def test_knowledge_state_invalid_datetime(mock_knowledge_client):
     assert "error" in result
 
 
+# ── Issue #4: temporal modules reach the generated BAML client ──────
+# These tests patch the REAL namespaced client
+# (agent_memory_mcp.baml_client.async_client.b) — no fake top-level
+# baml_client module is injected — proving the production import path.
+
+
+class TestTemporalBamlWiring:
+    @pytest.mark.asyncio
+    async def test_extract_temporal_context_reaches_generated_client(
+        self, monkeypatch
+    ):
+        """extract_temporal_context must call the namespaced BAML client."""
+        result_obj = MagicMock()
+        result_obj.valid_at = "2026-03-01T00:00:00+00:00"
+        result_obj.temporal_qualifier = "since March"
+        result_obj.is_current_state = False
+
+        mock_fn = AsyncMock(return_value=result_obj)
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.ExtractTemporalContext",
+            mock_fn,
+        )
+
+        ref = datetime(2026, 3, 9, tzinfo=timezone.utc)
+        result = await extract_temporal_context(
+            "Alice works at Globex since March", reference_time=ref
+        )
+
+        mock_fn.assert_awaited_once()
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs["text"] == "Alice works at Globex since March"
+        assert call_kwargs["reference_time"] == ref.isoformat()
+        assert result == {
+            "valid_at": "2026-03-01T00:00:00+00:00",
+            "temporal_qualifier": "since March",
+            "is_current_state": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_detect_and_invalidate_reaches_generated_client(
+        self, monkeypatch
+    ):
+        """detect_and_invalidate must call the namespaced BAML client and
+        use its verdict (not the SPO fallback) when the call succeeds."""
+        result_obj = MagicMock()
+        result_obj.contradicted_indices = [0]
+        result_obj.contradiction_type = "direct_contradiction"
+        result_obj.reasoning = "Alice moved companies"
+
+        mock_fn = AsyncMock(return_value=result_obj)
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.DetectContradictions",
+            mock_fn,
+        )
+
+        mock_client = MagicMock()
+        mock_client.graph.execute_write = AsyncMock(return_value=[{"c": 1}])
+
+        with patch(
+            "agent_memory_mcp.temporal.contradiction.find_contradiction_candidates",
+            new_callable=AsyncMock,
+            return_value=_make_candidates(),
+        ):
+            result = await detect_and_invalidate(
+                mock_client, "Alice", "WORKS_AT", "Globex", "new-fact"
+            )
+
+        mock_fn.assert_awaited_once()
+        call_kwargs = mock_fn.call_args.kwargs
+        assert call_kwargs["new_fact_subject"] == "Alice"
+        assert call_kwargs["new_fact_object"] == "Globex"
+        assert len(call_kwargs["candidates"]) == 2
+        assert result["contradictions_detected"] == 1
+        assert result["facts_invalidated"] == 1
+        assert result["contradiction_type"] == "direct_contradiction"
+        # BAML succeeded — reasoning is the model's, not fallback text.
+        assert result["reasoning"] == "Alice moved companies"
+
+
 # ── R15/R14: index bounds + normalization in detect_and_invalidate ──
 
 
@@ -371,14 +463,12 @@ def _make_candidates():
     ]
 
 
-def _fake_baml_module(detect_mock):
-    import types
-
-    module = types.ModuleType("baml_client")
-    b = MagicMock()
-    b.DetectContradictions = detect_mock
-    module.b = b
-    return module
+def _patch_detect_contradictions(monkeypatch, detect_mock):
+    """Patch DetectContradictions on the real namespaced BAML client."""
+    monkeypatch.setattr(
+        "agent_memory_mcp.baml_client.async_client.b.DetectContradictions",
+        detect_mock,
+    )
 
 
 class TestContradictionIndexBounds:
@@ -386,17 +476,13 @@ class TestContradictionIndexBounds:
     async def test_negative_llm_index_is_ignored(self, monkeypatch):
         """R15: a negative index from the LLM must NOT invalidate the last
         candidate (Python's -1 resolves to the tail of the list)."""
-        import sys
-
         result_obj = MagicMock()
         result_obj.contradicted_indices = [-1]
         result_obj.contradiction_type = "direct_contradiction"
         result_obj.reasoning = "hallucinated index"
 
-        monkeypatch.setitem(
-            sys.modules,
-            "baml_client",
-            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        _patch_detect_contradictions(
+            monkeypatch, AsyncMock(return_value=result_obj)
         )
 
         mock_client = MagicMock()
@@ -417,17 +503,13 @@ class TestContradictionIndexBounds:
     @pytest.mark.asyncio
     async def test_out_of_range_llm_index_is_ignored(self, monkeypatch):
         """An index past the candidate list must be ignored, not crash."""
-        import sys
-
         result_obj = MagicMock()
         result_obj.contradicted_indices = [5]
         result_obj.contradiction_type = "direct_contradiction"
         result_obj.reasoning = "hallucinated index"
 
-        monkeypatch.setitem(
-            sys.modules,
-            "baml_client",
-            _fake_baml_module(AsyncMock(return_value=result_obj)),
+        _patch_detect_contradictions(
+            monkeypatch, AsyncMock(return_value=result_obj)
         )
 
         mock_client = MagicMock()
@@ -453,12 +535,8 @@ class TestSpoFallbackNormalization:
     ):
         """R14: the BAML-failure SPO fallback must normalize (casefold+trim)
         subject/predicate before comparing."""
-        import sys
-
-        monkeypatch.setitem(
-            sys.modules,
-            "baml_client",
-            _fake_baml_module(AsyncMock(side_effect=RuntimeError("baml down"))),
+        _patch_detect_contradictions(
+            monkeypatch, AsyncMock(side_effect=RuntimeError("baml down"))
         )
 
         mock_client = MagicMock()
