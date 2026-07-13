@@ -23,7 +23,7 @@ async def extract_temporal_context(
     ref_iso = reference_time.isoformat()
 
     try:
-        from baml_client import b as baml
+        from agent_memory_mcp.baml_client.async_client import b as baml
 
         result = await baml.ExtractTemporalContext(
             text=content,
@@ -37,7 +37,7 @@ async def extract_temporal_context(
         }
 
     except Exception as e:
-        logger.debug("Temporal extraction failed: %s", e)
+        logger.warning("Temporal extraction failed: %s", e)
         return {
             "valid_at": None,
             "temporal_qualifier": None,

@@ -48,7 +48,7 @@ function ExtractReasoning(text: string) -> ReasoningExtractionOutput {
 
     ## Text to Analyze
     <stored_content>
-    {{ text }}
+    {{ text | replace("</stored_content", "<\\stored_content") }}
     </stored_content>
 
     {{ ctx.output_format }}
@@ -94,18 +94,18 @@ function SynthesizeExplanation(chain: ReasoningChainInput) -> string {
 
     <stored_content>
     ## Task
-    {{ chain.task }}
+    {{ chain.task | replace("</stored_content", "<\\stored_content") }}
 
     ## Reasoning Steps
     {% for step in chain.steps %}
     ### Step {{ loop.index }}
-    **Thought**: {{ step.thought }}
-    **Action**: {{ step.action }}
-    **Observation**: {{ step.observation }}
+    **Thought**: {{ step.thought | replace("</stored_content", "<\\stored_content") }}
+    **Action**: {{ step.action | replace("</stored_content", "<\\stored_content") }}
+    **Observation**: {{ step.observation | replace("</stored_content", "<\\stored_content") }}
     {% endfor %}
 
     ## Outcome
-    {{ chain.outcome }}
+    {{ chain.outcome | replace("</stored_content", "<\\stored_content") }}
     </stored_content>
 
     {{ ctx.output_format }}
