@@ -110,7 +110,7 @@ function ExtractMemory(text: string) -> MemoryExtraction {
 
     {{ _.role("user") }}
     <stored_content>
-    {{ text }}
+    {{ text | replace("</stored_content", "<\\stored_content") }}
     </stored_content>
   "#
 }
