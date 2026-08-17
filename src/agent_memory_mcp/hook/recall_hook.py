@@ -40,6 +40,10 @@ MEMORY_TYPES = ["facts", "entities", "preferences"]
 TRUNCATION_MARKER = "… (truncated)"
 
 
+def _header(count: int, ms: float) -> str:
+    return f"memory: {count} items recalled in {ms:.0f} ms"
+
+
 def format_context(
     response: dict[str, Any],
     ms: float,
@@ -50,49 +54,68 @@ def format_context(
     Mirrors the graph-memory-starter output shape: a counts header, one
     line per fact, entity descriptions in a ``where:`` block (conditions
     live on entities, not edges), preferences last.
+
+    The header counts what the body actually renders, not what the
+    response contained: an entity with no description and no neighbors
+    produces no line, and truncation drops trailing records.
     """
     results = response.get("results") or {}
     facts = results.get("facts") or []
     entities = results.get("entities") or []
     prefs = results.get("preferences") or []
 
-    total = len(facts) + len(entities) + len(prefs)
-    header = f"memory: {total} items recalled in {ms:.0f} ms"
-    if total == 0:
-        return header + "\n(no memory matches for this prompt)"
-
-    lines = [header, ""]
+    lines: list[str] = []
+    # Line index at which each rendered record first appears. A record
+    # that renders nothing never lands here, and truncation counts only
+    # the indices that survive.
+    item_at: list[int] = []
 
     for f in facts:
         line = f"{f.get('subject')} --[{f.get('predicate')}]--> {f.get('object')}"
         status = f.get("temporal_status")
         if status and status != "active":
             line += f"   ({status})"
+        item_at.append(len(lines))
         lines.append(line)
 
-    for e in entities:
+    # An entity can render both edges and a where: note; count it once,
+    # at whichever comes first.
+    entity_at: dict[int, int] = {}
+    for i, e in enumerate(entities):
         for n in e.get("neighbors") or []:
             rel = n.get("relationship")
+            entity_at.setdefault(i, len(lines))
             if n.get("direction") == "incoming":
                 lines.append(f"{n.get('name')} --[{rel}]--> {e.get('name')}")
             else:
                 lines.append(f"{e.get('name')} --[{rel}]--> {n.get('name')}")
 
-    notes = [(e.get("name"), e.get("description")) for e in entities if e.get("description")]
+    notes = [(i, e) for i, e in enumerate(entities) if e.get("description")]
     if notes:
         lines.append("")
         lines.append("where:")
-        lines.extend(f"  {name}: {desc}" for name, desc in notes)
+        for i, e in notes:
+            entity_at.setdefault(i, len(lines))
+            lines.append(f"  {e.get('name')}: {e.get('description')}")
+    item_at.extend(entity_at.values())
 
     if prefs:
         lines.append("")
-        lines.extend(f"[{p.get('category')}] {p.get('preference')}" for p in prefs)
+        for p in prefs:
+            item_at.append(len(lines))
+            lines.append(f"[{p.get('category')}] {p.get('preference')}")
 
-    text = "\n".join(lines)
+    if not item_at:
+        return _header(0, ms) + "\n(no memory matches for this prompt)"
+
+    header = _header(len(item_at), ms)
+    text = "\n".join([header, ""] + lines)
     if len(text) <= max_chars:
         return text
 
-    budget = max_chars - len(TRUNCATION_MARKER) - 1
+    # Header and blank line are kept verbatim; the recount below can only
+    # shorten the header, so the budget stays conservative.
+    budget = max_chars - len(header) - 1 - 1 - len(TRUNCATION_MARKER) - 1
     kept: list[str] = []
     size = 0
     for line in lines:
@@ -100,8 +123,9 @@ def format_context(
             break
         kept.append(line)
         size += len(line) + 1
+    shown = sum(1 for idx in item_at if idx < len(kept))
     kept.append(TRUNCATION_MARKER)
-    return "\n".join(kept)
+    return "\n".join([_header(shown, ms), ""] + kept)
 
 
 def build_hook_output(text: str) -> dict[str, Any]:
