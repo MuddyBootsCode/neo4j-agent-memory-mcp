@@ -22,6 +22,13 @@ class BamlReasoningExtractor:
         self._client_name = client_name
         self._baml_options: dict[str, Any] = {}
 
+        if client_registry is None and client_name == "Bedrock":
+            # Anthropic-direct mode: with ANTHROPIC_API_KEY set, the default
+            # construction routes to the Anthropic API instead of Bedrock.
+            from agent_memory_mcp.providers import anthropic_registry
+
+            client_registry = anthropic_registry()
+
         if client_registry:
             self._baml_options["client_registry"] = client_registry
         elif client_name != "Bedrock":
