@@ -24,10 +24,12 @@ async def extract_temporal_context(
 
     try:
         from agent_memory_mcp.baml_client.async_client import b as baml
+        from agent_memory_mcp.providers import default_baml_options
 
         result = await baml.ExtractTemporalContext(
             text=content,
             reference_time=ref_iso,
+            baml_options=default_baml_options(),
         )
 
         return {

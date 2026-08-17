@@ -127,6 +127,29 @@ NAM_EMBEDDING_MODEL=amazon.titan-embed-text-v2:0
 NAM_EMBEDDING_DIMENSIONS=1024
 ```
 
+### Local mode: Anthropic API key, no Bedrock
+
+If `ANTHROPIC_API_KEY` is set, the server does not use Bedrock at all:
+extraction (unified pass, temporal, contradiction, reasoning) routes to the
+Anthropic API via a runtime BAML ClientRegistry (`agent_memory_mcp/providers.py`;
+model `claude-opus-5`, override with `NAM_ANTHROPIC_MODEL`), embeddings default
+to local sentence-transformers (`all-MiniLM-L6-v2`, 384 dims — Anthropic has no
+embeddings API), and the startup credential preflight is satisfied by the key
+alone. An explicit `NAM_EMBEDDING_PROVIDER` still wins over the key-derived
+default.
+
+```bash
+uv sync --extra local   # installs sentence-transformers (torch)
+ANTHROPIC_API_KEY=sk-ant-... NEO4J_PASSWORD=graphmemory \
+  MCP_TRANSPORT=http MCP_PORT=8080 uv run python run_server.py
+```
+
+> ⚠️ **Use a fresh graph.** Local embeddings are 384-dimensional; a graph
+> whose vector indexes were built by Bedrock Titan (1024) will fail every
+> vector query with a dimension mismatch. Wipe the data and drop the
+> `*_embedding_idx` vector indexes (they are recreated at 384 on first use),
+> or run a separate Neo4j volume for local mode.
+
 ### 3. Generate BAML Client
 
 ```bash

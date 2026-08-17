@@ -18,6 +18,11 @@ dependencies = [
 [project.scripts]
 neo4j-memory-mcp = "agent_memory_mcp.mcp.server:main"
 
+[project.optional-dependencies]
+local = [
+    "sentence-transformers>=3.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
