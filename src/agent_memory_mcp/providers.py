@@ -20,10 +20,13 @@ from typing import Any
 
 ANTHROPIC_CLIENT_NAME = "AnthropicDirect"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-5"
-# Matches the Bedrock client's inference_configuration in clients.baml.
 # No temperature/top_p/top_k: sampling params are rejected (400) on
 # claude-opus-5 and the rest of the Opus 4.7+ family.
-ANTHROPIC_MAX_TOKENS = 4096
+# Larger than the Bedrock client's 4096: thinking is on by default on
+# claude-opus-5 and thinking tokens count against max_tokens, so a 4096
+# budget can be spent before the structured extraction output is emitted,
+# truncating the response and failing BAML parsing.
+ANTHROPIC_MAX_TOKENS = 16000
 
 LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 LOCAL_EMBEDDING_DIMENSIONS = 384
