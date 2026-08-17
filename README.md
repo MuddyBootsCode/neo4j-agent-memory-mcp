@@ -138,6 +138,21 @@ embeddings API), and the startup credential preflight is satisfied by the key
 alone. An explicit `NAM_EMBEDDING_PROVIDER` still wins over the key-derived
 default.
 
+The whole stack runs on compose — Neo4j plus the server in one command:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d   # or put the key in .env
+```
+
+The server listens on `127.0.0.1:8080` (HTTP transport, bearer token
+`NAM_HTTP_TOKEN`, default `local-dev-token`; clients such as the recall hook
+read the same variable). The sentence-transformers model is downloaded on
+first search (~12 s) into the `hf-cache` volume; warm searches run in
+~400 ms. To run Neo4j alone (host-side server workflow):
+`docker compose up -d neo4j`.
+
+Host-side equivalent, without the container:
+
 ```bash
 uv sync --extra local   # installs sentence-transformers (torch)
 ANTHROPIC_API_KEY=sk-ant-... NEO4J_PASSWORD=graphmemory \

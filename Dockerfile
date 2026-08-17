@@ -13,8 +13,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock ./
 
-# Install runtime dependencies only
-RUN uv sync --frozen --no-dev
+# Install runtime dependencies only. INSTALL_EXTRAS names an optional
+# dependency group to include (e.g. "local" for sentence-transformers,
+# used by the Anthropic-direct local mode in docker-compose.yml).
+ARG INSTALL_EXTRAS=""
+RUN uv sync --frozen --no-dev ${INSTALL_EXTRAS:+--extra ${INSTALL_EXTRAS}}
 
 # Copy BAML source and application code
 COPY baml_src/ baml_src/

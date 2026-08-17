@@ -12,3 +12,6 @@ docs/
 neo4j-init/
 *.md
 .claude/
+.venv/
+notebooks/
+docs/
