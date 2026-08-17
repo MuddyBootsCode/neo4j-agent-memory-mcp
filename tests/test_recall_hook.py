@@ -123,6 +123,49 @@ class TestFormatContext:
         text = format_context(empty, ms=3.0)
         assert "no memory matches" in text
 
+    def test_header_ignores_entities_that_render_nothing(self):
+        response = {
+            "results": {
+                "facts": [],
+                "entities": [
+                    {"id": "e1", "name": "Ghost", "description": None, "neighbors": []},
+                    {"id": "e2", "name": "Sarah Chen", "description": "Ops Manager"},
+                ],
+                "preferences": [],
+            }
+        }
+        text = format_context(response, ms=1.0)
+        assert text.split("\n")[0] == "memory: 1 items recalled in 1 ms"
+        assert "Ghost" not in text
+
+    def test_entity_with_edges_and_description_counted_once(self):
+        text = format_context(SAMPLE_RESPONSE, ms=12.0)
+        # 2 facts + 1 entity (renders an edge and a where: note) + 1 preference
+        assert text.split("\n")[0] == "memory: 4 items recalled in 12 ms"
+
+    def test_truncated_header_counts_only_surviving_items(self):
+        response = {
+            "results": {
+                "facts": [
+                    {
+                        "subject": f"Entity {i}",
+                        "predicate": "related_to",
+                        "object": "x" * 200,
+                        "temporal_status": "active",
+                    }
+                    for i in range(50)
+                ],
+                "entities": [],
+                "preferences": [],
+            }
+        }
+        text = format_context(response, ms=1.0, max_chars=1000)
+        lines = text.split("\n")
+        assert lines[-1] == "… (truncated)"
+        shown = sum(1 for ln in lines if "related_to" in ln)
+        assert lines[0] == f"memory: {shown} items recalled in 1 ms"
+        assert shown < 50
+
     def test_output_capped_at_max_chars(self):
         big = {
             "results": {
