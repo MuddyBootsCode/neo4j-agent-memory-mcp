@@ -184,6 +184,44 @@ NAM_HTTP_TOKEN=$(openssl rand -hex 32) \
   uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
 ```
 
+### 5. Register the Recall Hook (optional)
+
+`memory_search` is a pull tool: the model has to decide to call it. The recall
+hook makes retrieval push-mode instead — it runs on every `UserPromptSubmit`,
+searches memory with the prompt, and injects compact triples as
+`additionalContext` before the model sees the prompt.
+
+Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project /path/to/neo4j-agent-memory-mcp neo4j-memory-recall-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+It needs the server running on HTTP (`docker compose up -d`, or step 4 with
+`--transport http`). The hook is fail-open: any error, timeout, or malformed
+payload exits 0 with no output, so a down server never blocks a prompt.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NAM_HOOK_URL` | `http://127.0.0.1:8080/mcp` | Server endpoint |
+| `NAM_HTTP_TOKEN` | — | Bearer token, if the server requires one |
+| `NAM_HOOK_TIMEOUT` | `5` | Whole-call budget, seconds |
+| `NAM_HOOK_MAX_CHARS` | `4000` | Cap on injected context size |
+| `NAM_HOOK_THRESHOLD` | `0.5` | Similarity cutoff (lower than the server's 0.7) |
+
 ## MCP Tools
 
 | Tool | Purpose |
