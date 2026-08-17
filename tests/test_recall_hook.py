@@ -97,12 +97,12 @@ class TestFormatContext:
 
     def test_expired_facts_are_annotated(self):
         text = format_context(SAMPLE_RESPONSE, ms=1.0)
-        line = next(l for l in text.split("\n") if "approved_by" in l)
+        line = next(ln for ln in text.split("\n") if "approved_by" in ln)
         assert "expired" in line
 
     def test_active_facts_not_annotated_as_expired(self):
         text = format_context(SAMPLE_RESPONSE, ms=1.0)
-        line = next(l for l in text.split("\n") if "delegates_to" in l)
+        line = next(ln for ln in text.split("\n") if "delegates_to" in ln)
         assert "expired" not in line
 
     def test_entity_descriptions_carried_in_where_block(self):
