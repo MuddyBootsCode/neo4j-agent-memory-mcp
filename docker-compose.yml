@@ -28,5 +28,36 @@ services:
         limits:
           memory: 10g
 
+  # Local Anthropic-direct mode: extraction via the Anthropic API, embeddings
+  # via local sentence-transformers — no AWS anywhere. `docker compose up -d`
+  # brings up the full stack; to run Neo4j alone (host-side server workflow),
+  # use `docker compose up -d neo4j`.
+  mcp:
+    build:
+      context: .
+      args:
+        INSTALL_EXTRAS: local
+    container_name: neo4j-memory-mcp
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required for the mcp service (Anthropic-direct local mode). Set it in .env or the shell, or start Neo4j alone with `docker compose up -d neo4j`.}
+      NAM_ANTHROPIC_MODEL: ${NAM_ANTHROPIC_MODEL:-claude-opus-5}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-graphmemory}
+      MCP_TRANSPORT: http
+      # The image binds 0.0.0.0 inside the container, which requires a bearer
+      # token; the port is published on loopback only, so the default token is
+      # fine for local use. The recall hook reads the same NAM_HTTP_TOKEN var.
+      NAM_HTTP_TOKEN: ${NAM_HTTP_TOKEN:-local-dev-token}
+    volumes:
+      # Cache the sentence-transformers model across container restarts
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
 volumes:
   neo4j-data:
+  hf-cache:
