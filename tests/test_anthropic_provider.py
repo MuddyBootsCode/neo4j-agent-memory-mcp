@@ -98,17 +98,20 @@ class TestEmbeddingKwargs:
 
 
 class TestCallSitesThreadRegistry:
-    async def test_unified_extraction_passes_baml_options(self, monkeypatch):
+    async def test_unified_extractor_passes_baml_options(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         captured = {}
 
         class _StubBaml:
-            async def ExtractMemory(self, *, text, baml_options=None):
+            async def ExtractCodingMemory(
+                self, *, transcript, context, baml_options=None
+            ):
                 captured["baml_options"] = baml_options
 
                 class _R:
-                    entities = []
-                    relations = []
+                    decisions = []
+                    gotchas = []
+                    dead_ends = []
                     preferences = []
 
                 return _R()
@@ -117,9 +120,9 @@ class TestCallSitesThreadRegistry:
 
         monkeypatch.setattr(ac, "b", _StubBaml())
 
-        from agent_memory_mcp.extraction.unified import extract_memory
+        from agent_memory_mcp.extraction.unified import UnifiedBamlExtractor
 
-        await extract_memory("Sarah delegates to Marcus")
+        await UnifiedBamlExtractor().extract("Sarah delegates to Marcus")
         from baml_py import ClientRegistry
 
         assert isinstance(captured["baml_options"].get("client_registry"), ClientRegistry)

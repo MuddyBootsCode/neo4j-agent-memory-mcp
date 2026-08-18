@@ -95,15 +95,18 @@ async def extract_memory(text: str) -> dict[str, list[dict[str, Any]]]:
 
 
 class UnifiedBamlExtractor:
-    """Upstream ``EntityExtractor``-protocol adapter over :func:`extract_memory`.
+    """Upstream ``EntityExtractor``-protocol adapter over the coding extraction.
 
-    Restores the client-level extraction hook the single-graph refactor severed:
+    Keeps the client-level extraction hook alive:
     ``MemoryClient.short_term.add_message(extract_entities=True)`` looks up its
     extractor through the upstream factory, which only knows spaCy/GLiNER/OpenAI.
     Wired in via :func:`agent_memory_mcp.mcp._extractor_patch.patch_extractor_factory`,
-    this adapter runs the same single-pass BAML ``ExtractMemory`` call used by the
-    MCP ``memory_store`` tool and hands the result to the upstream persistence
-    pipeline (Entity MERGE on name+type, MENTIONS links, RELATED_TO edges).
+    this adapter runs the same ``ExtractCodingMemory`` call used by the MCP
+    ``memory_store`` tool. Message text carries no session context (branch,
+    task, touched files), so anchored coding memory (decisions, gotchas, dead
+    ends) drops by design and the result carries preferences only — entities
+    and relations are always empty. The hook capture path is the source of
+    anchored coding memory.
     """
 
     name = "UnifiedBamlExtractor"
@@ -118,42 +121,20 @@ class UnifiedBamlExtractor:
     ) -> Any:
         from neo4j_agent_memory.core.exceptions import ExtractionError
         from neo4j_agent_memory.extraction.base import (
-            ExtractedEntity,
             ExtractedPreference,
-            ExtractedRelation,
             ExtractionResult,
         )
 
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
         try:
-            extraction = await extract_memory(text)
+            extraction = await extract_coding_memory(
+                text, branch="", task=None, files=[]
+            )
         except Exception as exc:
             raise ExtractionError(
-                f"Unified BAML extraction failed ({type(exc).__name__}): {exc}"
+                f"Coding BAML extraction failed ({type(exc).__name__}): {exc}"
             ) from exc
-
-        entities = [
-            ExtractedEntity(
-                name=e["name"],
-                type=e["type"],
-                subtype=e.get("subtype"),
-                confidence=e["confidence"],
-                attributes={k: e[k] for k in _DOMAIN_PROPS if e.get(k)},
-                extractor=self.name,
-            )
-            for e in extraction["entities"]
-        ]
-
-        relations = []
-        if extract_relations:
-            relations = [
-                ExtractedRelation(
-                    source=r["source"],
-                    target=r["target"],
-                    relation_type=r["relation_type"],
-                    confidence=r["confidence"],
-                )
-                for r in extraction["relations"]
-            ]
 
         preferences = []
         if extract_preferences:
@@ -161,15 +142,15 @@ class UnifiedBamlExtractor:
                 ExtractedPreference(
                     category=p["category"],
                     preference=p["preference"],
-                    context=p.get("context"),
+                    context=None,
                     confidence=p["confidence"],
                 )
                 for p in extraction["preferences"]
             ]
 
         return ExtractionResult(
-            entities=entities,
-            relations=relations,
+            entities=[],
+            relations=[],
             preferences=preferences,
             source_text=text,
         )
