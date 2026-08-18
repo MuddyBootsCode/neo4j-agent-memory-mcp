@@ -8,19 +8,23 @@ prompt (push, not pull — the model never asks). Two paths:
   sweep builds a session context (repo, branch, edited files, task key)
   and the hook calls ``coding_recall`` — anchor-first coding memories
   plus warnings about other agents working nearby. The same connection
-  also fires ``record_coding_activity`` (push capture of the session's
-  files and recent commits) as a side effect; its errors are swallowed.
+  also makes a best-effort ``record_coding_activity`` call (push capture
+  of the session's files and recent commits); its errors and stalls are
+  swallowed and it is bounded by its own small timeout.
 - Classic path: outside a repo, or whenever the coding path fails or the
   server says ``fallback``, the hook queries ``memory_search`` and
   renders compact triples + notes, exactly as before.
 
 Fail-open contract: any error, timeout, or malformed payload exits 0
-with no output. Memory must never block a prompt submit.
+with no output. Memory must never block a prompt submit. Worst-case
+coding-path latency stacks the git sweep (NAM_HOOK_GIT_BUDGET plus up to
+one 3 s commit scan) with up to two MCP sessions of NAM_HOOK_TIMEOUT
+each (coding_recall, then a fallback memory_search).
 
 Configuration (environment):
     NAM_HOOK_URL          MCP server URL (default http://127.0.0.1:8080/mcp)
     NAM_HTTP_TOKEN        Bearer token, if the server requires one
-    NAM_HOOK_TIMEOUT      Whole-call budget in seconds (default 5)
+    NAM_HOOK_TIMEOUT      Per-MCP-session budget in seconds (default 5)
     NAM_HOOK_MAX_CHARS    Cap on injected context size (default 4000)
     NAM_AGENT_ID          Stable agent identity; falls back to the
                           payload's session_id, then "unknown-agent"
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -269,7 +274,10 @@ def format_coding_memories(memories: list[dict] | None) -> str | None:
         task = _clean_task(row.get("task"))
         parts = [p for p in (_shown_files(row.get("files")), task) if p]
         suffix = f" ({', '.join(parts)})" if parts else ""
-        lines.append(f"[{label}] {text.strip()}{suffix}")
+        # One record, one line: embedded newlines would let truncation
+        # split a record and make the header count dishonest.
+        flat = text.strip().replace("\n", " ")
+        lines.append(f"[{label}] {flat}{suffix}")
     return "\n".join(lines) if lines else None
 
 
@@ -332,6 +340,9 @@ def search_via_mcp(prompt: str) -> str:
 # record_coding_activity tools.
 DEFAULT_GIT_BUDGET = 4.0
 DEFAULT_LOOKBACK_HOURS = 24.0
+# Hard ceiling on the piggybacked push capture: past this, the capture is
+# abandoned so a stalled write can never cost the recall its result.
+CAPTURE_TIMEOUT = 1.0
 MAX_FILES_SENT = 50
 # A coding_recall response must carry all of these to be trusted; anything
 # thinner is treated as malformed and the hook falls back to memory_search.
@@ -359,6 +370,7 @@ def gather_session_context(payload: dict) -> dict | None:
             return None
         branch = current_branch(cwd) if time.perf_counter() < deadline else None
         files = edited_files(cwd) if time.perf_counter() < deadline else []
+        budget_spent = time.perf_counter() >= deadline
 
         agent_id = (
             os.environ.get("NAM_AGENT_ID")
@@ -373,6 +385,7 @@ def gather_session_context(payload: dict) -> dict | None:
             "task_key": infer_task_key(branch),
             "agent_id": agent_id,
             "session_id": payload.get("session_id") or agent_id,
+            "git_budget_spent": budget_spent,
         }
     except Exception:
         return None
@@ -390,10 +403,12 @@ def _lookback_since_iso(now: datetime | None = None) -> str:
 
 
 async def record_activity_via_mcp(client: Any, ctx: dict, commits: list) -> None:
-    """Fire-and-forget push capture over an already-open client session.
+    """Best-effort, error-swallowed push capture over an open client session.
 
-    Swallows every error: capture must never cost the recall its result.
-    Skipped on a detached HEAD (no branch) — the server requires one.
+    Not fire-and-forget: the caller awaits it, but bounds it with
+    CAPTURE_TIMEOUT and swallows everything it raises, so it can never
+    cost the recall its result. Skipped on a detached HEAD (no branch) —
+    the server requires one.
     """
     if not ctx.get("branch"):
         return
@@ -435,7 +450,12 @@ def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
     headers = {"Authorization": f"Bearer {token}"} if token else None
     transport = StreamableHttpTransport(url, headers=headers)
 
-    commits = commits_since(ctx["cwd"], _lookback_since_iso())
+    # The gather already spent its git budget: don't stack another git
+    # subprocess on top; capture just goes out without commits.
+    if ctx.get("git_budget_spent"):
+        commits: list = []
+    else:
+        commits = commits_since(ctx["cwd"], _lookback_since_iso())
 
     async def _call() -> str | None:
         async with Client(transport, timeout=timeout) as client:
@@ -454,7 +474,16 @@ def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
                 text = _extract_text(result)
             except Exception:
                 text = None
-            await record_activity_via_mcp(client, ctx, commits)
+            # The capture gets its own small budget, and even the
+            # CancelledError from the outer timeout is swallowed here:
+            # a stalled capture must never destroy a recall already won.
+            try:
+                await asyncio.wait_for(
+                    record_activity_via_mcp(client, ctx, commits),
+                    timeout=CAPTURE_TIMEOUT,
+                )
+            except (asyncio.CancelledError, Exception):
+                pass
             return text
 
     try:
@@ -467,6 +496,23 @@ def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
         return parsed
     except Exception:
         return None
+
+
+# Pinned to _header's wording by TestParseContextHeader; change both
+# together.
+_CONTEXT_HEADER_RE = re.compile(r"^memory: (\d+) items recalled")
+
+
+def _parse_context_header(formatted: str) -> tuple[int, str | None]:
+    """Split a format_context result into (item count, body).
+
+    The count is read back from the header line so the combined coding
+    header can fold it in; an unrecognized header degrades to 0.
+    """
+    first, _, rest = formatted.partition("\n")
+    match = _CONTEXT_HEADER_RE.match(first)
+    count = int(match.group(1)) if match else 0
+    return count, (rest.lstrip("\n") or None)
 
 
 def _coding_header(count: int, agents: int, ms: float) -> str:
@@ -559,18 +605,18 @@ def run(
             # Anchor-less recall: the coding graph has nothing to offer,
             # so the classic search supplies the memory section. Its
             # header is folded into the combined one.
-            raw = search(prompt)
+            # A search failure only costs the memory section — the
+            # overlap block is deterministic and already in hand.
+            try:
+                raw = search(prompt)
+                sresp = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                sresp = None
             ms = (time.perf_counter() - t0) * 1000
-            sresp = json.loads(raw) if isinstance(raw, str) else raw
             memory_body = None
             if isinstance(sresp, dict) and "error" not in sresp:
                 formatted = format_context(sresp, ms=ms, max_chars=max_chars)
-                first, _, rest = formatted.partition("\n")
-                try:
-                    count = int(first.split()[1])
-                except (IndexError, ValueError):
-                    count = 0
-                memory_body = rest.lstrip("\n") or None
+                count, memory_body = _parse_context_header(formatted)
         else:
             ms = (time.perf_counter() - t0) * 1000
             memory_body = format_coding_memories(response.get("memories"))
