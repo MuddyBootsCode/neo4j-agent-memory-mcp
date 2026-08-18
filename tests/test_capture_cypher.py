@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from agent_memory_mcp.capture.cypher import (
-    anchored_memory_upsert,
+    anchored_memory_write,
     commit_upsert,
     editing_upsert,
     session_upsert,
@@ -77,7 +77,7 @@ class TestSessionUpsert:
         assert "MERGE (s:CodingSession {id: $session_id})" in query
         assert "MERGE (a)-[:RUNS]->(s)" in query
         assert "ON CREATE SET" in query
-        assert "s.started_at = datetime($ts)" in query
+        assert "s.started_at = datetime($ts), s.last_seen = datetime($ts)" in query
         assert "ON MATCH SET" in query
         assert "s.last_seen = datetime($ts)" in query
         assert "datetime()" not in query.replace("datetime($ts)", "")
@@ -171,6 +171,8 @@ class TestCommitUpsert:
 
     def test_idempotent_only_merge_clauses(self):
         query, _ = commit_upsert("s", "r", "sha", "m", ["a.py"], TS)
+        # "CREATE (" cannot false-positive on "ON CREATE SET": the SET form
+        # is never followed by an open paren.
         assert "CREATE (" not in query
 
     def test_no_argument_interpolation(self):
@@ -180,16 +182,16 @@ class TestCommitUpsert:
 
 
 # ---------------------------------------------------------------------------
-# anchored_memory_upsert
+# anchored_memory_write
 # ---------------------------------------------------------------------------
 
 ALLOWED_KINDS = ["Decision", "Gotcha", "DeadEnd", "CodingPreference"]
 
 
-class TestAnchoredMemoryUpsert:
+class TestAnchoredMemoryWrite:
     def test_rejects_bad_kind(self):
         with pytest.raises(ValueError, match="EvilLabel"):
-            anchored_memory_upsert(
+            anchored_memory_write(
                 kind="EvilLabel",
                 props={"text": "x"},
                 session_id="s",
@@ -202,11 +204,11 @@ class TestAnchoredMemoryUpsert:
     def test_rejects_injection_in_kind(self):
         bad = "Decision) DETACH DELETE n //"
         with pytest.raises(ValueError):
-            anchored_memory_upsert(bad, {}, "s", "r", [], None, TS)
+            anchored_memory_write(bad, {}, "s", "r", [], None, TS)
 
     @pytest.mark.parametrize("kind", ALLOWED_KINDS)
     def test_accepts_each_allowlisted_kind(self, kind):
-        query, _ = anchored_memory_upsert(kind, {"text": "x"}, "s", "r", [], None, TS)
+        query, _ = anchored_memory_write(kind, {"text": "x"}, "s", "r", [], None, TS)
         assert f"CREATE (m:{kind})" in query
 
     @pytest.mark.parametrize(
@@ -214,13 +216,13 @@ class TestAnchoredMemoryUpsert:
     )
     def test_rejects_nested_props(self, bad_value):
         with pytest.raises(ValueError):
-            anchored_memory_upsert(
+            anchored_memory_write(
                 "Decision", {"bad": bad_value}, "s", "r", [], None, TS
             )
 
     def test_props_map_param_no_per_key_interpolation(self):
         props = {"text": f"{SENTINEL}text", "confidence": 0.9, "flag": True}
-        query, params = anchored_memory_upsert(
+        query, params = anchored_memory_write(
             "Gotcha", props, "s", "r", [], None, TS
         )
         assert "SET m = $props" in query
@@ -231,7 +233,7 @@ class TestAnchoredMemoryUpsert:
         assert "$confidence" not in query
 
     def test_params_without_task_key(self):
-        query, params = anchored_memory_upsert(
+        query, params = anchored_memory_write(
             "Decision", {"text": "x"}, "sess-1", "repo-a", ["a.py"], None, TS
         )
         assert params == {
@@ -245,7 +247,7 @@ class TestAnchoredMemoryUpsert:
         assert "WorkTask" not in query
 
     def test_params_with_task_key(self):
-        query, params = anchored_memory_upsert(
+        query, params = anchored_memory_write(
             "Decision", {"text": "x"}, "sess-1", "repo-a", ["a.py"], "MUD-395", TS
         )
         assert params == {
@@ -260,7 +262,7 @@ class TestAnchoredMemoryUpsert:
         assert "MERGE (m)-[:CONCERNS]->(t)" in query
 
     def test_anchor_edges_and_session_link(self):
-        query, _ = anchored_memory_upsert(
+        query, _ = anchored_memory_write(
             "DeadEnd", {"text": "x"}, "s", "r", ["a.py"], None, TS
         )
         assert "MATCH (s:CodingSession {id: $session_id})" in query
@@ -270,14 +272,14 @@ class TestAnchoredMemoryUpsert:
         assert "MERGE (m)-[:ABOUT]->(f)" in query
 
     def test_single_create_clause(self):
-        query, _ = anchored_memory_upsert(
+        query, _ = anchored_memory_write(
             "Decision", {"text": "x"}, "s", "r", ["a.py"], "MUD-1", TS
         )
         assert query.count("CREATE (") == 1
 
     def test_no_argument_interpolation(self):
         session_id, repo, path, task_key = (f"{SENTINEL}{i}" for i in range(4))
-        query, _ = anchored_memory_upsert(
+        query, _ = anchored_memory_write(
             "Decision",
             {"text": f"{SENTINEL}p"},
             session_id,

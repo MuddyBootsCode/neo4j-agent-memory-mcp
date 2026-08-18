@@ -3,7 +3,7 @@
 Every function returns ``(query, params)`` for the caller to run through
 ``client.graph.execute_write`` — nothing here touches Neo4j. All argument
 values travel as query parameters; the single exception is the node label in
-:func:`anchored_memory_upsert`, which is validated against a fixed allowlist
+:func:`anchored_memory_write`, which is validated against a fixed allowlist
 before interpolation.
 
 Timestamps: callers supply ``ts`` as an ISO 8601 string and queries use
@@ -32,16 +32,18 @@ def session_upsert(
 ) -> tuple[str, dict[str, Any]]:
     """Upsert an agent, its coding session, and (optionally) the task link.
 
-    On create the session records repo, branch, and ``started_at``; on match
-    it refreshes branch and ``last_seen``. When ``task_key`` is given, the
-    ``WorkTask`` is MERGEd and the ``WORKING_ON`` edge timestamp is refreshed
-    on every call. ``ts`` is an ISO 8601 string.
+    On create the session records repo, branch, ``started_at``, and
+    ``last_seen``; on match it refreshes branch and ``last_seen``.
+    ``repo`` is intentionally not refreshed on match — it is immutable per
+    session id. When ``task_key`` is given, the ``WorkTask`` is MERGEd and
+    the ``WORKING_ON`` edge timestamp is refreshed on every call. ``ts`` is an
+    ISO 8601 string.
     """
     query = """
         MERGE (a:CodeAgent {id: $agent_id})
         MERGE (s:CodingSession {id: $session_id})
         ON CREATE SET s.repo = $repo, s.branch = $branch,
-            s.started_at = datetime($ts)
+            s.started_at = datetime($ts), s.last_seen = datetime($ts)
         ON MATCH SET s.branch = $branch, s.last_seen = datetime($ts)
         MERGE (a)-[:RUNS]->(s)
     """
@@ -71,7 +73,9 @@ def editing_upsert(
     """Record that a session is editing the given files.
 
     Returns ``None`` when ``paths`` is empty — there is nothing to write and
-    callers skip the call entirely. The ``EDITING`` edge's ``r.at`` is SET
+    callers skip the call entirely. MATCHes the session; if it does not
+    exist the whole write is a silent no-op — run session_upsert first.
+    The ``EDITING`` edge's ``r.at`` is SET
     (not ON CREATE SET) so it refreshes on every call; recency-window reads
     depend on that. ``ts`` is an ISO 8601 string.
     """
@@ -105,7 +109,9 @@ def commit_upsert(
 
     MERGE everywhere, so re-sending the same commit is idempotent: the
     ``Change`` is keyed on ``sha`` and its message/repo/timestamp are only
-    written on create. ``ts`` is an ISO 8601 string.
+    written on create. MATCHes the session; if it does not
+    exist the whole write is a silent no-op — run session_upsert first.
+    ``ts`` is an ISO 8601 string.
     """
     query = """
         MATCH (s:CodingSession {id: $session_id})
@@ -129,7 +135,7 @@ def commit_upsert(
     return query, params
 
 
-def anchored_memory_upsert(
+def anchored_memory_write(
     kind: str,
     props: dict[str, Any],
     session_id: str,
@@ -148,7 +154,9 @@ def anchored_memory_upsert(
     bool); nested containers raise ``ValueError`` (Neo4j property
     constraint). Anchor edges come from ``anchor_paths`` (an empty list
     creates the node with no ``ABOUT`` edges); the ``CONCERNS`` edge is only
-    built when ``task_key`` is given. ``ts`` is an ISO 8601 string.
+    built when ``task_key`` is given. MATCHes the session; if it does not
+    exist the whole write is a silent no-op — run session_upsert first.
+    ``ts`` is an ISO 8601 string.
     """
     if kind not in ANCHORED_KINDS:
         raise ValueError(
