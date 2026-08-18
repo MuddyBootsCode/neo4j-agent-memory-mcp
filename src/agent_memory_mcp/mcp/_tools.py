@@ -458,9 +458,10 @@ def register_tools(mcp: FastMCP) -> None:
         """Store a memory in the knowledge graph.
 
         Supports messages, facts (SPO triples), and user preferences. Storing a
-        message runs a single unified extraction pass that pulls entities
-        (POLE+O + domain types as labels), relationships, and preferences and
-        persists them to the graph.
+        message runs the coding-memory extraction pass over the content; with
+        no session context available here (no branch, task, or touched files),
+        only preferences are persisted — anchored coding memory (decisions,
+        gotchas, dead ends) comes from the hook capture path instead.
 
         Args:
             memory_type: Type of memory - 'message', 'fact', or 'preference'.
@@ -497,20 +498,31 @@ def register_tools(mcp: FastMCP) -> None:
                     generate_embedding=True,
                 )
 
-                # Unified extraction — never fatal to the stored message.
+                # Coding-memory extraction — never fatal to the stored message.
+                # A stored message carries no session context (branch, task,
+                # touched files), so the anchored types (decisions, gotchas,
+                # dead ends) all drop by design; the hook capture path is the
+                # source of anchored coding memory. Only preferences flow here.
                 extraction_counts = None
                 try:
-                    from agent_memory_mcp.extraction.unified import (
-                        extract_memory,
-                        persist_memory,
+                    from agent_memory_mcp.extraction.coding import (
+                        extract_coding_memory,
                     )
+                    from agent_memory_mcp.extraction.unified import persist_memory
 
-                    extraction = await extract_memory(content)
+                    coding = await extract_coding_memory(
+                        content, branch="", task=None, files=[]
+                    )
+                    extraction = {
+                        "entities": [],
+                        "relations": [],
+                        "preferences": coding["preferences"],
+                    }
                     extraction_counts = await persist_memory(
                         client, str(message.id), extraction
                     )
                 except Exception as extract_err:
-                    logger.warning("Unified extraction failed: %s", extract_err)
+                    logger.warning("Coding-memory extraction failed: %s", extract_err)
 
                 result_data = {
                     "stored": True,
