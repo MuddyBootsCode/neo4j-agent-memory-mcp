@@ -632,6 +632,31 @@ class TestOfflineRenderedPrompts:
         for earlier in blocks[:-1]:
             assert FENCE_OPEN not in earlier
 
+    @pytest.mark.parametrize("task,rendered", [(None, "unknown"), ("MUD-395", "MUD-395")])
+    def test_coding_context_fields_render_on_separate_lines(self, task, rendered):
+        """Branch/Task/Files must each land on their own line.
+
+        The renderer trims the newline after a block tag, so a template that
+        relies on the newline after ``{% endif %}`` renders
+        ``Task: unknownFiles touched this session:``. The line break lives
+        inside the if/else branches instead; this pins that rendering.
+        """
+        from agent_memory_mcp.baml_client import types
+        from agent_memory_mcp.baml_client.sync_client import b
+
+        request = b.request.ExtractCodingMemory(
+            transcript="a transcript",
+            context=types.CodingSessionContext(
+                branch="main", task=task, files=["a.py"]
+            ),
+        )
+        body = request.body.json()
+        user_turn = body["messages"][-1]["content"][-1]["text"]
+        assert (
+            f"\nBranch: main\nTask: {rendered}\nFiles touched this session:\n- a.py\n"
+            in user_turn
+        )
+
     def test_coding_fenced_content_renders_in_its_own_block(self):
         """Role separation for ExtractCodingMemory: the final content block
         holds the two fenced data blocks and none of the instruction text."""
