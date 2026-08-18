@@ -11,9 +11,10 @@ prompt (push, not pull — the model never asks). Two paths:
   also makes a best-effort ``record_coding_activity`` call (push capture
   of the session's files and recent commits); its errors and stalls are
   swallowed and it is bounded by its own small timeout.
-- Classic path: outside a repo, or whenever the coding path fails or the
-  server says ``fallback``, the hook queries ``memory_search`` and
-  renders compact triples + notes, exactly as before.
+- Classic path: outside a repo, or whenever the coding path fails, the
+  server says ``fallback``, or the anchor-first recall returns no
+  memories, the hook queries ``memory_search`` and renders compact
+  triples + notes, exactly as before.
 
 Fail-open contract: any error, timeout, or malformed payload exits 0
 with no output. Memory must never block a prompt submit. Worst-case
@@ -30,6 +31,11 @@ Configuration (environment):
                           payload's session_id, then "unknown-agent"
     NAM_HOOK_GIT_BUDGET   Wall-clock budget in seconds for the git sweep
                           (default 4.0); collectors past it are skipped
+    NAM_TASK_KEY          Explicit task key; overrides the ticket or
+                          branch inferred from git
+    NAM_OVERLAP_WINDOW_HOURS
+                          Recency window in hours for cross-agent
+                          overlap warnings (default 24)
     NAM_CAPTURE_LOOKBACK_HOURS
                           How far back the push capture looks for
                           commits (default 24)
@@ -343,6 +349,7 @@ DEFAULT_LOOKBACK_HOURS = 24.0
 # Hard ceiling on the piggybacked push capture: past this, the capture is
 # abandoned so a stalled write can never cost the recall its result.
 CAPTURE_TIMEOUT = 1.0
+DEFAULT_OVERLAP_WINDOW_HOURS = 24.0
 MAX_FILES_SENT = 50
 # A coding_recall response must carry all of these to be trusted; anything
 # thinner is treated as malformed and the hook falls back to memory_search.
@@ -382,7 +389,7 @@ def gather_session_context(payload: dict) -> dict | None:
             "repo": repo,
             "branch": branch,
             "files": list(files)[:MAX_FILES_SENT],
-            "task_key": infer_task_key(branch),
+            "task_key": infer_task_key(branch, repo=repo),
             "agent_id": agent_id,
             "session_id": payload.get("session_id") or agent_id,
             "git_budget_spent": budget_spent,
@@ -429,6 +436,20 @@ async def record_activity_via_mcp(client: Any, ctx: dict, commits: list) -> None
         pass
 
 
+def build_coding_recall_args(prompt: str, ctx: dict) -> dict[str, Any]:
+    """Arguments for the coding_recall tool call."""
+    return {
+        "prompt": prompt,
+        "agent_id": ctx["agent_id"],
+        "repo": ctx["repo"],
+        "files": ctx["files"],
+        "task_key": ctx["task_key"],
+        "overlap_window_hours": float(
+            os.environ.get("NAM_OVERLAP_WINDOW_HOURS", DEFAULT_OVERLAP_WINDOW_HOURS)
+        ),
+    }
+
+
 def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
     """Call coding_recall, then record_coding_activity, on one connection.
 
@@ -462,14 +483,7 @@ def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
             text: str | None = None
             try:
                 result = await client.call_tool(
-                    "coding_recall",
-                    {
-                        "prompt": prompt,
-                        "agent_id": ctx["agent_id"],
-                        "repo": ctx["repo"],
-                        "files": ctx["files"],
-                        "task_key": ctx["task_key"],
-                    },
+                    "coding_recall", build_coding_recall_args(prompt, ctx)
                 )
                 text = _extract_text(result)
             except Exception:
@@ -564,8 +578,9 @@ def run(
     """Hook entry point. Always returns 0: recall is best-effort.
 
     In a git repo the coding path runs first (coding_recall + push
-    capture); everywhere else — and on any coding-path failure or a
-    ``fallback`` response — the classic memory_search path answers.
+    capture); everywhere else — and on any coding-path failure, a
+    ``fallback`` response, or a recall carrying no memories — the
+    classic memory_search path answers.
     """
     stdin = stdin if stdin is not None else sys.stdin
     stdout = stdout if stdout is not None else sys.stdout
@@ -600,11 +615,18 @@ def run(
         n_agents = len(overlaps) if overlap_text else 0
 
         memory_body: str | None
+        # The verbatim format_context output, kept so a fallback with no
+        # overlap block can be emitted exactly as Path A would (Path A's
+        # no-match rendering has no blank line; reassembly would add one).
+        classic_formatted: str | None = None
         count = 0
-        if response.get("fallback"):
-            # Anchor-less recall: the coding graph has nothing to offer,
-            # so the classic search supplies the memory section. Its
-            # header is folded into the combined one.
+        if response.get("fallback") or not response.get("memories"):
+            # Anchor-less recall, or an anchored recall that found
+            # nothing: the coding graph has nothing to offer, so the
+            # classic search supplies the memory section — otherwise an
+            # empty anchor graph would silently cost the embedding
+            # recall the legacy path always ran. Its header is folded
+            # into the combined one.
             # A search failure only costs the memory section — the
             # overlap block is deterministic and already in hand.
             try:
@@ -615,8 +637,8 @@ def run(
             ms = (time.perf_counter() - t0) * 1000
             memory_body = None
             if isinstance(sresp, dict) and "error" not in sresp:
-                formatted = format_context(sresp, ms=ms, max_chars=max_chars)
-                count, memory_body = _parse_context_header(formatted)
+                classic_formatted = format_context(sresp, ms=ms, max_chars=max_chars)
+                count, memory_body = _parse_context_header(classic_formatted)
         else:
             ms = (time.perf_counter() - t0) * 1000
             memory_body = format_coding_memories(response.get("memories"))
@@ -629,6 +651,11 @@ def run(
                 )
 
         if overlap_text is None and memory_body is None:
+            return 0
+
+        if overlap_text is None and classic_formatted is not None:
+            # Pure fallback output: identical to what Path A would emit.
+            print(json.dumps(build_hook_output(classic_formatted)), file=stdout)
             return 0
 
         header = _coding_header(count, n_agents, ms)

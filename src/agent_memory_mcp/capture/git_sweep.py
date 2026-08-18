@@ -132,12 +132,18 @@ def commits_since(repo_dir: str, since_iso: str, cap: int = 20) -> list[dict[str
     return commits
 
 
-def infer_task_key(branch: str | None, env: dict | None = None) -> str | None:
+def infer_task_key(
+    branch: str | None, env: dict | None = None, repo: str | None = None
+) -> str | None:
     """Task key for the current work: env override, ticket in branch, branch.
 
     ``NAM_TASK_KEY`` (from ``env``, default ``os.environ``) wins when set and
-    non-empty; else the first ``ABC-123``-style match in the branch; else the
-    branch itself; None when the branch is None/empty with no override.
+    non-empty — an explicit override is global on purpose. Else the first
+    ``ABC-123``-style match in the branch; ticket ids are meaningfully global,
+    so ``repo`` never touches them. Else the branch itself, scoped as
+    ``"repo/branch"`` when ``repo`` is given — a bare branch name like "main"
+    would otherwise merge unrelated repos into one WorkTask and cross-warn
+    their agents. None when the branch is None/empty with no override.
     """
     source = os.environ if env is None else env
     override = source.get("NAM_TASK_KEY")
@@ -148,4 +154,4 @@ def infer_task_key(branch: str | None, env: dict | None = None) -> str | None:
     match = _TASK_KEY_RE.search(branch)
     if match:
         return match.group(0)
-    return branch
+    return f"{repo}/{branch}" if repo else branch

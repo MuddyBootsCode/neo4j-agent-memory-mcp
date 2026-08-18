@@ -8,6 +8,7 @@ the real formatting/dispatch code without a live server.
 
 import json
 import io
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -210,6 +211,28 @@ class TestSearchArgs:
 
         monkeypatch.setenv("NAM_HOOK_THRESHOLD", "0.35")
         assert build_search_args("q")["threshold"] == 0.35
+
+
+class TestCodingRecallArgs:
+    def test_default_overlap_window(self, monkeypatch):
+        from agent_memory_mcp.hook.recall_hook import build_coding_recall_args
+
+        monkeypatch.delenv("NAM_OVERLAP_WINDOW_HOURS", raising=False)
+        args = build_coding_recall_args("p", dict(CTX))
+        assert args == {
+            "prompt": "p",
+            "agent_id": "agent-1",
+            "repo": "neo4j-agent-memory-mcp",
+            "files": ["src/a.py"],
+            "task_key": "MUD-395",
+            "overlap_window_hours": 24.0,
+        }
+
+    def test_overlap_window_overridable_via_env(self, monkeypatch):
+        from agent_memory_mcp.hook.recall_hook import build_coding_recall_args
+
+        monkeypatch.setenv("NAM_OVERLAP_WINDOW_HOURS", "6")
+        assert build_coding_recall_args("p", dict(CTX))["overlap_window_hours"] == 6.0
 
 
 class TestBuildHookOutput:
@@ -660,14 +683,78 @@ class TestRunCodingPath:
         assert calls == []
         assert out == ref_out
 
-    def test_empty_memories_and_overlaps_emit_nothing(self):
+    def test_empty_memories_run_fallback_search(self):
+        # fallback=false with memories=[] must still reach embedding
+        # recall: the anchor graph having nothing is not proof the
+        # classic index has nothing.
+        searched = []
+
+        def spy(q):
+            searched.append(q)
+            return json.dumps(SAMPLE_RESPONSE)
+
         code, out = _run_b(
             {"prompt": "q", "cwd": "/repo"},
+            search=spy,
+            coding_recall=lambda p, c: _coding_response(),
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        assert searched == ["q"]
+        payload = json.loads(out)
+        ctx_text = payload["hookSpecificOutput"]["additionalContext"]
+        assert "Sarah Chen --[delegates_to]--> Marcus Webb" in ctx_text
+        assert "4 items recalled" in payload["systemMessage"]
+
+    def test_empty_memories_no_match_search_matches_path_a(self):
+        # When the fallback search also finds nothing, the classic
+        # no-match output appears, byte-identical to Path A modulo ms.
+        empty = json.dumps(
+            {"results": {"facts": [], "entities": [], "preferences": []}}
+        )
+        _, ref_out = self._path_a_reference("q", lambda q: empty)
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            search=lambda q: empty,
+            coding_recall=lambda p, c: _coding_response(),
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        norm = lambda text: re.sub(r"in \d+ ms", "in N ms", text)  # noqa: E731
+        assert norm(out) == norm(ref_out)
+        assert "(no memory matches for this prompt)" in out
+
+    def test_empty_memories_failing_search_no_overlaps_emit_nothing(self):
+        # Silent exit survives only when the fallback search yields
+        # nothing renderable and there is no overlap block either.
+        def boom(q):
+            raise ConnectionError("server down")
+
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            search=boom,
             coding_recall=lambda p, c: _coding_response(),
             gather=lambda pl: dict(CTX),
         )
         assert code == 0
         assert out == ""
+
+    def test_empty_memories_with_overlaps_render_overlaps_plus_search(self):
+        resp = _coding_response(overlaps=[_overlap()])
+        code, out = _run_b(
+            {"prompt": "p", "cwd": "/repo"},
+            coding_recall=lambda p, c: resp,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        payload = json.loads(out)
+        ctx_text = payload["hookSpecificOutput"]["additionalContext"]
+        assert ctx_text.index("agents: 1 active nearby") < ctx_text.index(
+            "Sarah Chen --[delegates_to]"
+        )
+        sm = payload["systemMessage"]
+        assert "4 items recalled" in sm
+        assert "1 agents nearby" in sm
 
     @pytest.mark.parametrize("bad", [["not-a-dict"], "junk", 42, {}, {"memories": []}])
     def test_malformed_coding_response_falls_back_to_path_a(self, bad):
@@ -759,7 +846,7 @@ class TestParseContextHeader:
 class TestCodingRecallViaMcp:
     """Transport internals with a faked fastmcp Client (no network)."""
 
-    def _fake_client(self, monkeypatch, payload_text, tool_calls=None):
+    def _fake_client(self, monkeypatch, payload_text, tool_calls=None, tool_args=None):
         import fastmcp
 
         class FakeResult:
@@ -778,6 +865,8 @@ class TestCodingRecallViaMcp:
             async def call_tool(self, name, args):
                 if tool_calls is not None:
                     tool_calls.append(name)
+                if tool_args is not None:
+                    tool_args[name] = args
                 return FakeResult()
 
         monkeypatch.setattr(fastmcp, "Client", FakeClient)
@@ -796,6 +885,16 @@ class TestCodingRecallViaMcp:
         monkeypatch.setattr(recall_hook, "CAPTURE_TIMEOUT", 0.05)
         result = recall_hook.coding_recall_via_mcp("p", dict(CTX))
         assert result == {"memories": [], "fallback": True, "overlaps": []}
+
+    def test_overlap_window_env_reaches_tool_args(self, monkeypatch):
+        recall_json = json.dumps({"memories": [], "fallback": False, "overlaps": []})
+        seen = {}
+        self._fake_client(monkeypatch, recall_json, tool_args=seen)
+        monkeypatch.setattr(recall_hook, "commits_since", lambda cwd, since: [])
+        monkeypatch.setenv("NAM_OVERLAP_WINDOW_HOURS", "6")
+        result = recall_hook.coding_recall_via_mcp("p", dict(CTX))
+        assert result == {"memories": [], "fallback": False, "overlaps": []}
+        assert seen["coding_recall"]["overlap_window_hours"] == 6.0
 
     def test_budget_spent_skips_commit_scan(self, monkeypatch):
         recall_json = json.dumps({"memories": [], "fallback": False, "overlaps": []})
