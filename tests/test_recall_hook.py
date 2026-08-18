@@ -502,6 +502,7 @@ class TestGatherSessionContext:
             "task_key": "MUD-395",
             "agent_id": "sess-9",
             "session_id": "sess-9",
+            "git_budget_spent": False,
         }
 
     def test_env_agent_id_override(self, monkeypatch):
@@ -548,6 +549,7 @@ class TestGatherSessionContext:
         assert ctx is not None
         assert ctx["branch"] is None
         assert ctx["files"] == []
+        assert ctx["git_budget_spent"] is True
 
 
 class TestLookbackSinceIso:
@@ -706,3 +708,106 @@ class TestFormatterRideAlongs:
     def test_overlap_non_string_task_dropped(self):
         text = format_overlap_block([_overlap(task=["MUD-1"])], now=NOW)
         assert "  codex-a is editing src/a.py (just now)" in text
+
+    def test_multiline_memory_text_flattened_to_one_line(self):
+        memories = [
+            {"kind": "Gotcha", "text": "line1\nline2", "files": [], "task": None}
+        ]
+        assert format_coding_memories(memories) == "[gotcha] line1 line2"
+
+
+class TestFallbackSearchFailure:
+    def test_overlap_block_survives_raising_search(self):
+        def boom(q):
+            raise ConnectionError("server down")
+
+        resp = _coding_response(fallback=True, overlaps=[_overlap()])
+        code, out = _run_b(
+            {"prompt": "p", "cwd": "/repo"},
+            search=boom,
+            coding_recall=lambda p, c: resp,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        payload = json.loads(out)
+        ctx_text = payload["hookSpecificOutput"]["additionalContext"]
+        assert "agents: 1 active nearby" in ctx_text
+        assert "Sarah Chen" not in ctx_text
+        sm = payload["systemMessage"]
+        assert "0 items recalled" in sm
+        assert "1 agents nearby" in sm
+
+
+class TestParseContextHeader:
+    def test_pinned_to_header_wording(self):
+        # Regression guard: if _header's wording changes, this breaks and
+        # _CONTEXT_HEADER_RE must change with it.
+        from agent_memory_mcp.hook.recall_hook import _header, _parse_context_header
+
+        count, body = _parse_context_header(_header(7, 3.0) + "\n\nA --[b]--> C")
+        assert count == 7
+        assert body == "A --[b]--> C"
+
+    def test_unrecognized_header_degrades_to_zero(self):
+        from agent_memory_mcp.hook.recall_hook import _parse_context_header
+
+        count, body = _parse_context_header("something else\nbody")
+        assert count == 0
+        assert body == "body"
+
+
+class TestCodingRecallViaMcp:
+    """Transport internals with a faked fastmcp Client (no network)."""
+
+    def _fake_client(self, monkeypatch, payload_text, tool_calls=None):
+        import fastmcp
+
+        class FakeResult:
+            data = payload_text
+
+        class FakeClient:
+            def __init__(self, transport, timeout=None):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def call_tool(self, name, args):
+                if tool_calls is not None:
+                    tool_calls.append(name)
+                return FakeResult()
+
+        monkeypatch.setattr(fastmcp, "Client", FakeClient)
+
+    def test_hanging_capture_does_not_destroy_recall(self, monkeypatch):
+        import asyncio as aio
+
+        recall_json = json.dumps({"memories": [], "fallback": True, "overlaps": []})
+        self._fake_client(monkeypatch, recall_json)
+
+        async def hang(client, ctx, commits):
+            await aio.sleep(10)
+
+        monkeypatch.setattr(recall_hook, "commits_since", lambda cwd, since: [])
+        monkeypatch.setattr(recall_hook, "record_activity_via_mcp", hang)
+        monkeypatch.setattr(recall_hook, "CAPTURE_TIMEOUT", 0.05)
+        result = recall_hook.coding_recall_via_mcp("p", dict(CTX))
+        assert result == {"memories": [], "fallback": True, "overlaps": []}
+
+    def test_budget_spent_skips_commit_scan(self, monkeypatch):
+        recall_json = json.dumps({"memories": [], "fallback": False, "overlaps": []})
+        calls = []
+        self._fake_client(monkeypatch, recall_json, tool_calls=calls)
+        scans = []
+        monkeypatch.setattr(
+            recall_hook, "commits_since", lambda cwd, since: scans.append(cwd) or []
+        )
+        result = recall_hook.coding_recall_via_mcp(
+            "p", dict(CTX, git_budget_spent=True)
+        )
+        assert scans == []
+        assert result == {"memories": [], "fallback": False, "overlaps": []}
+        assert calls == ["coding_recall", "record_coding_activity"]
