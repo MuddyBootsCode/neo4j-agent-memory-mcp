@@ -503,23 +503,20 @@ def register_tools(mcp: FastMCP) -> None:
                 # touched files), so the anchored types (decisions, gotchas,
                 # dead ends) all drop by design; the hook capture path is the
                 # source of anchored coding memory. Only preferences flow here.
-                extraction_counts = None
+                preferences_stored = None
                 try:
                     from agent_memory_mcp.extraction.coding import (
                         extract_coding_memory,
                     )
-                    from agent_memory_mcp.extraction.unified import persist_memory
+                    from agent_memory_mcp.extraction.unified import (
+                        persist_preferences,
+                    )
 
                     coding = await extract_coding_memory(
                         content, branch="", task=None, files=[]
                     )
-                    extraction = {
-                        "entities": [],
-                        "relations": [],
-                        "preferences": coding["preferences"],
-                    }
-                    extraction_counts = await persist_memory(
-                        client, str(message.id), extraction
+                    preferences_stored = await persist_preferences(
+                        client, coding["preferences"]
                     )
                 except Exception as extract_err:
                     logger.warning("Coding-memory extraction failed: %s", extract_err)
@@ -530,10 +527,12 @@ def register_tools(mcp: FastMCP) -> None:
                     "id": str(message.id),
                     "session_id": session_id,
                 }
-                if extraction_counts:
-                    result_data["entities"] = extraction_counts["entities"]
-                    result_data["relations"] = extraction_counts["relations"]
-                    result_data["preferences"] = extraction_counts["preferences"]
+                if preferences_stored is not None:
+                    # Entities/relations died with the org ontology; the keys
+                    # stay (always 0) so the response shape remains stable.
+                    result_data["entities"] = 0
+                    result_data["relations"] = 0
+                    result_data["preferences"] = preferences_stored
 
             elif memory_type == "preference":
                 if not category:

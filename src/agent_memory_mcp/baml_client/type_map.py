@@ -37,23 +37,11 @@ type_map = {
     "types.ExtractedDecision": types.ExtractedDecision,
     "stream_types.ExtractedDecision": stream_types.ExtractedDecision,
 
-    "types.ExtractedEntity": types.ExtractedEntity,
-    "stream_types.ExtractedEntity": stream_types.ExtractedEntity,
-
     "types.ExtractedGotcha": types.ExtractedGotcha,
     "stream_types.ExtractedGotcha": stream_types.ExtractedGotcha,
 
-    "types.ExtractedPreference": types.ExtractedPreference,
-    "stream_types.ExtractedPreference": stream_types.ExtractedPreference,
-
     "types.ExtractedReasoningStep": types.ExtractedReasoningStep,
     "stream_types.ExtractedReasoningStep": stream_types.ExtractedReasoningStep,
-
-    "types.ExtractedRelation": types.ExtractedRelation,
-    "stream_types.ExtractedRelation": stream_types.ExtractedRelation,
-
-    "types.MemoryExtraction": types.MemoryExtraction,
-    "stream_types.MemoryExtraction": stream_types.MemoryExtraction,
 
     "types.ReasoningChainInput": types.ReasoningChainInput,
     "stream_types.ReasoningChainInput": stream_types.ReasoningChainInput,
@@ -67,7 +55,5 @@ type_map = {
     "types.TemporalExtraction": types.TemporalExtraction,
     "stream_types.TemporalExtraction": stream_types.TemporalExtraction,
 
-
-    "types.EntityType": types.EntityType,
 
 }

@@ -78,21 +78,16 @@ class TestNodeIntegrity:
             f"Entities missing type: {[r['name'] for r in rows]}"
         )
 
-    async def test_entity_types_are_valid(self, populated_graph):
-        """Entity types should be from the unified ontology (POLE+O + domain types)."""
-        from agent_memory_mcp.baml_client.types import EntityType
-
+    async def test_message_extraction_creates_no_entities(self, populated_graph):
+        """The org entity ontology is retired: message storage extracts only
+        preferences (coding-memory pivot), so no Entity nodes may appear."""
         client = populated_graph
-        valid_types = {t.value for t in EntityType}
-
         rows = await client.graph.execute_read(
-            "MATCH (e:Entity) RETURN DISTINCT e.type AS type", {},
+            "MATCH (e:Entity) RETURN e.name AS name, e.type AS type", {},
         )
-        actual_types = {r["type"] for r in rows}
-        invalid = actual_types - valid_types
-        assert len(invalid) == 0, (
-            f"Invalid entity types found: {invalid}. "
-            f"Valid types: {valid_types}"
+        assert len(rows) == 0, (
+            f"Message extraction created entities after the org-ontology "
+            f"retirement: {[(r['name'], r['type']) for r in rows]}"
         )
 
     async def test_no_duplicate_entities(self, populated_graph):

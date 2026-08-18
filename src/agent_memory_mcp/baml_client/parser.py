@@ -35,12 +35,6 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCodingMemory", llm_response=llm_response, mode="request")
         return typing.cast(types.CodingMemoryExtraction, __result__)
 
-    def ExtractMemory(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.MemoryExtraction:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="request")
-        return typing.cast(types.MemoryExtraction, __result__)
-
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.ReasoningExtractionOutput:
@@ -78,12 +72,6 @@ class LlmStreamParser:
     ) -> stream_types.CodingMemoryExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCodingMemory", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.CodingMemoryExtraction, __result__)
-
-    def ExtractMemory(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.MemoryExtraction:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.MemoryExtraction, __result__)
 
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},

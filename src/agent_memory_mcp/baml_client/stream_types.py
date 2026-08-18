@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (17)
+# Generated classes (13)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -68,26 +68,11 @@ class ExtractedDecision(BaseModel):
     concerns_task: typing.Optional[bool] = Field(default=None, description='True if the decision is about context.task')
     confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
 
-class ExtractedEntity(BaseModel):
-    name: typing.Optional[str] = Field(default=None, description='The entity name as it appears in text')
-    type: typing.Optional[types.EntityType] = None
-    subtype: typing.Optional[str] = Field(default=None, description='Optional finer type, e.g. VEHICLE for OBJECT, STANDUP for MEETING')
-    status: typing.Optional[str] = Field(default=None, description='Lifecycle status when stated: e.g. scheduled/completed/cancelled (meetings), active/blocked/done/planned (tasks, projects), draft/validated/refuted (research)')
-    priority: typing.Optional[str] = Field(default=None, description='Priority when stated: critical, high, medium, low')
-    date: typing.Optional[str] = Field(default=None, description='A date/time associated with the entity, ISO 8601 (YYYY-MM-DD) preferred')
-    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
-
 class ExtractedGotcha(BaseModel):
     text: typing.Optional[str] = Field(default=None, description='The constraint, one sentence, imperative where possible')
     anchor_files: typing.List[str] = Field(description='Subset of context.files this gotcha is about; empty if none apply')
     concerns_task: typing.Optional[bool] = Field(default=None, description='True if the gotcha is about context.task')
     confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
-
-class ExtractedPreference(BaseModel):
-    category: typing.Optional[str] = Field(default=None, description='Preference category: food, music, tech, communication, style, etc.')
-    preference: typing.Optional[str] = Field(default=None, description='The preference statement')
-    context: typing.Optional[str] = Field(default=None, description='When/where this preference applies')
-    confidence: typing.Optional[float] = Field(default=None, description='Preference confidence from 0.0 to 1.0')
 
 class ExtractedReasoningStep(BaseModel):
     thought: typing.Optional[str] = Field(default=None, description='The reasoning or hypothesis behind the action — WHY it was done')
@@ -95,17 +80,6 @@ class ExtractedReasoningStep(BaseModel):
     observation: typing.Optional[str] = Field(default=None, description='What was learned or observed from the action')
     alternatives_considered: typing.Optional[str] = Field(default=None, description='Other approaches that were weighed and rejected')
     confidence: typing.Optional[float] = Field(default=None, description='Confidence in the extraction, 0.0 to 1.0')
-
-class ExtractedRelation(BaseModel):
-    source: typing.Optional[str] = Field(default=None, description='Source entity name (must match an extracted entity)')
-    target: typing.Optional[str] = Field(default=None, description='Target entity name (must match an extracted entity)')
-    relation_type: typing.Optional[str] = Field(default=None, description='UPPER_SNAKE_CASE relationship. Generic: WORKS_AT, MEMBER_OF, LIVES_IN, LOCATED_IN, OWNS, KNOWS, PART_OF. Meetings: ATTENDED, PRESENTED, DISCUSSED, DECIDED_IN, SCHEDULED_FOR, ASSIGNED_TO, FOLLOW_UP, RESULTED_IN. Projects: DEPENDS_ON, BLOCKED_BY, DELIVERS, CONTRIBUTES_TO, TRACKS. Research: CITES, SUPPORTS, CONTRADICTS, BUILDS_ON, EXPLORES, PRODUCED_BY, VALIDATES. Cross-domain: ABOUT, REFERENCES.')
-    confidence: typing.Optional[float] = Field(default=None, description='Relation confidence from 0.0 to 1.0')
-
-class MemoryExtraction(BaseModel):
-    entities: typing.List["ExtractedEntity"]
-    relations: typing.List["ExtractedRelation"]
-    preferences: typing.List["ExtractedPreference"]
 
 class ReasoningChainInput(BaseModel):
     task: typing.Optional[str] = Field(default=None, description='The task that was solved')

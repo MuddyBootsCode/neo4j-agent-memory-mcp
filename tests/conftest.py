@@ -34,25 +34,6 @@ def _no_ambient_anthropic_key(monkeypatch):
 
 
 @pytest.fixture
-def mock_baml_extract(monkeypatch):
-    """Patch the unified BAML extraction to avoid live API calls.
-
-    Returns (mock_fn, mock_result) so tests can configure return values.
-    """
-    mock_result = MagicMock()
-    mock_result.entities = []
-    mock_result.relations = []
-    mock_result.preferences = []
-
-    mock_fn = AsyncMock(return_value=mock_result)
-    monkeypatch.setattr(
-        "agent_memory_mcp.baml_client.async_client.b.ExtractMemory",
-        mock_fn,
-    )
-    return mock_fn, mock_result
-
-
-@pytest.fixture
 def mock_baml_reasoning(monkeypatch):
     """Patch BAML reasoning extraction and synthesis to avoid live API calls.
 

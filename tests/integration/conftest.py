@@ -214,7 +214,7 @@ def _apply_patches():
     Goes through the single fail-loud bootstrap (R27) — the same path every
     server construction uses. Safe to call multiple times — idempotent. The
     extractor patch routes ``add_message(extract_entities=True)`` through the
-    same unified ExtractMemory call the MCP tools use (gated on
+    same ExtractCodingMemory call the MCP tools use (gated on
     NAM_EXTRACTION__BAML_ENABLED, read at extractor-creation time). Does NOT
     set env vars — use _EnvContext for that.
     """
