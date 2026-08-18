@@ -7,14 +7,23 @@ import pytest
 
 
 class FakeGraph:
-    """Captures (query, params) pairs and serves canned read results in order."""
+    """Captures (query, params) pairs and serves canned read results in order.
 
-    def __init__(self, read_results=None):
+    ``fail_on_write`` makes the Nth (1-indexed) execute_write raise before
+    the call is recorded, so ``writes`` holds only the successful writes.
+    """
+
+    def __init__(self, read_results=None, fail_on_write=None):
         self.writes = []
         self.reads = []
         self._read_results = list(read_results or [])
+        self._fail_on_write = fail_on_write
+        self._write_calls = 0
 
     async def execute_write(self, query, params):
+        self._write_calls += 1
+        if self._fail_on_write == self._write_calls:
+            raise RuntimeError("neo4j write failed")
         self.writes.append((query, params))
         return []
 
@@ -156,6 +165,40 @@ class TestRecordCodingActivity:
         assert result["commits"] == 50
         assert result["skipped_commits"] == 0
 
+    async def test_write_failure_reports_partial_progress(
+        self, monkeypatch, mock_ctx
+    ):
+        # Writes: 1=session, 2=editing, 3=first sha'd commit (fails).
+        graph = FakeGraph(fail_on_write=3)
+        tools = _register(monkeypatch, graph)
+
+        result_str = await tools["record_coding_activity"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            edited_files=["a.py", "b.py"],
+            commits=[
+                {"message": "no sha"},
+                {"sha": "abc123", "message": "m", "files": []},
+                {"sha": "def456", "message": "m", "files": []},
+            ],
+        )
+
+        # The writes before the failure landed and are recorded.
+        assert len(graph.writes) == 2
+        assert "CodingSession" in graph.writes[0][0]
+        assert "EDITING" in graph.writes[1][0]
+
+        result = json.loads(result_str)
+        assert result == {
+            "error": "neo4j write failed",
+            "edited_files": 2,
+            "commits": 0,
+            "skipped_commits": 1,
+        }
+
 
 class TestCodingRecall:
     async def test_memories_with_files(self, monkeypatch, mock_ctx):
@@ -255,6 +298,10 @@ class TestCodingRecall:
         assert len(graph.reads) == 2
         overlap_query, overlap_params = graph.reads[1]
         assert "a2.id <> $agent_id" in overlap_query
+        # Anchored from the data, not an all-agents scan.
+        assert "(f:CodeFile {repo: $repo})<-[e:EDITING]-" in overlap_query
+        assert "<-[w:WORKING_ON]-" in overlap_query
+        assert "LIMIT 20" in overlap_query
         assert overlap_params["window"] == 6.0
         assert overlap_params["agent_id"] == "agent-1"
 
@@ -295,7 +342,6 @@ class TestCodingRecall:
 
         for query, _params in graph.writes + graph.reads:
             assert sentinel not in query
-
 
 class TestServerRegistration:
     def test_create_mcp_server_registers_coding_tools(self):
