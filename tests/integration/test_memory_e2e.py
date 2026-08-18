@@ -41,8 +41,15 @@ def tools(memory_client, monkeypatch):
     return mcp, MagicMock()
 
 
-async def test_message_store_extracts_and_search_finds(tools, cypher_session):
-    """Storing a message extracts entities and search retrieves them."""
+async def test_message_store_extracts_preference_and_search_finds(
+    tools, cypher_session
+):
+    """Storing a message persists its stated preference; search retrieves it.
+
+    Pivot semantics (MUD-395): message storage extracts only preferences —
+    entities and relations died with the org ontology, and anchored coding
+    memory comes from the hook capture path instead.
+    """
     mcp, ctx = tools
     session_id = f"e2e-{uuid.uuid4()}"
 
@@ -51,29 +58,41 @@ async def test_message_store_extracts_and_search_finds(tools, cypher_session):
             ctx,
             memory_type="message",
             content=(
-                "Sarah Chen works at DataVault Solutions in Denver. "
-                "She is leading the graph migration project."
+                "Please remember: I prefer rebase over merge commits when "
+                "updating feature branches."
             ),
             session_id=session_id,
         )
     )
     assert stored["stored"] is True
-    assert stored["entities"] >= 2  # at least Sarah Chen + DataVault
+    assert stored["entities"] == 0
+    assert stored["relations"] == 0
+    assert stored["preferences"] >= 1, (
+        f"Expected the stated rebase preference to persist, got {stored}"
+    )
 
-    # The message and its entities are in the graph.
+    # The message is in the graph; no Entity nodes were created.
+    counts = await cypher_session.execute_read(
+        "MATCH (m:Message) RETURN count(m) AS c", {}
+    )
+    assert counts[0]["c"] == 1
     counts = await cypher_session.execute_read(
         "MATCH (e:Entity) RETURN count(e) AS c", {}
     )
-    assert counts[0]["c"] >= 2
+    assert counts[0]["c"] == 0
 
-    # Search finds the stored content.
+    # Search finds the stored preference.
     found = json.loads(
         await _tool(mcp, "memory_search")(
-            ctx, query="Who works at DataVault?", memory_types=["messages", "entities"]
+            ctx,
+            query="rebase over merge commits when updating feature branches",
+            memory_types=["preferences"],
         )
     )
-    names = {e["name"].lower() for e in found["results"].get("entities", [])}
-    assert any("sarah" in n or "datavault" in n for n in names)
+    prefs = found["results"].get("preferences", [])
+    assert any("rebase" in p["preference"].lower() for p in prefs), (
+        f"Expected the rebase preference in search results, got {prefs}"
+    )
 
 
 async def test_fact_roundtrip_and_point_in_time(tools):

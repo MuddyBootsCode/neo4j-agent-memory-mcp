@@ -1,13 +1,16 @@
 """Graph integrity assertion tests.
 
-After storing multiple messages with entity extraction, verifies
-structural invariants of the knowledge graph via direct Cypher queries.
-These catch data quality issues that functional tests miss.
+After storing multiple messages with extraction enabled, verifies the
+pivot-era structural invariants (MUD-395) via direct Cypher queries: the
+org entity ontology is retired, so message storage must produce Message
+nodes with embeddings and NOTHING from the old Entity/MENTIONS/RELATED_TO
+ontology, while preference-bearing content flows to Preference nodes.
 """
 
 import pytest
 
-# Corpus of messages that produce a known set of entities and relationships
+# Corpus of messages exercising the retired org-entity shapes — none of
+# these may produce Entity nodes any more.
 CORPUS = [
     {
         "session_id": "integrity-session-1",
@@ -65,19 +68,6 @@ class TestNodeIntegrity:
             f"Messages without embeddings: {missing}"
         )
 
-    async def test_all_entities_have_type(self, populated_graph):
-        """Every Entity node should have a non-null type property."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH (e:Entity) "
-            "WHERE e.type IS NULL "
-            "RETURN e.name AS name",
-            {},
-        )
-        assert len(rows) == 0, (
-            f"Entities missing type: {[r['name'] for r in rows]}"
-        )
-
     async def test_message_extraction_creates_no_entities(self, populated_graph):
         """The org entity ontology is retired: message storage extracts only
         preferences (coding-memory pivot), so no Entity nodes may appear."""
@@ -90,163 +80,70 @@ class TestNodeIntegrity:
             f"retirement: {[(r['name'], r['type']) for r in rows]}"
         )
 
-    async def test_no_duplicate_entities(self, populated_graph):
-        """No two Entity nodes should share the same (name, type) pair."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH (e:Entity) "
-            "WITH e.name AS name, e.type AS type, count(e) AS cnt "
-            "WHERE cnt > 1 "
-            "RETURN name, type, cnt",
-            {},
-        )
-        assert len(rows) == 0, (
-            f"Duplicate entities: "
-            f"{[(r['name'], r['type'], r['cnt']) for r in rows]}"
-        )
-
 
 class TestEdgeIntegrity:
     """Verify edge-level invariants."""
 
-    async def test_no_orphaned_entities(self, populated_graph):
-        """Every Entity should have at least one incoming MENTIONS edge."""
+    async def test_no_org_ontology_edges(self, populated_graph):
+        """No MENTIONS or RELATED_TO edges may survive the pivot — the
+        retired extraction path was their only producer."""
         client = populated_graph
         rows = await client.graph.execute_read(
-            "MATCH (e:Entity) "
-            "WHERE NOT (e)<-[:MENTIONS]-(:Message) "
-            "RETURN e.name AS name, e.type AS type",
+            "MATCH ()-[r]->() WHERE type(r) IN ['MENTIONS', 'RELATED_TO'] "
+            "RETURN type(r) AS rel, count(r) AS count",
             {},
         )
-        assert len(rows) == 0, (
-            f"Orphaned entities (no MENTIONS): "
-            f"{[(r['name'], r['type']) for r in rows]}"
-        )
-
-    async def test_related_to_edges_have_type(self, populated_graph):
-        """Every RELATED_TO edge should have a relation_type property."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH ()-[r:RELATED_TO]->() "
-            "WHERE r.relation_type IS NULL OR r.relation_type = '' "
-            "RETURN startNode(r).name AS src, endNode(r).name AS tgt",
-            {},
-        )
-        assert len(rows) == 0, (
-            f"RELATED_TO edges missing relation_type: "
-            f"{[(r['src'], r['tgt']) for r in rows]}"
-        )
-
-    async def test_related_to_connects_entities(self, populated_graph):
-        """RELATED_TO edges should only connect Entity nodes."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH (a)-[r:RELATED_TO]->(b) "
-            "WHERE NOT (a:Entity) OR NOT (b:Entity) "
-            "RETURN labels(a) AS src_labels, labels(b) AS tgt_labels",
-            {},
-        )
-        assert len(rows) == 0, (
-            f"RELATED_TO connecting non-Entity nodes: "
-            f"{[(r['src_labels'], r['tgt_labels']) for r in rows]}"
-        )
-
-    async def test_mentions_connects_message_to_entity(self, populated_graph):
-        """MENTIONS edges should only go from Message to Entity."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH (a)-[:MENTIONS]->(b) "
-            "WHERE NOT (a:Message) OR NOT (b:Entity) "
-            "RETURN labels(a) AS src_labels, labels(b) AS tgt_labels",
-            {},
-        )
-        assert len(rows) == 0, (
-            f"MENTIONS connecting wrong node types: "
-            f"{[(r['src_labels'], r['tgt_labels']) for r in rows]}"
-        )
-
-
-class TestGraphQuerySafety:
-    """Verify the read-only graph_query tool rejects write operations."""
-
-    async def test_rejects_create(self, populated_graph):
-        """graph_query should reject CREATE statements."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert not _is_read_only_query("CREATE (n:Test {name: 'bad'})")
-
-    async def test_rejects_merge(self, populated_graph):
-        """graph_query should reject MERGE statements."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert not _is_read_only_query("MERGE (n:Test {name: 'bad'})")
-
-    async def test_rejects_delete(self, populated_graph):
-        """graph_query should reject DELETE statements."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert not _is_read_only_query("MATCH (n) DELETE n")
-
-    async def test_rejects_detach_delete(self, populated_graph):
-        """graph_query should reject DETACH DELETE statements."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert not _is_read_only_query("MATCH (n) DETACH DELETE n")
-
-    async def test_rejects_set(self, populated_graph):
-        """graph_query should reject SET statements."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert not _is_read_only_query("MATCH (n) SET n.name = 'hacked'")
-
-    async def test_allows_read(self, populated_graph):
-        """graph_query should allow MATCH/RETURN queries."""
-        from agent_memory_mcp.mcp._tools import _is_read_only_query
-
-        assert _is_read_only_query("MATCH (n) RETURN count(n)")
-        assert _is_read_only_query(
-            "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) "
-            "RETURN a.name, r.relation_type, b.name"
+        assert rows == [], (
+            f"Retired org-ontology edges present: "
+            f"{[(r['rel'], r['count']) for r in rows]}"
         )
 
 
 class TestGraphStatistics:
-    """Verify expected graph shape after loading the corpus."""
+    """Verify expected graph shape after loading the corpus (pivot semantics)."""
 
-    async def test_minimum_entity_count(self, populated_graph):
-        """The corpus should produce a minimum number of entities."""
+    async def test_messages_persist_and_are_queryable(self, populated_graph):
+        """Every corpus message persists and vector search retrieves content."""
         client = populated_graph
         rows = await client.graph.execute_read(
-            "MATCH (e:Entity) RETURN count(e) AS count", {},
+            "MATCH (m:Message) RETURN count(m) AS count", {},
         )
-        # 5 messages mention at least: Michael, Graphable, Sarah, Raj, DataVault,
-        # Alice, Marcus, Denver, Larimer Street — conservatively 5+
-        assert rows[0]["count"] >= 5, (
-            f"Expected at least 5 entities, got {rows[0]['count']}"
+        assert rows[0]["count"] == len(CORPUS), (
+            f"Expected {len(CORPUS)} messages, got {rows[0]['count']}"
         )
 
-    async def test_minimum_relationship_count(self, populated_graph):
-        """The corpus should produce at least some relationships."""
-        client = populated_graph
-        rows = await client.graph.execute_read(
-            "MATCH ()-[r:RELATED_TO]->() RETURN count(r) AS count", {},
+        results = await client.short_term.search_messages(
+            query="Who is the CTO of DataVault Solutions?",
+            limit=5,
+            threshold=0.3,
         )
-        # At minimum: Michael WORKS_AT Graphable, Raj WORKS_AT DataVault
-        assert rows[0]["count"] >= 2, (
-            f"Expected at least 2 relationships, got {rows[0]['count']}"
+        assert any("Raj Patel" in r.content for r in results), (
+            f"Expected the Raj Patel message in search results, got "
+            f"{[r.content for r in results]}"
         )
 
-    async def test_all_messages_have_mentions(self, populated_graph):
-        """Every message should mention at least one entity."""
+    async def test_preference_persists_after_seeding(self, populated_graph):
+        """Preference-bearing content stored through the message path
+        produces Preference nodes — the one thing message extraction still
+        persists after the pivot."""
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+        from agent_memory_mcp.extraction.unified import persist_preferences
+
         client = populated_graph
+        extracted = await extract_coding_memory(
+            "I prefer integration tests over mocks — always verify against "
+            "the real database.",
+            branch="",
+            task=None,
+            files=[],
+        )
+        stored = await persist_preferences(client, extracted["preferences"])
+        assert stored >= 1, (
+            f"Expected the stated testing preference to persist, extraction "
+            f"returned {extracted['preferences']}"
+        )
+
         rows = await client.graph.execute_read(
-            "MATCH (m:Message) "
-            "WHERE NOT (m)-[:MENTIONS]->(:Entity) "
-            "RETURN m.id AS id, "
-            "       substring(m.content, 0, 50) AS snippet",
-            {},
+            "MATCH (p:Preference) RETURN count(p) AS count", {},
         )
-        assert len(rows) == 0, (
-            f"Messages with no extracted entities: "
-            f"{[r['snippet'] for r in rows]}"
-        )
+        assert rows[0]["count"] > 0

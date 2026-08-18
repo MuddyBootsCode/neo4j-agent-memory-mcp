@@ -94,7 +94,11 @@ function ExtractCodingMemory(transcript: string, context: CodingSessionContext) 
     {{ _.role("user") }}
     <session_context>
     Branch: {{ context.branch | replace("</session_context", "<\\session_context") | replace("</session_transcript", "<\\session_transcript") }}
-    Task: {% if context.task %}{{ context.task | replace("</session_context", "<\\session_context") | replace("</session_transcript", "<\\session_transcript") }}{% else %}unknown{% endif %}
+    {% if context.task %}
+    Task: {{ context.task | replace("</session_context", "<\\session_context") | replace("</session_transcript", "<\\session_transcript") }}
+    {% else %}
+    Task: unknown
+    {% endif %}
     Files touched this session:
     {% for file in context.files %}
     - {{ file | replace("</session_context", "<\\session_context") | replace("</session_transcript", "<\\session_transcript") }}
