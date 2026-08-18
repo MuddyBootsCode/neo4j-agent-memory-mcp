@@ -29,12 +29,19 @@ _COMMIT_HEADER_RE = re.compile(r"^[0-9a-f]{40}\x1f")
 
 def _git(repo_dir: str, *args: str) -> str | None:
     """Run one git command; stdout on success, None on any failure."""
+    # Drop ambient repo overrides so ``-C repo_dir`` always wins, and decode
+    # lossily so non-UTF8 output degrades per character, not per call.
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_INDEX_FILE")
+    }
     try:
         result = subprocess.run(
             ["git", "-C", repo_dir, *args],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=GIT_TIMEOUT,
+            env=env,
         )
     except Exception:
         return None
@@ -68,27 +75,29 @@ def repo_name(repo_dir: str) -> str | None:
 def edited_files(repo_dir: str, cap: int = 50) -> list[str]:
     """Files touched in the working tree: dirty, staged, and untracked.
 
-    Order-preserving union of ``git diff --name-only HEAD``,
-    ``git diff --name-only --cached``, and untracked files, truncated to
-    ``cap`` entries. Empty list when any of the three calls fails.
+    One ``git status --porcelain`` call: entries whose X or Y column marks a
+    staged or unstaged change, plus ``??`` untracked entries. Renames yield
+    the new path. Order-preserving dedup, truncated to ``cap`` entries.
+    Empty list on failure.
     """
-    outputs = []
-    for args in (
-        ("diff", "--name-only", "HEAD"),
-        ("diff", "--name-only", "--cached"),
-        ("ls-files", "--others", "--exclude-standard"),
-    ):
-        out = _git(repo_dir, *args)
-        if out is None:
-            return []
-        outputs.append(out)
+    out = _git(repo_dir, "status", "--porcelain")
+    if out is None:
+        return []
 
     seen: dict[str, None] = {}
-    for out in outputs:
-        for line in out.splitlines():
-            path = line.strip()
-            if path:
-                seen.setdefault(path, None)
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        x, y, path = line[0], line[1], line[3:]
+        untracked = x == "?" and y == "?"
+        changed = x not in " ?" or y not in " ?"
+        if not (untracked or changed):
+            continue
+        # Rename entries read "old -> new"; the new path is the live one.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if path:
+            seen.setdefault(path, None)
     return list(seen)[:cap]
 
 
@@ -101,6 +110,7 @@ def commits_since(repo_dir: str, since_iso: str, cap: int = 20) -> list[dict[str
     out = _git(
         repo_dir,
         "log",
+        "--no-show-signature",
         f"--since={since_iso}",
         f"--max-count={cap}",
         "--pretty=format:%H%x1f%cI%x1f%s",
