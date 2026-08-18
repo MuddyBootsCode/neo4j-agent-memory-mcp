@@ -97,6 +97,21 @@ class BamlAsyncClient:
                 "new_fact_subject": new_fact_subject,"new_fact_predicate": new_fact_predicate,"new_fact_object": new_fact_object,"candidates": candidates,
             })
             return typing.cast(types.ContradictionResult, __result__.cast_to(types, types, stream_types, False, __runtime__))
+    async def ExtractCodingMemory(self, transcript: str,context: types.CodingSessionContext,
+        baml_options: BamlCallOptions = {},
+    ) -> types.CodingMemoryExtraction:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            __stream__ = self.stream.ExtractCodingMemory(transcript=transcript,context=context,
+                baml_options=baml_options)
+            return await __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = await self.__options.merge_options(baml_options).call_function_async(function_name="ExtractCodingMemory", args={
+                "transcript": transcript,"context": context,
+            })
+            return typing.cast(types.CodingMemoryExtraction, __result__.cast_to(types, types, stream_types, False, __runtime__))
     async def ExtractMemory(self, text: str,
         baml_options: BamlCallOptions = {},
     ) -> types.MemoryExtraction:
@@ -178,6 +193,18 @@ class BamlStreamClient:
           lambda x: typing.cast(types.ContradictionResult, x.cast_to(types, types, stream_types, False, __runtime__)),
           __ctx__,
         )
+    def ExtractCodingMemory(self, transcript: str,context: types.CodingSessionContext,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.CodingMemoryExtraction, types.CodingMemoryExtraction]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_async_stream(function_name="ExtractCodingMemory", args={
+            "transcript": transcript,"context": context,
+        })
+        return baml_py.BamlStream[stream_types.CodingMemoryExtraction, types.CodingMemoryExtraction](
+          __result__,
+          lambda x: typing.cast(stream_types.CodingMemoryExtraction, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.CodingMemoryExtraction, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
     def ExtractMemory(self, text: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[stream_types.MemoryExtraction, types.MemoryExtraction]:
@@ -241,6 +268,13 @@ class BamlHttpRequestClient:
             "new_fact_subject": new_fact_subject,"new_fact_predicate": new_fact_predicate,"new_fact_object": new_fact_object,"candidates": candidates,
         }, mode="request")
         return __result__
+    async def ExtractCodingMemory(self, transcript: str,context: types.CodingSessionContext,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ExtractCodingMemory", args={
+            "transcript": transcript,"context": context,
+        }, mode="request")
+        return __result__
     async def ExtractMemory(self, text: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -282,6 +316,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="DetectContradictions", args={
             "new_fact_subject": new_fact_subject,"new_fact_predicate": new_fact_predicate,"new_fact_object": new_fact_object,"candidates": candidates,
+        }, mode="stream")
+        return __result__
+    async def ExtractCodingMemory(self, transcript: str,context: types.CodingSessionContext,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ExtractCodingMemory", args={
+            "transcript": transcript,"context": context,
         }, mode="stream")
         return __result__
     async def ExtractMemory(self, text: str,

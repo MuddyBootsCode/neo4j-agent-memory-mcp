@@ -61,7 +61,7 @@ class EntityType(str, Enum):
     EXPERIMENT = "EXPERIMENT"
 
 # #########################################################################
-# Generated classes (11)
+# Generated classes (17)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -71,10 +71,40 @@ class CandidateFact(BaseModel):
     object: str
     confidence: float
 
+class CodingMemoryExtraction(BaseModel):
+    decisions: typing.List["ExtractedDecision"]
+    gotchas: typing.List["ExtractedGotcha"]
+    dead_ends: typing.List["ExtractedDeadEnd"]
+    preferences: typing.List["ExtractedCodingPreference"]
+
+class CodingSessionContext(BaseModel):
+    branch: str = Field(description='The git branch the session is working on')
+    task: typing.Optional[str] = Field(default=None, description='Ticket ID (e.g. MUD-395) or the stated goal of the session; null if unknown')
+    files: typing.List[str] = Field(description='File paths this session has touched so far')
+
 class ContradictionResult(BaseModel):
     contradicted_indices: typing.List[int] = Field(description='Indices of candidate facts that are contradicted by the new fact. Empty if no contradictions.')
     contradiction_type: str = Field(description='Type: \'direct_supersession\' (same subject, updated value), \'negation\' (opposite claim), \'refinement\' (more specific version), or \'none\'')
     reasoning: str = Field(description='Brief explanation of why these facts are contradicted')
+
+class ExtractedCodingPreference(BaseModel):
+    category: str = Field(description='Preference category: e.g. testing, style, tooling, workflow')
+    preference: str = Field(description='The stated preference about how to work')
+    confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedDeadEnd(BaseModel):
+    attempt: str = Field(description='What was tried')
+    why_failed: str = Field(description='Why it failed, as stated in the transcript')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this dead end is about; empty if none apply')
+    concerns_task: bool = Field(description='True if the dead end is about context.task')
+    confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedDecision(BaseModel):
+    text: str = Field(description='The decision as one sentence: chose X over Y')
+    reason: str = Field(description='Why, as stated in the transcript')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this decision is about; empty if none apply')
+    concerns_task: bool = Field(description='True if the decision is about context.task')
+    confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
 
 class ExtractedEntity(BaseModel):
     name: str = Field(description='The entity name as it appears in text')
@@ -83,6 +113,12 @@ class ExtractedEntity(BaseModel):
     status: typing.Optional[str] = Field(default=None, description='Lifecycle status when stated: e.g. scheduled/completed/cancelled (meetings), active/blocked/done/planned (tasks, projects), draft/validated/refuted (research)')
     priority: typing.Optional[str] = Field(default=None, description='Priority when stated: critical, high, medium, low')
     date: typing.Optional[str] = Field(default=None, description='A date/time associated with the entity, ISO 8601 (YYYY-MM-DD) preferred')
+    confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedGotcha(BaseModel):
+    text: str = Field(description='The constraint, one sentence, imperative where possible')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this gotcha is about; empty if none apply')
+    concerns_task: bool = Field(description='True if the gotcha is about context.task')
     confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
 
 class ExtractedPreference(BaseModel):
