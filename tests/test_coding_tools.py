@@ -351,3 +351,290 @@ class TestServerRegistration:
         names = {t.name for t in mcp._tool_manager._tools.values()}
         assert "record_coding_activity" in names
         assert "coding_recall" in names
+        assert "capture_session_memory" in names
+
+
+def _extraction(**overrides):
+    """A canned extract_coding_memory result, tweakable per test."""
+    result = {
+        "decisions": [
+            {
+                "text": "use uv everywhere",
+                "reason": "lockfile reproducibility",
+                "anchor_files": ["a.py"],
+                "concerns_task": True,
+                "confidence": 0.9,
+            },
+            {
+                "text": "keep hooks thin",
+                "reason": "fail-open budget",
+                "anchor_files": ["b.py"],
+                "concerns_task": False,
+                "confidence": 0.8,
+            },
+        ],
+        "gotchas": [
+            {
+                "text": "pytest asyncio_mode is auto here",
+                "anchor_files": ["a.py", "b.py"],
+                "concerns_task": False,
+                "confidence": 0.7,
+            }
+        ],
+        "dead_ends": [
+            {
+                "attempt": "tried asyncio.gather",
+                "why_failed": "write ordering matters",
+                "anchor_files": [],
+                "concerns_task": True,
+                "confidence": 0.7,
+            }
+        ],
+        "preferences": [
+            {
+                "category": "tooling",
+                "preference": "prefers uv over pip",
+                "confidence": 0.8,
+            }
+        ],
+        "anchor_rate": 0.8,
+        "dropped_unanchored": 1,
+    }
+    result.update(overrides)
+    return result
+
+
+def _stub_extract(monkeypatch, result=None, exc=None):
+    """Replace extract_coding_memory in the tool module; returns call log."""
+    calls = []
+
+    async def fake(transcript, *, branch, task, files):
+        calls.append(
+            {"transcript": transcript, "branch": branch, "task": task, "files": files}
+        )
+        if exc is not None:
+            raise exc
+        return result if result is not None else _extraction()
+
+    monkeypatch.setattr(
+        "agent_memory_mcp.mcp._coding_tools.extract_coding_memory", fake
+    )
+    return calls
+
+
+class TestCaptureSessionMemory:
+    async def test_happy_path_writes_props_edges_and_counts(
+        self, monkeypatch, mock_ctx
+    ):
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        calls = _stub_extract(monkeypatch)
+
+        result_str = await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="feature/x",
+            transcript="user: do the thing\nassistant: done",
+            task_key="MUD-395",
+            files=["a.py", "b.py"],
+        )
+
+        assert calls == [
+            {
+                "transcript": "user: do the thing\nassistant: done",
+                "branch": "feature/x",
+                "task": "MUD-395",
+                "files": ["a.py", "b.py"],
+            }
+        ]
+
+        # Session upsert first, then one write per kept item.
+        assert len(graph.writes) == 6
+        assert "CodingSession" in graph.writes[0][0]
+        assert "CodeAgent" in graph.writes[0][0]
+
+        # One ISO timestamp shared across every write in the call.
+        ts_values = {params["ts"] for _, params in graph.writes}
+        assert len(ts_values) == 1
+
+        d1_query, d1_params = graph.writes[1]
+        assert "CREATE (m:Decision)" in d1_query
+        # Prop names must match coding_recall's _MEMORIES_QUERY contract.
+        assert set(d1_params["props"]) == {"text", "reason", "confidence"}
+        assert d1_params["props"]["text"] == "use uv everywhere"
+        assert d1_params["anchor_paths"] == ["a.py"]
+        # concerns_task=True carries the task edge.
+        assert d1_params["task_key"] == "MUD-395"
+        assert "CONCERNS" in d1_query
+
+        d2_query, d2_params = graph.writes[2]
+        assert "CREATE (m:Decision)" in d2_query
+        # concerns_task=False: no task edge even though task_key was given.
+        assert "task_key" not in d2_params
+        assert "CONCERNS" not in d2_query
+        assert d2_params["anchor_paths"] == ["b.py"]
+
+        g_query, g_params = graph.writes[3]
+        assert "CREATE (m:Gotcha)" in g_query
+        assert set(g_params["props"]) == {"text", "confidence"}
+        assert g_params["anchor_paths"] == ["a.py", "b.py"]
+
+        de_query, de_params = graph.writes[4]
+        assert "CREATE (m:DeadEnd)" in de_query
+        assert set(de_params["props"]) == {"attempt", "why_failed", "confidence"}
+        assert de_params["task_key"] == "MUD-395"
+
+        p_query, p_params = graph.writes[5]
+        assert "CREATE (m:CodingPreference)" in p_query
+        assert set(p_params["props"]) == {"category", "preference", "confidence"}
+        # Preferences are session-anchored: no files, no task edge.
+        assert p_params["anchor_paths"] == []
+        assert "task_key" not in p_params
+
+        result = json.loads(result_str)
+        assert result == {
+            "stored": 5,
+            "by_kind": {
+                "Decision": 2,
+                "Gotcha": 1,
+                "DeadEnd": 1,
+                "CodingPreference": 1,
+            },
+            "dropped_unanchored": 1,
+            "anchor_rate": 0.8,
+        }
+
+    async def test_empty_transcript_skips_extraction_and_writes(
+        self, monkeypatch, mock_ctx
+    ):
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        calls = _stub_extract(monkeypatch)
+
+        result_str = await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            transcript="   \n  ",
+        )
+
+        assert calls == []
+        assert graph.writes == []
+        assert json.loads(result_str) == {
+            "stored": 0,
+            "dropped_unanchored": 0,
+            "anchor_rate": None,
+        }
+
+    async def test_transcript_tail_and_files_are_capped(self, monkeypatch, mock_ctx):
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        calls = _stub_extract(monkeypatch)
+
+        transcript = ("x" * 90_000) + "TAIL-MARKER"
+        await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            transcript=transcript,
+            files=[f"f{i}.py" for i in range(120)],
+        )
+
+        sent = calls[0]["transcript"]
+        assert len(sent) == 80_000
+        assert sent.endswith("TAIL-MARKER")
+        assert len(calls[0]["files"]) == 100
+
+    async def test_extraction_failure_returns_error_without_writes(
+        self, monkeypatch, mock_ctx
+    ):
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        _stub_extract(monkeypatch, exc=RuntimeError("baml exploded"))
+
+        result_str = await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            transcript="user: hi",
+        )
+
+        assert graph.writes == []
+        result = json.loads(result_str)
+        assert result["error"] == "baml exploded"
+        assert result["stored"] == 0
+
+    async def test_nothing_extracted_skips_session_upsert(
+        self, monkeypatch, mock_ctx
+    ):
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        _stub_extract(
+            monkeypatch,
+            result=_extraction(
+                decisions=[],
+                gotchas=[],
+                dead_ends=[],
+                preferences=[],
+                anchor_rate=None,
+                dropped_unanchored=2,
+            ),
+        )
+
+        result_str = await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            transcript="user: hi",
+        )
+
+        assert graph.writes == []
+        result = json.loads(result_str)
+        assert result == {
+            "stored": 0,
+            "by_kind": {
+                "Decision": 0,
+                "Gotcha": 0,
+                "DeadEnd": 0,
+                "CodingPreference": 0,
+            },
+            "dropped_unanchored": 2,
+            "anchor_rate": None,
+        }
+
+    async def test_write_failure_reports_partial_counts(
+        self, monkeypatch, mock_ctx
+    ):
+        # Writes: 1=session, 2=first decision, 3=second decision (fails).
+        graph = FakeGraph(fail_on_write=3)
+        tools = _register(monkeypatch, graph)
+        _stub_extract(monkeypatch)
+
+        result_str = await tools["capture_session_memory"](
+            mock_ctx,
+            agent_id="agent-1",
+            session_id="sess-1",
+            repo="my-repo",
+            branch="main",
+            transcript="user: hi",
+            task_key="MUD-395",
+            files=["a.py", "b.py"],
+        )
+
+        assert len(graph.writes) == 2
+        result = json.loads(result_str)
+        assert result["error"] == "neo4j write failed"
+        assert result["stored"] == 1
+        assert result["by_kind"]["Decision"] == 1
+        assert result["by_kind"]["Gotcha"] == 0
+        assert result["dropped_unanchored"] == 1

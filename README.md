@@ -222,6 +222,46 @@ payload exits 0 with no output, so a down server never blocks a prompt.
 | `NAM_HOOK_MAX_CHARS` | `4000` | Cap on injected context size |
 | `NAM_HOOK_THRESHOLD` | `0.5` | Similarity cutoff (lower than the server's 0.7) |
 
+### 6. Register the Capture Hook (optional)
+
+The capture hook is the recall hook's write-side counterpart: it runs on
+`SessionEnd`, renders the session transcript, and calls
+`capture_session_memory` — the server extracts decisions, gotchas, and dead
+ends from the transcript and anchors them to the files and task the session
+touched. Without it, the extracted memory plane never gets written.
+
+Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project /path/to/neo4j-agent-memory-mcp nam-capture-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Like the recall hook it needs the server running on HTTP and is fail-open:
+any error, timeout, or malformed payload exits 0. It prints nothing on
+success — `SessionEnd` output is not injected anywhere.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NAM_CAPTURE_DISABLED` | — | Set to `1` to disable the hook (kill switch) |
+| `NAM_HOOK_URL` | `http://127.0.0.1:8080/mcp` | Server endpoint |
+| `NAM_HTTP_TOKEN` | — | Bearer token, if the server requires one |
+| `NAM_CAPTURE_TIMEOUT` | `30` | Whole-call budget, seconds (extraction is an LLM call) |
+| `NAM_AGENT_ID` | payload session id | Stable agent identity |
+| `NAM_TASK_KEY` | inferred from branch | Explicit task key override |
+
 ## MCP Tools
 
 | Tool | Purpose |
