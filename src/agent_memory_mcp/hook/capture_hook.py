@@ -41,6 +41,8 @@ from agent_memory_mcp.capture.git_sweep import (
 
 DEFAULT_URL = "http://127.0.0.1:8080/mcp"
 DEFAULT_CAPTURE_TIMEOUT = 30.0
+# Caps the same payload as _MAX_TRANSCRIPT_CHARS in mcp/_coding_tools.py —
+# one on the sending side, one on the receiving side. Move them together.
 MAX_TRANSCRIPT_CHARS = 80_000
 MAX_FILES_SENT = 100
 
@@ -71,7 +73,12 @@ def extract_transcript_text(path: str, max_chars: int = MAX_TRANSCRIPT_CHARS) ->
 
     Each relevant line is ``{"type": "user"|"assistant", "message":
     {"content": ...}}``; everything else — other line types, malformed
-    JSON, empty content — is skipped. Returns the TAIL of the rendering
+    JSON, empty content — is skipped. Entries marked ``isMeta`` are
+    skipped too: they are injected machinery (local-command caveats,
+    skill files), not conversation, and a multi-KB skill file would
+    evict genuine late-session turns from the tail. ``isSidechain``
+    entries are deliberately INCLUDED — subagent work carries decisions
+    worth extracting. Returns the TAIL of the rendering
     capped at ``max_chars``, cut at a line boundary (whole rendered
     messages), except when a single message alone exceeds the cap, in
     which case its tail is returned. Never raises; a missing or
@@ -86,6 +93,8 @@ def extract_transcript_text(path: str, max_chars: int = MAX_TRANSCRIPT_CHARS) ->
                 except Exception:
                     continue
                 if not isinstance(record, dict):
+                    continue
+                if record.get("isMeta"):
                     continue
                 role = record.get("type")
                 if role not in ("user", "assistant"):

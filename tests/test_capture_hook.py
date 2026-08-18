@@ -68,6 +68,22 @@ class TestExtractTranscriptText:
         text = extract_transcript_text(path)
         assert text == "user: real content"
 
+    def test_meta_entries_excluded_sidechain_included(self, tmp_path):
+        meta = {
+            "type": "user",
+            "isMeta": True,
+            "message": {"content": "<local-command-caveat> " + ("skill text " * 500)},
+        }
+        sidechain = {
+            "type": "assistant",
+            "isSidechain": True,
+            "message": {"content": "subagent decided to use MERGE"},
+        }
+        path = _jsonl(tmp_path / "t.jsonl", [meta, _user("real ask"), sidechain])
+        text = extract_transcript_text(path)
+        assert text == "user: real ask\nassistant: subagent decided to use MERGE"
+        assert "skill text" not in text
+
     def test_tail_cap_cuts_at_line_boundary(self, tmp_path):
         records = [_user(f"message number {i} padded out a bit") for i in range(50)]
         path = _jsonl(tmp_path / "t.jsonl", records)

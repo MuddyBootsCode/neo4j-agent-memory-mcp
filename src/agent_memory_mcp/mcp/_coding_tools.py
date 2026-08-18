@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 # Input caps applied silently; the returned counts reflect what was written.
 _MAX_EDITED_FILES = 100
 _MAX_COMMITS = 50
+# Caps the same payload as MAX_TRANSCRIPT_CHARS in hook/capture_hook.py —
+# one on the receiving side, one on the sending side. Move them together.
 _MAX_TRANSCRIPT_CHARS = 80_000
 _MAX_ANCHOR_FILES = 100
 
@@ -283,7 +285,12 @@ def register_coding_tools(mcp: FastMCP) -> None:
 
         if not transcript or not transcript.strip():
             return json.dumps(
-                {"stored": 0, "dropped_unanchored": 0, "anchor_rate": None}
+                {
+                    "stored": 0,
+                    "by_kind": {kind: 0 for kind in _CAPTURE_KINDS},
+                    "dropped_unanchored": 0,
+                    "anchor_rate": None,
+                }
             )
 
         ts = datetime.now(timezone.utc).isoformat()

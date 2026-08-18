@@ -526,6 +526,12 @@ class TestCaptureSessionMemory:
         assert graph.writes == []
         assert json.loads(result_str) == {
             "stored": 0,
+            "by_kind": {
+                "Decision": 0,
+                "Gotcha": 0,
+                "DeadEnd": 0,
+                "CodingPreference": 0,
+            },
             "dropped_unanchored": 0,
             "anchor_rate": None,
         }
