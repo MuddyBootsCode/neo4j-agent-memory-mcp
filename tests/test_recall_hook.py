@@ -8,10 +8,15 @@ the real formatting/dispatch code without a live server.
 
 import json
 import io
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from agent_memory_mcp.hook.recall_hook import (
     build_hook_output,
+    format_coding_memories,
     format_context,
+    format_overlap_block,
     run,
 )
 
@@ -257,3 +262,149 @@ class TestRun:
         code = run(stdin=stdin, stdout=stdout, search=lambda q: "{}")
         assert code == 0
         assert stdout.getvalue() == ""
+
+
+NOW = datetime(2026, 8, 18, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _seen(**delta):
+    """ISO-8601 timestamp `delta` before the fixed NOW."""
+    return (NOW - timedelta(**delta)).isoformat()
+
+
+def _overlap(**overrides):
+    row = {
+        "agent": "codex-a",
+        "files": ["src/a.py"],
+        "task": "MUD-395",
+        "last_seen": _seen(seconds=10),
+    }
+    row.update(overrides)
+    return row
+
+
+class TestFormatOverlapBlock:
+    def test_empty_overlaps_return_none(self):
+        assert format_overlap_block([]) is None
+        assert format_overlap_block(None) is None
+
+    def test_header_counts_rows(self):
+        text = format_overlap_block([_overlap(), _overlap(agent="codex-b")], now=NOW)
+        lines = text.split("\n")
+        assert lines[0] == "agents: 2 active nearby"
+        assert len(lines) == 3
+
+    @pytest.mark.parametrize(
+        ("last_seen", "expected"),
+        [
+            (_seen(seconds=89), "just now"),
+            (_seen(seconds=91), "1m ago"),
+            (_seen(minutes=89), "89m ago"),
+            (_seen(minutes=91), "1h ago"),
+            (_seen(hours=35), "35h ago"),
+            (_seen(hours=37), "1d ago"),
+        ],
+    )
+    def test_relative_time_buckets(self, last_seen, expected):
+        text = format_overlap_block([_overlap(task=None, last_seen=last_seen)], now=NOW)
+        assert f"({expected})" in text
+
+    @pytest.mark.parametrize("last_seen", ["not-a-date", None, 12345])
+    def test_malformed_last_seen_degrades_to_recently(self, last_seen):
+        text = format_overlap_block([_overlap(task=None, last_seen=last_seen)], now=NOW)
+        assert "(recently)" in text
+
+    def test_naive_timestamp_treated_as_utc(self):
+        naive = (NOW - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+        text = format_overlap_block([_overlap(task=None, last_seen=naive)], now=NOW)
+        assert "(2h ago)" in text
+
+    def test_files_capped_at_three_with_more_marker(self):
+        files = ["src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/e.py"]
+        text = format_overlap_block([_overlap(files=files)], now=NOW)
+        assert "src/a.py, src/b.py, src/c.py, +2 more" in text
+        assert "src/d.py" not in text
+
+    def test_line_with_task_and_files(self):
+        text = format_overlap_block([_overlap()], now=NOW)
+        assert "  codex-a is editing src/a.py (MUD-395, just now)" in text
+
+    def test_null_task_is_omitted(self):
+        text = format_overlap_block([_overlap(task=None)], now=NOW)
+        assert "  codex-a is editing src/a.py (just now)" in text
+
+    def test_empty_files_with_task_says_working_on(self):
+        text = format_overlap_block([_overlap(files=[])], now=NOW)
+        assert "  codex-a is working on MUD-395 (just now)" in text
+
+    def test_thoroughly_malformed_row_does_not_raise(self):
+        rows = [
+            {"agent": 42, "files": "not-a-list", "task": 7, "last_seen": None},
+            {"files": [1, None]},
+            "not-even-a-dict",
+        ]
+        text = format_overlap_block(rows, now=NOW)
+        assert text.startswith("agents: 3 active nearby")
+
+
+class TestFormatCodingMemories:
+    def test_empty_memories_return_none(self):
+        assert format_coding_memories([]) is None
+        assert format_coding_memories(None) is None
+
+    def test_line_with_files_and_task(self):
+        memories = [
+            {
+                "kind": "Decision",
+                "text": "Use fastmcp streamable HTTP",
+                "files": ["src/server.py"],
+                "task": "MUD-395",
+            }
+        ]
+        text = format_coding_memories(memories)
+        assert text == "[decision] Use fastmcp streamable HTTP (src/server.py, MUD-395)"
+
+    def test_line_with_files_only(self):
+        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": ["a.py"], "task": None}]
+        assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz (a.py)"
+
+    def test_line_with_task_only(self):
+        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": "MUD-1"}]
+        assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz (MUD-1)"
+
+    def test_line_with_neither_files_nor_task(self):
+        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": None}]
+        assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz"
+
+    def test_dead_end_kind_maps_to_two_words(self):
+        memories = [{"kind": "DeadEnd", "text": "Tried X", "files": [], "task": None}]
+        assert format_coding_memories(memories) == "[dead end] Tried X"
+
+    def test_unknown_kind_lowercased_as_is(self):
+        memories = [{"kind": "Insight", "text": "Y", "files": [], "task": None}]
+        assert format_coding_memories(memories) == "[insight] Y"
+
+    def test_files_capped_at_three_with_more_marker(self):
+        memories = [
+            {"kind": "Decision", "text": "Z", "files": ["a", "b", "c", "d"], "task": None}
+        ]
+        assert format_coding_memories(memories) == "[decision] Z (a, b, c, +1 more)"
+
+    def test_row_missing_text_is_skipped(self):
+        memories = [
+            {"kind": "Decision", "files": ["a.py"], "task": None},
+            {"kind": "Gotcha", "text": "kept", "files": [], "task": None},
+        ]
+        assert format_coding_memories(memories) == "[gotcha] kept"
+
+    def test_all_rows_skipped_returns_none(self):
+        memories = [{"kind": "Decision"}, {"kind": "Gotcha", "text": ""}]
+        assert format_coding_memories(memories) is None
+
+    def test_thoroughly_malformed_row_does_not_raise(self):
+        memories = [
+            {"kind": 3, "text": "still shown", "files": 7, "task": ["x"]},
+            "not-a-dict",
+        ]
+        text = format_coding_memories(memories)
+        assert "still shown" in text
