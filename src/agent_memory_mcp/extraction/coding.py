@@ -42,7 +42,7 @@ async def extract_coding_memory(
     Returns a dict with ``decisions``, ``gotchas``, ``dead_ends`` and
     ``preferences`` lists plus two anchoring metrics. Each item's
     ``anchor_files`` is reduced to its intersection with ``files`` (exact match
-    after ``.strip()``, model order preserved); a decision/gotcha/dead-end left
+    after ``.strip()``, model order preserved, duplicates removed); a decision/gotcha/dead-end left
     with no anchor files and a falsy ``concerns_task`` is dropped and counted
     in ``dropped_unanchored``. When ``task`` is None, ``concerns_task`` cannot
     rescue an item. ``anchor_rate`` is kept/(kept+dropped) over the three
@@ -68,8 +68,13 @@ async def extract_coding_memory(
     dropped_unanchored = 0
 
     def _sanitize_anchors(anchor_files: list[str]) -> list[str]:
-        stripped = (path.strip() for path in anchor_files)
-        return [path for path in stripped if path in allowed]
+        seen: set[str] = set()
+        sanitized: list[str] = []
+        for path in (a.strip() for a in anchor_files):
+            if path and path in allowed and path not in seen:
+                seen.add(path)
+                sanitized.append(path)
+        return sanitized
 
     def _admit(anchor_files: list[str], concerns_task: bool) -> bool:
         """Count and admit one anchored-type item; False means drop it."""
@@ -89,7 +94,7 @@ async def extract_coding_memory(
                     "text": d.text,
                     "reason": d.reason,
                     "anchor_files": anchors,
-                    "concerns_task": bool(d.concerns_task),
+                    "concerns_task": bool(d.concerns_task) and task is not None,
                     "confidence": _clamp(d.confidence, 0.7),
                 }
             )
@@ -102,7 +107,7 @@ async def extract_coding_memory(
                 {
                     "text": g.text,
                     "anchor_files": anchors,
-                    "concerns_task": bool(g.concerns_task),
+                    "concerns_task": bool(g.concerns_task) and task is not None,
                     "confidence": _clamp(g.confidence, 0.7),
                 }
             )
@@ -116,7 +121,7 @@ async def extract_coding_memory(
                     "attempt": de.attempt,
                     "why_failed": de.why_failed,
                     "anchor_files": anchors,
-                    "concerns_task": bool(de.concerns_task),
+                    "concerns_task": bool(de.concerns_task) and task is not None,
                     "confidence": _clamp(de.confidence, 0.7),
                 }
             )

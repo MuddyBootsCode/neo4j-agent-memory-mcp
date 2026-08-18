@@ -269,3 +269,61 @@ class TestExtractCodingMemory:
         assert result["gotchas"] == []
         assert result["dropped_unanchored"] == 1
         assert result["anchor_rate"] == 0.0
+
+    async def test_duplicate_anchor_paths_deduped_order_preserving(self, monkeypatch):
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
+        self._stub(
+            monkeypatch,
+            decisions=[
+                self._decision(anchor_files=["src/db.py", "src/db.py", "src/app.py"])
+            ],
+        )
+
+        result = await extract_coding_memory(
+            "transcript",
+            branch="main",
+            task="MUD-395",
+            files=self.FILES,
+        )
+
+        assert result["decisions"][0]["anchor_files"] == ["src/db.py", "src/app.py"]
+
+    async def test_blank_files_entry_does_not_admit_whitespace_anchor(self, monkeypatch):
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
+        self._stub(
+            monkeypatch,
+            gotchas=[self._gotcha(anchor_files=["   "], concerns_task=False)],
+        )
+
+        result = await extract_coding_memory(
+            "transcript",
+            branch="main",
+            task="MUD-395",
+            files=["src/app.py", "  "],
+        )
+
+        # The whitespace-only anchor must neither match the blank files entry
+        # nor rescue the item.
+        assert result["gotchas"] == []
+        assert result["dropped_unanchored"] == 1
+        assert result["anchor_rate"] == 0.0
+
+    async def test_kept_item_reports_concerns_task_false_when_task_is_none(self, monkeypatch):
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
+        self._stub(
+            monkeypatch,
+            decisions=[self._decision(anchor_files=["src/db.py"], concerns_task=True)],
+        )
+
+        result = await extract_coding_memory(
+            "transcript",
+            branch="main",
+            task=None,
+            files=self.FILES,
+        )
+
+        assert len(result["decisions"]) == 1
+        assert result["decisions"][0]["concerns_task"] is False
