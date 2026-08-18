@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (11)
+# Generated classes (17)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -33,10 +33,40 @@ class CandidateFact(BaseModel):
     object: typing.Optional[str] = None
     confidence: typing.Optional[float] = None
 
+class CodingMemoryExtraction(BaseModel):
+    decisions: typing.List["ExtractedDecision"]
+    gotchas: typing.List["ExtractedGotcha"]
+    dead_ends: typing.List["ExtractedDeadEnd"]
+    preferences: typing.List["ExtractedCodingPreference"]
+
+class CodingSessionContext(BaseModel):
+    branch: typing.Optional[str] = Field(default=None, description='The git branch the session is working on')
+    task: typing.Optional[str] = Field(default=None, description='Ticket ID (e.g. MUD-395) or the stated goal of the session; null if unknown')
+    files: typing.List[str] = Field(description='File paths this session has touched so far')
+
 class ContradictionResult(BaseModel):
     contradicted_indices: typing.List[int] = Field(description='Indices of candidate facts that are contradicted by the new fact. Empty if no contradictions.')
     contradiction_type: typing.Optional[str] = Field(default=None, description='Type: \'direct_supersession\' (same subject, updated value), \'negation\' (opposite claim), \'refinement\' (more specific version), or \'none\'')
     reasoning: typing.Optional[str] = Field(default=None, description='Brief explanation of why these facts are contradicted')
+
+class ExtractedCodingPreference(BaseModel):
+    category: typing.Optional[str] = Field(default=None, description='Preference category: e.g. testing, style, tooling, workflow')
+    preference: typing.Optional[str] = Field(default=None, description='The stated preference about how to work')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedDeadEnd(BaseModel):
+    attempt: typing.Optional[str] = Field(default=None, description='What was tried')
+    why_failed: typing.Optional[str] = Field(default=None, description='Why it failed, as stated in the transcript')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this dead end is about; empty if none apply')
+    concerns_task: typing.Optional[bool] = Field(default=None, description='True if the dead end is about context.task')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedDecision(BaseModel):
+    text: typing.Optional[str] = Field(default=None, description='The decision as one sentence: chose X over Y')
+    reason: typing.Optional[str] = Field(default=None, description='Why, as stated in the transcript')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this decision is about; empty if none apply')
+    concerns_task: typing.Optional[bool] = Field(default=None, description='True if the decision is about context.task')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
 
 class ExtractedEntity(BaseModel):
     name: typing.Optional[str] = Field(default=None, description='The entity name as it appears in text')
@@ -45,6 +75,12 @@ class ExtractedEntity(BaseModel):
     status: typing.Optional[str] = Field(default=None, description='Lifecycle status when stated: e.g. scheduled/completed/cancelled (meetings), active/blocked/done/planned (tasks, projects), draft/validated/refuted (research)')
     priority: typing.Optional[str] = Field(default=None, description='Priority when stated: critical, high, medium, low')
     date: typing.Optional[str] = Field(default=None, description='A date/time associated with the entity, ISO 8601 (YYYY-MM-DD) preferred')
+    confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
+
+class ExtractedGotcha(BaseModel):
+    text: typing.Optional[str] = Field(default=None, description='The constraint, one sentence, imperative where possible')
+    anchor_files: typing.List[str] = Field(description='Subset of context.files this gotcha is about; empty if none apply')
+    concerns_task: typing.Optional[bool] = Field(default=None, description='True if the gotcha is about context.task')
     confidence: typing.Optional[float] = Field(default=None, description='Extraction confidence from 0.0 to 1.0')
 
 class ExtractedPreference(BaseModel):

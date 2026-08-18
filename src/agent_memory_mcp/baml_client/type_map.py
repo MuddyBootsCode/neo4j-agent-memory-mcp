@@ -19,11 +19,29 @@ type_map = {
     "types.CandidateFact": types.CandidateFact,
     "stream_types.CandidateFact": stream_types.CandidateFact,
 
+    "types.CodingMemoryExtraction": types.CodingMemoryExtraction,
+    "stream_types.CodingMemoryExtraction": stream_types.CodingMemoryExtraction,
+
+    "types.CodingSessionContext": types.CodingSessionContext,
+    "stream_types.CodingSessionContext": stream_types.CodingSessionContext,
+
     "types.ContradictionResult": types.ContradictionResult,
     "stream_types.ContradictionResult": stream_types.ContradictionResult,
 
+    "types.ExtractedCodingPreference": types.ExtractedCodingPreference,
+    "stream_types.ExtractedCodingPreference": stream_types.ExtractedCodingPreference,
+
+    "types.ExtractedDeadEnd": types.ExtractedDeadEnd,
+    "stream_types.ExtractedDeadEnd": stream_types.ExtractedDeadEnd,
+
+    "types.ExtractedDecision": types.ExtractedDecision,
+    "stream_types.ExtractedDecision": stream_types.ExtractedDecision,
+
     "types.ExtractedEntity": types.ExtractedEntity,
     "stream_types.ExtractedEntity": stream_types.ExtractedEntity,
+
+    "types.ExtractedGotcha": types.ExtractedGotcha,
+    "stream_types.ExtractedGotcha": stream_types.ExtractedGotcha,
 
     "types.ExtractedPreference": types.ExtractedPreference,
     "stream_types.ExtractedPreference": stream_types.ExtractedPreference,
