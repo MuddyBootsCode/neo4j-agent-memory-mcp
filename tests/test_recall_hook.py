@@ -8,15 +8,19 @@ the real formatting/dispatch code without a live server.
 
 import json
 import io
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from agent_memory_mcp.hook import recall_hook
 from agent_memory_mcp.hook.recall_hook import (
+    _lookback_since_iso,
     build_hook_output,
     format_coding_memories,
     format_context,
     format_overlap_block,
+    gather_session_context,
     run,
 )
 
@@ -297,6 +301,7 @@ class TestFormatOverlapBlock:
     @pytest.mark.parametrize(
         ("last_seen", "expected"),
         [
+            (_seen(seconds=-7200), "just now"),  # future-dated clock skew
             (_seen(seconds=89), "just now"),
             (_seen(seconds=91), "1m ago"),
             (_seen(minutes=89), "89m ago"),
@@ -365,15 +370,26 @@ class TestFormatCodingMemories:
         assert text == "[decision] Use fastmcp streamable HTTP (src/server.py, MUD-395)"
 
     def test_line_with_files_only(self):
-        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": ["a.py"], "task": None}]
+        memories = [
+            {
+                "kind": "Gotcha",
+                "text": "Neo4j needs tz",
+                "files": ["a.py"],
+                "task": None,
+            }
+        ]
         assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz (a.py)"
 
     def test_line_with_task_only(self):
-        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": "MUD-1"}]
+        memories = [
+            {"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": "MUD-1"}
+        ]
         assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz (MUD-1)"
 
     def test_line_with_neither_files_nor_task(self):
-        memories = [{"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": None}]
+        memories = [
+            {"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": None}
+        ]
         assert format_coding_memories(memories) == "[gotcha] Neo4j needs tz"
 
     def test_dead_end_kind_maps_to_two_words(self):
@@ -386,7 +402,12 @@ class TestFormatCodingMemories:
 
     def test_files_capped_at_three_with_more_marker(self):
         memories = [
-            {"kind": "Decision", "text": "Z", "files": ["a", "b", "c", "d"], "task": None}
+            {
+                "kind": "Decision",
+                "text": "Z",
+                "files": ["a", "b", "c", "d"],
+                "task": None,
+            }
         ]
         assert format_coding_memories(memories) == "[decision] Z (a, b, c, +1 more)"
 
@@ -408,3 +429,280 @@ class TestFormatCodingMemories:
         ]
         text = format_coding_memories(memories)
         assert "still shown" in text
+
+
+# ---------------------------------------------------------------------------
+# Coding path (Task 7): session context gathering + coding_recall composition.
+# All transports are faked; nothing here touches git or a server.
+# ---------------------------------------------------------------------------
+
+CTX = {
+    "cwd": "/repo",
+    "repo": "neo4j-agent-memory-mcp",
+    "branch": "feature/MUD-395",
+    "files": ["src/a.py"],
+    "task_key": "MUD-395",
+    "agent_id": "agent-1",
+    "session_id": "sess-1",
+}
+
+
+def _sample_search(q):
+    return json.dumps(SAMPLE_RESPONSE)
+
+
+def _coding_response(**overrides):
+    resp = {"memories": [], "fallback": False, "overlaps": []}
+    resp.update(overrides)
+    return resp
+
+
+def _run_b(payload, search=None, coding_recall=None, gather=None):
+    stdin = io.StringIO(json.dumps(payload))
+    stdout = io.StringIO()
+    code = run(
+        stdin=stdin,
+        stdout=stdout,
+        search=search
+        if search is not None
+        else (lambda q: json.dumps(SAMPLE_RESPONSE)),
+        coding_recall=coding_recall,
+        gather=gather,
+    )
+    return code, stdout.getvalue()
+
+
+class TestGatherSessionContext:
+    def _stub_git(self, monkeypatch, repo="neo", branch="feature/MUD-395", files=None):
+        monkeypatch.setattr(recall_hook, "repo_name", lambda c: repo)
+        monkeypatch.setattr(recall_hook, "current_branch", lambda c: branch)
+        monkeypatch.setattr(
+            recall_hook, "edited_files", lambda c: list(files or ["a.py"])
+        )
+        monkeypatch.delenv("NAM_AGENT_ID", raising=False)
+        monkeypatch.delenv("NAM_TASK_KEY", raising=False)
+
+    def test_missing_cwd_returns_none(self):
+        assert gather_session_context({}) is None
+        assert gather_session_context({"cwd": ""}) is None
+
+    def test_non_repo_cwd_returns_none(self, monkeypatch):
+        self._stub_git(monkeypatch, repo=None)
+        monkeypatch.setattr(recall_hook, "repo_name", lambda c: None)
+        assert gather_session_context({"cwd": "/not/a/repo"}) is None
+
+    def test_context_fields_from_git(self, monkeypatch):
+        self._stub_git(monkeypatch)
+        ctx = gather_session_context({"cwd": "/x", "session_id": "sess-9"})
+        assert ctx == {
+            "cwd": "/x",
+            "repo": "neo",
+            "branch": "feature/MUD-395",
+            "files": ["a.py"],
+            "task_key": "MUD-395",
+            "agent_id": "sess-9",
+            "session_id": "sess-9",
+        }
+
+    def test_env_agent_id_override(self, monkeypatch):
+        self._stub_git(monkeypatch)
+        monkeypatch.setenv("NAM_AGENT_ID", "codex-7")
+        ctx = gather_session_context({"cwd": "/x", "session_id": "sess-9"})
+        assert ctx["agent_id"] == "codex-7"
+        assert ctx["session_id"] == "sess-9"
+
+    def test_agent_id_defaults_when_no_env_and_no_session(self, monkeypatch):
+        self._stub_git(monkeypatch)
+        ctx = gather_session_context({"cwd": "/x"})
+        assert ctx["agent_id"] == "unknown-agent"
+        assert ctx["session_id"] == "unknown-agent"
+
+    def test_files_capped_at_fifty(self, monkeypatch):
+        self._stub_git(monkeypatch, files=[f"f{i}.py" for i in range(60)])
+        ctx = gather_session_context({"cwd": "/x"})
+        assert len(ctx["files"]) == 50
+
+    def test_gather_exception_returns_none(self, monkeypatch):
+        monkeypatch.setattr(recall_hook, "repo_name", lambda c: 1 / 0)
+        assert gather_session_context({"cwd": "/x"}) is None
+
+    def test_budget_skips_later_collectors(self, monkeypatch):
+        calls = []
+
+        def slow_repo(c):
+            time.sleep(0.05)
+            return "neo"
+
+        monkeypatch.setenv("NAM_HOOK_GIT_BUDGET", "0.01")
+        monkeypatch.delenv("NAM_AGENT_ID", raising=False)
+        monkeypatch.delenv("NAM_TASK_KEY", raising=False)
+        monkeypatch.setattr(recall_hook, "repo_name", slow_repo)
+        monkeypatch.setattr(
+            recall_hook, "current_branch", lambda c: calls.append("branch") or "b"
+        )
+        monkeypatch.setattr(
+            recall_hook, "edited_files", lambda c: calls.append("files") or ["f"]
+        )
+        ctx = gather_session_context({"cwd": "/x", "session_id": "s"})
+        assert calls == []
+        assert ctx is not None
+        assert ctx["branch"] is None
+        assert ctx["files"] == []
+
+
+class TestLookbackSinceIso:
+    def test_default_is_24_hours(self, monkeypatch):
+        monkeypatch.delenv("NAM_CAPTURE_LOOKBACK_HOURS", raising=False)
+        assert _lookback_since_iso(NOW) == (NOW - timedelta(hours=24)).isoformat()
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("NAM_CAPTURE_LOOKBACK_HOURS", "2.5")
+        assert _lookback_since_iso(NOW) == (NOW - timedelta(hours=2.5)).isoformat()
+
+
+class TestRunCodingPath:
+    def _ctx_text(self, out):
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+    def _path_a_reference(self, prompt, search):
+        # No cwd in the payload: the real gather bails, giving pure Path A.
+        return _run({"prompt": prompt}, search=search)
+
+    def test_overlap_block_before_memory_lines(self):
+        resp = _coding_response(
+            memories=[
+                {"kind": "Gotcha", "text": "Neo4j needs tz", "files": [], "task": None}
+            ],
+            overlaps=[_overlap()],
+        )
+        code, out = _run_b(
+            {"prompt": "p", "cwd": "/repo"},
+            coding_recall=lambda p, c: resp,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        payload = json.loads(out)
+        ctx_text = payload["hookSpecificOutput"]["additionalContext"]
+        assert ctx_text.index("agents: 1 active nearby") < ctx_text.index("[gotcha]")
+        sm = payload["systemMessage"]
+        assert "1 items recalled" in sm
+        assert "1 agents nearby" in sm
+
+    def test_fallback_true_routes_to_injected_search(self):
+        searched = []
+
+        def spy(q):
+            searched.append(q)
+            return json.dumps(SAMPLE_RESPONSE)
+
+        resp = _coding_response(fallback=True, overlaps=[_overlap()])
+        code, out = _run_b(
+            {"prompt": "p", "cwd": "/repo"},
+            search=spy,
+            coding_recall=lambda p, c: resp,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        assert searched == ["p"]
+        ctx_text = self._ctx_text(out)
+        assert "Sarah Chen --[delegates_to]--> Marcus Webb" in ctx_text
+        assert ctx_text.index("agents: 1 active nearby") < ctx_text.index(
+            "Sarah Chen --[delegates_to]"
+        )
+        sm = json.loads(out)["systemMessage"]
+        assert "4 items recalled" in sm
+        assert "1 agents nearby" in sm
+
+    def test_coding_recall_none_matches_path_a(self):
+        search = _sample_search
+        ref_code, ref_out = self._path_a_reference("who approves", search)
+        code, out = _run_b(
+            {"prompt": "who approves", "cwd": "/repo"},
+            search=search,
+            coding_recall=lambda p, c: None,
+            gather=lambda pl: dict(CTX),
+        )
+        assert (code, out) == (ref_code, ref_out)
+
+    def test_coding_recall_raises_matches_path_a(self):
+        def boom(p, c):
+            raise ConnectionError("server down")
+
+        search = _sample_search
+        _, ref_out = self._path_a_reference("q", search)
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            search=search,
+            coding_recall=boom,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        assert out == ref_out
+
+    def test_gather_none_skips_coding_recall(self):
+        calls = []
+
+        def cr(p, c):
+            calls.append((p, c))
+            return _coding_response()
+
+        search = _sample_search
+        _, ref_out = self._path_a_reference("q", search)
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            search=search,
+            coding_recall=cr,
+            gather=lambda pl: None,
+        )
+        assert code == 0
+        assert calls == []
+        assert out == ref_out
+
+    def test_empty_memories_and_overlaps_emit_nothing(self):
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            coding_recall=lambda p, c: _coding_response(),
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        assert out == ""
+
+    @pytest.mark.parametrize("bad", [["not-a-dict"], "junk", 42, {}, {"memories": []}])
+    def test_malformed_coding_response_falls_back_to_path_a(self, bad):
+        search = _sample_search
+        _, ref_out = self._path_a_reference("q", search)
+        code, out = _run_b(
+            {"prompt": "q", "cwd": "/repo"},
+            search=search,
+            coding_recall=lambda p, c: bad,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        assert out == ref_out
+
+    def test_char_cap_applies_to_memory_section_only(self, monkeypatch):
+        monkeypatch.setenv("NAM_HOOK_MAX_CHARS", "40")
+        resp = _coding_response(
+            memories=[{"kind": "Gotcha", "text": "x" * 200, "files": [], "task": None}],
+            overlaps=[_overlap()],
+        )
+        code, out = _run_b(
+            {"prompt": "p", "cwd": "/repo"},
+            coding_recall=lambda p, c: resp,
+            gather=lambda pl: dict(CTX),
+        )
+        assert code == 0
+        ctx_text = self._ctx_text(out)
+        assert "codex-a is editing src/a.py" in ctx_text
+        assert "x" * 200 not in ctx_text
+        assert "… (truncated)" in ctx_text
+
+
+class TestFormatterRideAlongs:
+    def test_coding_memory_list_task_dropped(self):
+        memories = [{"kind": "Decision", "text": "T", "files": [], "task": ["MUD-1"]}]
+        assert format_coding_memories(memories) == "[decision] T"
+
+    def test_overlap_non_string_task_dropped(self):
+        text = format_overlap_block([_overlap(task=["MUD-1"])], now=NOW)
+        assert "  codex-a is editing src/a.py (just now)" in text

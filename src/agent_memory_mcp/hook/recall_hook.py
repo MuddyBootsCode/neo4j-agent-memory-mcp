@@ -1,18 +1,34 @@
 """UserPromptSubmit recall hook: push-mode memory injection.
 
-Reads the Claude Code hook payload from stdin, queries the running MCP
-server's ``memory_search`` tool over streamable HTTP, and emits the
-results as ``additionalContext`` so retrieval happens before the model
-sees the prompt (push, not pull — the model never asks).
+Reads the Claude Code hook payload from stdin and injects memory as
+``additionalContext`` so retrieval happens before the model sees the
+prompt (push, not pull — the model never asks). Two paths:
+
+- Coding path: when the payload's ``cwd`` is a git repo, a fast git
+  sweep builds a session context (repo, branch, edited files, task key)
+  and the hook calls ``coding_recall`` — anchor-first coding memories
+  plus warnings about other agents working nearby. The same connection
+  also fires ``record_coding_activity`` (push capture of the session's
+  files and recent commits) as a side effect; its errors are swallowed.
+- Classic path: outside a repo, or whenever the coding path fails or the
+  server says ``fallback``, the hook queries ``memory_search`` and
+  renders compact triples + notes, exactly as before.
 
 Fail-open contract: any error, timeout, or malformed payload exits 0
 with no output. Memory must never block a prompt submit.
 
 Configuration (environment):
-    NAM_HOOK_URL        MCP server URL (default http://127.0.0.1:8080/mcp)
-    NAM_HTTP_TOKEN      Bearer token, if the server requires one
-    NAM_HOOK_TIMEOUT    Whole-call budget in seconds (default 5)
-    NAM_HOOK_MAX_CHARS  Cap on injected context size (default 4000)
+    NAM_HOOK_URL          MCP server URL (default http://127.0.0.1:8080/mcp)
+    NAM_HTTP_TOKEN        Bearer token, if the server requires one
+    NAM_HOOK_TIMEOUT      Whole-call budget in seconds (default 5)
+    NAM_HOOK_MAX_CHARS    Cap on injected context size (default 4000)
+    NAM_AGENT_ID          Stable agent identity; falls back to the
+                          payload's session_id, then "unknown-agent"
+    NAM_HOOK_GIT_BUDGET   Wall-clock budget in seconds for the git sweep
+                          (default 4.0); collectors past it are skipped
+    NAM_CAPTURE_LOOKBACK_HOURS
+                          How far back the push capture looks for
+                          commits (default 24)
 """
 
 from __future__ import annotations
@@ -21,8 +37,16 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, TextIO
+
+from agent_memory_mcp.capture.git_sweep import (
+    commits_since,
+    current_branch,
+    edited_files,
+    infer_task_key,
+    repo_name,
+)
 
 DEFAULT_URL = "http://127.0.0.1:8080/mcp"
 DEFAULT_TIMEOUT = 5.0
@@ -179,8 +203,16 @@ def _relative_time(last_seen: Any, now: datetime) -> str:
     return f"{int(seconds // 86400)}d ago"
 
 
+def _clean_task(task: Any) -> str | None:
+    """A task is rendered only when it is a non-empty string.
+
+    Lists, ints, and other reprs would leak noise into the injection.
+    """
+    return task if isinstance(task, str) and task else None
+
+
 def format_overlap_block(
-    overlaps: list[dict], now: datetime | None = None
+    overlaps: list[dict] | None, now: datetime | None = None
 ) -> str | None:
     """Render coding_recall overlaps as a compact awareness block.
 
@@ -198,8 +230,7 @@ def format_overlap_block(
         if not isinstance(row, dict):
             row = {}
         agent = str(row.get("agent") or "another agent")
-        task = row.get("task")
-        task = str(task) if task else None
+        task = _clean_task(row.get("task"))
         files = _shown_files(row.get("files"))
         when = _relative_time(row.get("last_seen"), now)
         if files:
@@ -212,7 +243,7 @@ def format_overlap_block(
     return "\n".join(lines)
 
 
-def format_coding_memories(memories: list[dict]) -> str | None:
+def format_coding_memories(memories: list[dict] | None) -> str | None:
     """Render coding_recall memories, one line per record.
 
     None when there is nothing to show — including when every row is
@@ -235,8 +266,7 @@ def format_coding_memories(memories: list[dict]) -> str | None:
             label = KIND_LABELS.get(kind, kind.lower())
         else:
             label = "note"
-        task = row.get("task")
-        task = str(task) if task else None
+        task = _clean_task(row.get("task"))
         parts = [p for p in (_shown_files(row.get("files")), task) if p]
         suffix = f" ({', '.join(parts)})" if parts else ""
         lines.append(f"[{label}] {text.strip()}{suffix}")
@@ -298,15 +328,206 @@ def search_via_mcp(prompt: str) -> str:
     return asyncio.run(asyncio.wait_for(_call(), timeout=timeout))
 
 
+# Coding path: git-derived session context feeding the coding_recall /
+# record_coding_activity tools.
+DEFAULT_GIT_BUDGET = 4.0
+DEFAULT_LOOKBACK_HOURS = 24.0
+MAX_FILES_SENT = 50
+# A coding_recall response must carry all of these to be trusted; anything
+# thinner is treated as malformed and the hook falls back to memory_search.
+_CODING_KEYS = frozenset({"memories", "fallback", "overlaps"})
+
+
+def gather_session_context(payload: dict) -> dict | None:
+    """Build the coding-session context from the hook payload's ``cwd``.
+
+    None disables the coding path entirely: missing/empty ``cwd``, a cwd
+    that is not a git repo, or any unexpected error. Each git collector
+    already carries a per-subprocess timeout; NAM_HOOK_GIT_BUDGET bounds
+    the whole sweep — collectors past the budget are skipped, leaving a
+    thinner context rather than a stalled hook.
+    """
+    try:
+        cwd = payload.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            return None
+        budget = float(os.environ.get("NAM_HOOK_GIT_BUDGET", DEFAULT_GIT_BUDGET))
+        deadline = time.perf_counter() + budget
+
+        repo = repo_name(cwd)
+        if repo is None:
+            return None
+        branch = current_branch(cwd) if time.perf_counter() < deadline else None
+        files = edited_files(cwd) if time.perf_counter() < deadline else []
+
+        agent_id = (
+            os.environ.get("NAM_AGENT_ID")
+            or payload.get("session_id")
+            or "unknown-agent"
+        )
+        return {
+            "cwd": cwd,
+            "repo": repo,
+            "branch": branch,
+            "files": list(files)[:MAX_FILES_SENT],
+            "task_key": infer_task_key(branch),
+            "agent_id": agent_id,
+            "session_id": payload.get("session_id") or agent_id,
+        }
+    except Exception:
+        return None
+
+
+def _lookback_since_iso(now: datetime | None = None) -> str:
+    """Push-capture commit horizon: a known-good timestamp computed here.
+
+    Always derived from the current clock — never a stored value, which
+    could be garbage and make git return the whole history.
+    """
+    hours = float(os.environ.get("NAM_CAPTURE_LOOKBACK_HOURS", DEFAULT_LOOKBACK_HOURS))
+    now = now if now is not None else datetime.now(timezone.utc)
+    return (now - timedelta(hours=hours)).isoformat()
+
+
+async def record_activity_via_mcp(client: Any, ctx: dict, commits: list) -> None:
+    """Fire-and-forget push capture over an already-open client session.
+
+    Swallows every error: capture must never cost the recall its result.
+    Skipped on a detached HEAD (no branch) — the server requires one.
+    """
+    if not ctx.get("branch"):
+        return
+    try:
+        await client.call_tool(
+            "record_coding_activity",
+            {
+                "agent_id": ctx["agent_id"],
+                "session_id": ctx["session_id"],
+                "repo": ctx["repo"],
+                "branch": ctx["branch"],
+                "task_key": ctx["task_key"],
+                "edited_files": list(ctx.get("files") or [])[:MAX_FILES_SENT],
+                "commits": commits,
+            },
+        )
+    except Exception:
+        pass
+
+
+def coding_recall_via_mcp(prompt: str, ctx: dict) -> dict | None:
+    """Call coding_recall, then record_coding_activity, on one connection.
+
+    Returns the parsed coding_recall dict, or None on any failure (server
+    down, error payload, timeout) so the caller falls back to
+    memory_search. The push capture piggybacks on the same client session
+    to avoid a second connection setup; its errors are swallowed
+    separately and never affect the returned recall.
+    """
+    import asyncio
+
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    url = os.environ.get("NAM_HOOK_URL", DEFAULT_URL)
+    token = os.environ.get("NAM_HTTP_TOKEN")
+    timeout = float(os.environ.get("NAM_HOOK_TIMEOUT", DEFAULT_TIMEOUT))
+
+    headers = {"Authorization": f"Bearer {token}"} if token else None
+    transport = StreamableHttpTransport(url, headers=headers)
+
+    commits = commits_since(ctx["cwd"], _lookback_since_iso())
+
+    async def _call() -> str | None:
+        async with Client(transport, timeout=timeout) as client:
+            text: str | None = None
+            try:
+                result = await client.call_tool(
+                    "coding_recall",
+                    {
+                        "prompt": prompt,
+                        "agent_id": ctx["agent_id"],
+                        "repo": ctx["repo"],
+                        "files": ctx["files"],
+                        "task_key": ctx["task_key"],
+                    },
+                )
+                text = _extract_text(result)
+            except Exception:
+                text = None
+            await record_activity_via_mcp(client, ctx, commits)
+            return text
+
+    try:
+        raw = asyncio.run(asyncio.wait_for(_call(), timeout=timeout))
+        if raw is None:
+            return None
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict) or "error" in parsed:
+            return None
+        return parsed
+    except Exception:
+        return None
+
+
+def _coding_header(count: int, agents: int, ms: float) -> str:
+    if agents:
+        return f"memory: {count} items recalled, {agents} agents nearby in {ms:.0f} ms"
+    return _header(count, ms)
+
+
+def _truncate_section(text: str, max_chars: int) -> str:
+    """Cap one section by cutting whole lines and appending the marker."""
+    if len(text) <= max_chars:
+        return text
+    budget = max_chars - len(TRUNCATION_MARKER) - 1
+    kept: list[str] = []
+    size = 0
+    for line in text.split("\n"):
+        if size + len(line) + 1 > budget:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    kept.append(TRUNCATION_MARKER)
+    return "\n".join(kept)
+
+
+def _emit_memory_search(
+    prompt: str, search: Callable[[str], str], stdout: TextIO
+) -> None:
+    """Classic path: memory_search + format_context, unchanged behavior."""
+    t0 = time.perf_counter()
+    raw = search(prompt)
+    ms = (time.perf_counter() - t0) * 1000
+
+    response = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(response, dict) or "error" in response:
+        return
+
+    max_chars = int(os.environ.get("NAM_HOOK_MAX_CHARS", DEFAULT_MAX_CHARS))
+    text = format_context(response, ms=ms, max_chars=max_chars)
+    print(json.dumps(build_hook_output(text)), file=stdout)
+
+
 def run(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     search: Callable[[str], str] | None = None,
+    coding_recall: Callable[[str, dict], dict | None] | None = None,
+    gather: Callable[[dict], dict | None] | None = None,
 ) -> int:
-    """Hook entry point. Always returns 0: recall is best-effort."""
+    """Hook entry point. Always returns 0: recall is best-effort.
+
+    In a git repo the coding path runs first (coding_recall + push
+    capture); everywhere else — and on any coding-path failure or a
+    ``fallback`` response — the classic memory_search path answers.
+    """
     stdin = stdin if stdin is not None else sys.stdin
     stdout = stdout if stdout is not None else sys.stdout
     search = search if search is not None else search_via_mcp
+    coding_recall = (
+        coding_recall if coding_recall is not None else coding_recall_via_mcp
+    )
+    gather = gather if gather is not None else gather_session_context
 
     try:
         payload = json.load(stdin)
@@ -315,16 +536,58 @@ def run(
             return 0
 
         t0 = time.perf_counter()
-        raw = search(prompt)
-        ms = (time.perf_counter() - t0) * 1000
+        ctx = gather(payload)
+        response: Any = None
+        if ctx is not None:
+            try:
+                response = coding_recall(prompt, ctx)
+            except Exception:
+                response = None
 
-        response = json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(response, dict) or "error" in response:
+        if not isinstance(response, dict) or not _CODING_KEYS <= response.keys():
+            _emit_memory_search(prompt, search, stdout)
             return 0
 
         max_chars = int(os.environ.get("NAM_HOOK_MAX_CHARS", DEFAULT_MAX_CHARS))
-        text = format_context(response, ms=ms, max_chars=max_chars)
-        print(json.dumps(build_hook_output(text)), file=stdout)
+        overlaps = response.get("overlaps") or []
+        overlap_text = format_overlap_block(overlaps)
+        n_agents = len(overlaps) if overlap_text else 0
+
+        memory_body: str | None
+        count = 0
+        if response.get("fallback"):
+            # Anchor-less recall: the coding graph has nothing to offer,
+            # so the classic search supplies the memory section. Its
+            # header is folded into the combined one.
+            raw = search(prompt)
+            ms = (time.perf_counter() - t0) * 1000
+            sresp = json.loads(raw) if isinstance(raw, str) else raw
+            memory_body = None
+            if isinstance(sresp, dict) and "error" not in sresp:
+                formatted = format_context(sresp, ms=ms, max_chars=max_chars)
+                first, _, rest = formatted.partition("\n")
+                try:
+                    count = int(first.split()[1])
+                except (IndexError, ValueError):
+                    count = 0
+                memory_body = rest.lstrip("\n") or None
+        else:
+            ms = (time.perf_counter() - t0) * 1000
+            memory_body = format_coding_memories(response.get("memories"))
+            if memory_body is not None:
+                # The char cap applies to the memory section only; the
+                # overlap block is an awareness signal and rides ungated.
+                memory_body = _truncate_section(memory_body, max_chars)
+                count = sum(
+                    1 for ln in memory_body.split("\n") if ln != TRUNCATION_MARKER
+                )
+
+        if overlap_text is None and memory_body is None:
+            return 0
+
+        header = _coding_header(count, n_agents, ms)
+        sections = [header] + [s for s in (overlap_text, memory_body) if s]
+        print(json.dumps(build_hook_output("\n\n".join(sections))), file=stdout)
         return 0
     except Exception:
         return 0
