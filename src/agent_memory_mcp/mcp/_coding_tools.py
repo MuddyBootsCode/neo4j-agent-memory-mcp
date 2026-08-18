@@ -1,12 +1,16 @@
-"""MCP tools for the deterministic coding-memory plane.
+"""MCP tools for the coding-memory planes.
 
-Two push-model tools: the recall hook calls them directly before the model
-round trip, so both must be cheap and deterministic — no LLM calls here.
+Three push-model tools. The first two run inside the recall hook before the
+model round trip, so they must be cheap and deterministic — no LLM calls.
+The third runs at session end, where latency is free, and is the one place
+the extracted plane gets written.
 
 - record_coding_activity: write the session/editing/commit facts for a
   coding session via the pure builders in ``capture/cypher.py``.
 - coding_recall: anchor-first read of extracted memories (Decision, Gotcha,
   DeadEnd) plus cross-agent overlap detection.
+- capture_session_memory: run the transcript through ExtractCodingMemory
+  (BAML) and persist the anchored results via ``anchored_memory_write``.
 
 All Cypher in this module is fully parameterized; no user-supplied value is
 ever interpolated into query text.
@@ -22,10 +26,12 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Context
 
 from agent_memory_mcp.capture.cypher import (
+    anchored_memory_write,
     commit_upsert,
     editing_upsert,
     session_upsert,
 )
+from agent_memory_mcp.extraction.coding import extract_coding_memory
 from agent_memory_mcp.mcp._common import get_client
 from agent_memory_mcp.mcp._logging import log_tool_call
 
@@ -37,6 +43,11 @@ logger = logging.getLogger(__name__)
 # Input caps applied silently; the returned counts reflect what was written.
 _MAX_EDITED_FILES = 100
 _MAX_COMMITS = 50
+_MAX_TRANSCRIPT_CHARS = 80_000
+_MAX_ANCHOR_FILES = 100
+
+# Write order for extracted-plane items; also the by_kind key order.
+_CAPTURE_KINDS = ("Decision", "Gotcha", "DeadEnd", "CodingPreference")
 
 # Extracted-memory kinds served by coding_recall (CodingPreference is
 # deliberately excluded from anchor-first recall in v1).
@@ -222,6 +233,159 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     "edited_files": files_written,
                     "commits": commits_written,
                     "skipped_commits": commits_skipped,
+                }
+            )
+
+    @mcp.tool()
+    @log_tool_call
+    async def capture_session_memory(
+        ctx: Context,
+        agent_id: str,
+        session_id: str,
+        repo: str,
+        branch: str,
+        transcript: str,
+        task_key: str | None = None,
+        files: list[str] | None = None,
+    ) -> str:
+        """Extract anchored memories from a session transcript and store them.
+
+        Session-end capture tool — the SessionEnd hook calls this with the
+        rendered transcript and the session's git context. The transcript
+        goes through ExtractCodingMemory (a BAML/LLM call, so this tool is
+        slow); every kept item is written via ``anchored_memory_write``:
+        Decision/Gotcha/DeadEnd with their surviving anchor files as ABOUT
+        edges and a CONCERNS edge only when the item concerns the task,
+        CodingPreference always, session-anchored (MADE_IN) with no file or
+        task edges. Stored props follow coding_recall's read contract:
+        Decision {text, reason, confidence}, Gotcha {text, confidence},
+        DeadEnd {attempt, why_failed, confidence}, CodingPreference
+        {category, preference, confidence}.
+
+        Inputs are capped silently: the transcript at 80,000 chars keeping
+        the TAIL (recent turns matter most), ``files`` at 100 entries. An
+        empty or whitespace transcript returns immediately without calling
+        the extractor.
+
+        One timestamp is shared by every write. The session upsert runs
+        first — but only when extraction kept at least one item, so an
+        empty extraction (or an extraction failure) writes nothing at all.
+        Each write is its own transaction; on error the payload carries
+        the partial progress: {"error", "stored", "by_kind",
+        "dropped_unanchored", "anchor_rate"}. Memory nodes are CREATEd,
+        not MERGEd, so the retry contract is NOT idempotent — a retry
+        after a partial failure may duplicate already-stored items.
+
+        Returns JSON: {"stored", "by_kind", "dropped_unanchored",
+        "anchor_rate"}.
+        """
+        client = get_client(ctx)
+
+        if not transcript or not transcript.strip():
+            return json.dumps(
+                {"stored": 0, "dropped_unanchored": 0, "anchor_rate": None}
+            )
+
+        ts = datetime.now(timezone.utc).isoformat()
+        by_kind = {kind: 0 for kind in _CAPTURE_KINDS}
+        dropped_unanchored = 0
+        anchor_rate = None
+
+        try:
+            extracted = await extract_coding_memory(
+                transcript[-_MAX_TRANSCRIPT_CHARS:],
+                branch=branch,
+                task=task_key,
+                files=list(files or [])[:_MAX_ANCHOR_FILES],
+            )
+            dropped_unanchored = extracted["dropped_unanchored"]
+            anchor_rate = extracted["anchor_rate"]
+
+            # (kind, props, anchor_paths, task_key-or-None), in write order.
+            # concerns_task/anchor_files become edges, never node props.
+            items: list[tuple[str, dict[str, Any], list[str], str | None]] = []
+            for d in extracted["decisions"]:
+                items.append(
+                    (
+                        "Decision",
+                        {
+                            "text": d["text"],
+                            "reason": d["reason"],
+                            "confidence": d["confidence"],
+                        },
+                        d["anchor_files"],
+                        task_key if d.get("concerns_task") else None,
+                    )
+                )
+            for g in extracted["gotchas"]:
+                items.append(
+                    (
+                        "Gotcha",
+                        {"text": g["text"], "confidence": g["confidence"]},
+                        g["anchor_files"],
+                        task_key if g.get("concerns_task") else None,
+                    )
+                )
+            for de in extracted["dead_ends"]:
+                items.append(
+                    (
+                        "DeadEnd",
+                        {
+                            "attempt": de["attempt"],
+                            "why_failed": de["why_failed"],
+                            "confidence": de["confidence"],
+                        },
+                        de["anchor_files"],
+                        task_key if de.get("concerns_task") else None,
+                    )
+                )
+            for p in extracted["preferences"]:
+                items.append(
+                    (
+                        "CodingPreference",
+                        {
+                            "category": p["category"],
+                            "preference": p["preference"],
+                            "confidence": p["confidence"],
+                        },
+                        [],
+                        None,
+                    )
+                )
+
+            if items:
+                # Session first — the memory writes MATCH the session node.
+                query, params = session_upsert(
+                    agent_id, session_id, repo, branch, task_key, ts
+                )
+                await client.graph.execute_write(query, params)
+
+                for kind, props, anchor_paths, item_task_key in items:
+                    query, params = anchored_memory_write(
+                        kind, props, session_id, repo, anchor_paths,
+                        item_task_key, ts,
+                    )
+                    await client.graph.execute_write(query, params)
+                    by_kind[kind] += 1
+
+            return json.dumps(
+                {
+                    "stored": sum(by_kind.values()),
+                    "by_kind": by_kind,
+                    "dropped_unanchored": dropped_unanchored,
+                    "anchor_rate": anchor_rate,
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error in capture_session_memory: {e}")
+            return json.dumps(
+                {
+                    "error": str(e),
+                    "stored": sum(by_kind.values()),
+                    "by_kind": by_kind,
+                    "dropped_unanchored": dropped_unanchored,
+                    "anchor_rate": anchor_rate,
                 }
             )
 
