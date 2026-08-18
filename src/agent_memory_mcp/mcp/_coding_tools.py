@@ -42,12 +42,17 @@ _MAX_COMMITS = 50
 # deliberately excluded from anchor-first recall in v1).
 _RECALL_KINDS = ("Decision", "Gotcha", "DeadEnd")
 
+# The label disjunction is interpolated from _RECALL_KINDS — a fixed module
+# constant, never user input — so this is not an injection surface. It keeps
+# the query and the rendering logic on a single source of truth.
+_KIND_DISJUNCTION = " OR ".join(f"m:{kind}" for kind in _RECALL_KINDS)
+
 # Anchor-first memory read. ``$files`` is always a list (possibly empty) and
 # ``$task_key`` may be null — a null comparison never matches, so each anchor
 # clause degrades to a no-op when its input is absent.
 _MEMORIES_QUERY = """
     MATCH (m)
-    WHERE (m:Decision OR m:Gotcha OR m:DeadEnd)
+    WHERE (__KIND_DISJUNCTION__)
       AND (
         EXISTS {
           MATCH (m)-[:ABOUT]->(f:CodeFile)
@@ -72,38 +77,38 @@ _MEMORIES_QUERY = """
            files,
            head(tasks) AS task,
            toString(m.created_at) AS at
-"""
+""".replace("__KIND_DISJUNCTION__", _KIND_DISJUNCTION)
 
-# Cross-agent overlap read: recent sessions of OTHER agents touching the same
-# files (EDITING) or the same task (WORKING_ON) inside the recency window.
-# Grouped per (agent, session); `last_seen` is the newest qualifying edge.
+# Cross-agent overlap read, anchored from the data: start at the given
+# CodeFiles / WorkTask and traverse to sessions and agents, so the match never
+# scans every (agent)-[:RUNS]->(session) pair. Recent EDITING / WORKING_ON
+# edges (inside the recency window) of OTHER agents qualify. Aggregated to ONE
+# row per agent: the union of overlapping files across that agent's qualifying
+# sessions, with `last_seen` the overall newest qualifying edge.
 _OVERLAPS_QUERY = """
-    MATCH (a2:CodeAgent)-[:RUNS]->(s2:CodingSession)
+    CALL {
+        MATCH (f:CodeFile {repo: $repo})<-[e:EDITING]-(s2:CodingSession)
+        WHERE f.path IN $files
+          AND e.at >= datetime() - duration({hours: $window})
+        RETURN s2, f.path AS path, e.at AS seen
+      UNION ALL
+        MATCH (t:WorkTask)<-[w:WORKING_ON]-(s2:CodingSession)
+        WHERE t.key = $task_key
+          AND w.at >= datetime() - duration({hours: $window})
+        RETURN s2, null AS path, w.at AS seen
+    }
+    MATCH (a2:CodeAgent)-[:RUNS]->(s2)
     WHERE a2.id <> $agent_id
-    OPTIONAL MATCH (s2)-[e:EDITING]->(f:CodeFile)
-    WHERE f.repo = $repo AND f.path IN $files
-      AND e.at >= datetime() - duration({hours: $window})
-    OPTIONAL MATCH (s2)-[w:WORKING_ON]->(t:WorkTask)
-    WHERE t.key = $task_key
-      AND w.at >= datetime() - duration({hours: $window})
-    WITH a2, s2,
-         [p IN collect(DISTINCT f.path) WHERE p IS NOT NULL] AS files,
-         max(e.at) AS file_seen,
-         max(w.at) AS task_seen,
-         count(t) AS task_hits
-    WHERE size(files) > 0 OR task_hits > 0
+    WITH a2,
+         [p IN collect(DISTINCT path) WHERE p IS NOT NULL] AS files,
+         max(CASE WHEN path IS NULL THEN 1 ELSE 0 END) AS task_hit,
+         max(seen) AS last_seen
+    ORDER BY last_seen DESC
+    LIMIT 20
     RETURN a2.id AS agent,
            files,
-           CASE WHEN task_hits > 0 THEN $task_key ELSE null END AS task,
-           toString(
-             CASE
-               WHEN file_seen IS NULL THEN task_seen
-               WHEN task_seen IS NULL THEN file_seen
-               WHEN file_seen >= task_seen THEN file_seen
-               ELSE task_seen
-             END
-           ) AS last_seen
-    ORDER BY agent, last_seen DESC
+           CASE WHEN task_hit = 1 THEN $task_key ELSE null END AS task,
+           toString(last_seen) AS last_seen
 """
 
 
@@ -152,11 +157,21 @@ def register_coding_tools(mcp: FastMCP) -> None:
         returned counts reflect what was written. A commit dict without a
         ``sha`` is skipped and counted in ``skipped_commits``.
 
+        Each write runs in its own transaction, so a failure mid-sequence
+        leaves the earlier writes committed. Every write is MERGE-idempotent,
+        so the recovery contract is: retry the whole call. On error the
+        payload carries the partial progress made before the failure:
+        {"error", "edited_files", "commits", "skipped_commits"}.
+
         Returns JSON: {"session", "edited_files", "commits",
         "skipped_commits"}.
         """
         client = get_client(ctx)
         ts = datetime.now(timezone.utc).isoformat()
+
+        files_written = 0
+        commits_written = 0
+        commits_skipped = 0
 
         try:
             files = list(edited_files or [])[:_MAX_EDITED_FILES]
@@ -168,15 +183,12 @@ def register_coding_tools(mcp: FastMCP) -> None:
             )
             await client.graph.execute_write(query, params)
 
-            files_written = 0
             built = editing_upsert(session_id, repo, files, ts)
             if built is not None:
                 query, params = built
                 await client.graph.execute_write(query, params)
                 files_written = len(files)
 
-            commits_written = 0
-            commits_skipped = 0
             for commit in commit_dicts:
                 sha = commit.get("sha")
                 if not sha:
@@ -204,7 +216,14 @@ def register_coding_tools(mcp: FastMCP) -> None:
 
         except Exception as e:
             logger.error(f"Error in record_coding_activity: {e}")
-            return json.dumps({"error": str(e)})
+            return json.dumps(
+                {
+                    "error": str(e),
+                    "edited_files": files_written,
+                    "commits": commits_written,
+                    "skipped_commits": commits_skipped,
+                }
+            )
 
     @mcp.tool()
     @log_tool_call
