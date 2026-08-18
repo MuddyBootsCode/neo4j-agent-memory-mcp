@@ -240,7 +240,7 @@ Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --project /path/to/neo4j-agent-memory-mcp nam-capture-hook"
+            "command": "uv run --project /path/to/neo4j-agent-memory-mcp neo4j-memory-capture-hook"
           }
         ]
       }
