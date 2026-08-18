@@ -251,7 +251,9 @@ Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
 
 Like the recall hook it needs the server running on HTTP and is fail-open:
 any error, timeout, or malformed payload exits 0. It prints nothing on
-success — `SessionEnd` output is not injected anywhere.
+success — `SessionEnd` output is not injected anywhere. Very long sessions
+are capped to the final 80,000 characters of transcript, so early-session
+decisions may not be captured.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
