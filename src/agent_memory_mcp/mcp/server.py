@@ -315,11 +315,13 @@ try:
             lifespan=lifespan,
         )
 
+        from agent_memory_mcp.mcp._coding_tools import register_coding_tools
         from agent_memory_mcp.mcp._prompts import register_prompts
         from agent_memory_mcp.mcp._resources import register_resources
         from agent_memory_mcp.mcp._tools import register_tools
 
         register_tools(mcp)
+        register_coding_tools(mcp)
         register_resources(mcp)
         register_prompts(mcp)
 
@@ -377,11 +379,13 @@ try:
                 lifespan=_preconnected_lifespan,
             )
 
+            from agent_memory_mcp.mcp._coding_tools import register_coding_tools
             from agent_memory_mcp.mcp._prompts import register_prompts
             from agent_memory_mcp.mcp._resources import register_resources
             from agent_memory_mcp.mcp._tools import register_tools
 
             register_tools(self._mcp)
+            register_coding_tools(self._mcp)
             register_resources(self._mcp)
             register_prompts(self._mcp)
 
