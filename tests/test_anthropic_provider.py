@@ -122,7 +122,7 @@ class TestCallSitesThreadRegistry:
 
         from agent_memory_mcp.extraction.unified import UnifiedBamlExtractor
 
-        await UnifiedBamlExtractor().extract("Sarah delegates to Marcus")
+        await UnifiedBamlExtractor().extract("switched the db driver to asyncpg")
         from baml_py import ClientRegistry
 
         assert isinstance(captured["baml_options"].get("client_registry"), ClientRegistry)

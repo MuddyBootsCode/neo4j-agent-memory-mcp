@@ -3,8 +3,8 @@
 // One pass over a coding-session transcript pulls out the four durable
 // memory types (DECISION / GOTCHA / DEAD_END / PREFERENCE) so a future
 // agent working on the same code inherits what this session learned.
-// Additive to extraction.baml: the org-focused ExtractMemory ontology is
-// untouched.
+// This is THE extraction ontology: the org-focused ExtractMemory ontology
+// (extraction.baml) was removed in MUD-395.
 
 class CodingSessionContext {
   branch string @description("The git branch the session is working on")
