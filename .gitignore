@@ -48,3 +48,4 @@ tests/routing_eval_*_*.json
 
 # uv
 .uv/
+.worktrees/
