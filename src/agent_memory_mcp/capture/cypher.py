@@ -6,9 +6,9 @@ values travel as query parameters; the single exception is the node label in
 :func:`anchored_memory_write`, which is validated against a fixed allowlist
 before interpolation.
 
-Timestamps: callers supply ``ts`` as an ISO 8601 string and queries use
-``datetime($ts)``, never bare ``datetime()``, so writes are reproducible and
-testable.
+Timestamps: callers supply ``ts`` as an ISO 8601 string and queries in this
+module use ``datetime($ts)``, never bare ``datetime()``, so writes are
+reproducible and testable.
 """
 
 from __future__ import annotations

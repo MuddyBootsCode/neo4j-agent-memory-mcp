@@ -177,7 +177,10 @@ class TestCommitsSince:
         # corruption, so also pin the flag in the argv below.
         _run_git(repo, _git_env(tmp_path), "config", "log.showSignature", "true")
         commits = commits_since(str(repo), OLD_SINCE)
-        assert [c["message"] for c in commits] == ["second: add c", "first: add a and b"]
+        assert [c["message"] for c in commits] == [
+            "second: add c",
+            "first: add a and b",
+        ]
         assert commits[0]["files"] == ["c.txt"]
 
     def test_log_invocation_disables_signature_display(
@@ -212,7 +215,18 @@ class TestInferTaskKey:
         assert infer_task_key("", env={}) is None
 
     def test_empty_env_value_does_not_override(self) -> None:
-        assert infer_task_key("feature/MUD-395-pivot", env={"NAM_TASK_KEY": ""}) == "MUD-395"
+        assert (
+            infer_task_key("feature/MUD-395-pivot", env={"NAM_TASK_KEY": ""})
+            == "MUD-395"
+        )
 
     def test_env_override_without_branch(self) -> None:
         assert infer_task_key(None, env={"NAM_TASK_KEY": "MUD-1"}) == "MUD-1"
+
+    def test_branch_fallback_scoped_by_repo(self) -> None:
+        assert infer_task_key("main", env={}, repo="alpha") == "alpha/main"
+
+    def test_ticket_branch_unaffected_by_repo(self) -> None:
+        assert (
+            infer_task_key("feature/MUD-395-pivot", env={}, repo="alpha") == "MUD-395"
+        )
