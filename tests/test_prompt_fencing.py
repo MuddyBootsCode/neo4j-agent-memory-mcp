@@ -63,7 +63,6 @@ def _escape_filter(tag: str) -> str:
 # tag. Every untrusted interpolation in a multi-fence file must escape EVERY
 # tag of that file, so a value in one fence cannot close the other.
 FENCE_TAGS = {
-    "extraction.baml": ("stored_content",),
     "reasoning.baml": ("stored_content",),
     "temporal.baml": ("stored_content",),
     "coding.baml": ("session_context", "session_transcript"),
@@ -81,9 +80,6 @@ ESCAPE_FILTER = _escape_filter("stored_content")
 # candidate.confidence, loop.index) are typed int/float in BAML and cannot
 # contain the delimiter, so they stay bare — see TRUSTED_INTERPOLATIONS.
 UNTRUSTED_INTERPOLATIONS = {
-    "extraction.baml": {
-        "ExtractMemory": {"stored_content": ("text",)},
-    },
     "reasoning.baml": {
         "ExtractReasoning": {"stored_content": ("text",)},
         "SynthesizeExplanation": {
@@ -212,14 +208,6 @@ def _outside_fence(region: str, tags: tuple = ("stored_content",)) -> str:
         close_idx = region.index(_fence_close(tag)) + len(_fence_close(tag))
         region = region[:open_idx] + region[close_idx:]
     return region
-
-
-class TestExtractMemoryFencing:
-    """ExtractMemory (extraction.baml) must fence the raw message text."""
-
-    def test_stored_text_is_fenced(self):
-        region = _prompt_region(_read("extraction.baml"), "ExtractMemory")
-        _assert_fenced_region(region, "text")
 
 
 class TestExtractReasoningFencing:
@@ -421,9 +409,8 @@ class TestFenceDelimiterEscaping:
 class TestTemporalPromptsRoleSeparation:
     """Temporal prompts must push fenced content into a separate user turn.
 
-    Mirrors extraction.baml's precedent: instructions, framing, and
-    ``{{ ctx.output_format }}`` stay in the system portion; the user turn
-    contains nothing but the fenced untrusted content.
+    Instructions, framing, and ``{{ ctx.output_format }}`` stay in the system
+    portion; the user turn contains nothing but the fenced untrusted content.
     """
 
     @pytest.mark.parametrize(
@@ -445,11 +432,6 @@ class TestTemporalPromptsRoleSeparation:
         assert user_turn.startswith(FENCE_OPEN) and user_turn.endswith(
             FENCE_CLOSE
         ), "the user turn must contain nothing but the fenced content block"
-
-    def test_extraction_precedent_is_role_separated_too(self):
-        region = _prompt_region(_read("extraction.baml"), "ExtractMemory")
-        assert ROLE_USER in region
-        assert region.index(ROLE_USER) < region.index(FENCE_OPEN)
 
 
 class TestOfflineRenderedPrompts:
@@ -548,13 +530,12 @@ class TestOfflineRenderedPrompts:
                     branch=value, task=value, files=[value]
                 ),
             )
-        else:  # ExtractMemory, ExtractReasoning
+        else:  # ExtractReasoning
             request = build(text=value)
         return cls._prompt_text(request)
 
     # (function name, {fence tag: payload copies _render puts in that fence})
     CASES = [
-        ("ExtractMemory", {"stored_content": 1}),
         ("ExtractReasoning", {"stored_content": 1}),
         ("SynthesizeExplanation", {"stored_content": 5}),
         ("DetectContradictions", {"stored_content": 6}),

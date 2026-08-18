@@ -37,31 +37,11 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (1)
+# Generated enums (0)
 # #########################################################################
 
-class EntityType(str, Enum):
-    PERSON = "PERSON"
-    ORGANIZATION = "ORGANIZATION"
-    LOCATION = "LOCATION"
-    EVENT = "EVENT"
-    OBJECT = "OBJECT"
-    MEETING = "MEETING"
-    AGENDA_ITEM = "AGENDA_ITEM"
-    ACTION_ITEM = "ACTION_ITEM"
-    DECISION = "DECISION"
-    PROJECT = "PROJECT"
-    TASK = "TASK"
-    MILESTONE = "MILESTONE"
-    DELIVERABLE = "DELIVERABLE"
-    NOTE = "NOTE"
-    FINDING = "FINDING"
-    SOURCE = "SOURCE"
-    TOPIC = "TOPIC"
-    EXPERIMENT = "EXPERIMENT"
-
 # #########################################################################
-# Generated classes (17)
+# Generated classes (13)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -106,26 +86,11 @@ class ExtractedDecision(BaseModel):
     concerns_task: bool = Field(description='True if the decision is about context.task')
     confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
 
-class ExtractedEntity(BaseModel):
-    name: str = Field(description='The entity name as it appears in text')
-    type: EntityType
-    subtype: typing.Optional[str] = Field(default=None, description='Optional finer type, e.g. VEHICLE for OBJECT, STANDUP for MEETING')
-    status: typing.Optional[str] = Field(default=None, description='Lifecycle status when stated: e.g. scheduled/completed/cancelled (meetings), active/blocked/done/planned (tasks, projects), draft/validated/refuted (research)')
-    priority: typing.Optional[str] = Field(default=None, description='Priority when stated: critical, high, medium, low')
-    date: typing.Optional[str] = Field(default=None, description='A date/time associated with the entity, ISO 8601 (YYYY-MM-DD) preferred')
-    confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
-
 class ExtractedGotcha(BaseModel):
     text: str = Field(description='The constraint, one sentence, imperative where possible')
     anchor_files: typing.List[str] = Field(description='Subset of context.files this gotcha is about; empty if none apply')
     concerns_task: bool = Field(description='True if the gotcha is about context.task')
     confidence: float = Field(description='Extraction confidence from 0.0 to 1.0')
-
-class ExtractedPreference(BaseModel):
-    category: str = Field(description='Preference category: food, music, tech, communication, style, etc.')
-    preference: str = Field(description='The preference statement')
-    context: typing.Optional[str] = Field(default=None, description='When/where this preference applies')
-    confidence: float = Field(description='Preference confidence from 0.0 to 1.0')
 
 class ExtractedReasoningStep(BaseModel):
     thought: str = Field(description='The reasoning or hypothesis behind the action — WHY it was done')
@@ -133,17 +98,6 @@ class ExtractedReasoningStep(BaseModel):
     observation: str = Field(description='What was learned or observed from the action')
     alternatives_considered: typing.Optional[str] = Field(default=None, description='Other approaches that were weighed and rejected')
     confidence: float = Field(description='Confidence in the extraction, 0.0 to 1.0')
-
-class ExtractedRelation(BaseModel):
-    source: str = Field(description='Source entity name (must match an extracted entity)')
-    target: str = Field(description='Target entity name (must match an extracted entity)')
-    relation_type: str = Field(description='UPPER_SNAKE_CASE relationship. Generic: WORKS_AT, MEMBER_OF, LIVES_IN, LOCATED_IN, OWNS, KNOWS, PART_OF. Meetings: ATTENDED, PRESENTED, DISCUSSED, DECIDED_IN, SCHEDULED_FOR, ASSIGNED_TO, FOLLOW_UP, RESULTED_IN. Projects: DEPENDS_ON, BLOCKED_BY, DELIVERS, CONTRIBUTES_TO, TRACKS. Research: CITES, SUPPORTS, CONTRADICTS, BUILDS_ON, EXPLORES, PRODUCED_BY, VALIDATES. Cross-domain: ABOUT, REFERENCES.')
-    confidence: float = Field(description='Relation confidence from 0.0 to 1.0')
-
-class MemoryExtraction(BaseModel):
-    entities: typing.List["ExtractedEntity"]
-    relations: typing.List["ExtractedRelation"]
-    preferences: typing.List["ExtractedPreference"]
 
 class ReasoningChainInput(BaseModel):
     task: str = Field(description='The task that was solved')
