@@ -104,8 +104,8 @@ class TestRepoName:
 
 class TestEditedFiles:
     def test_union_of_dirty_staged_untracked(self, repo: Path) -> None:
-        # diff HEAD yields a.txt and b.txt, --cached repeats b.txt (deduped),
-        # untracked adds d.txt. Order preserved from the source commands.
+        # Porcelain output: unstaged a.txt, staged b.txt, untracked d.txt,
+        # in git status order.
         assert edited_files(str(repo)) == ["a.txt", "b.txt", "d.txt"]
 
     def test_cap_respected(self, repo: Path) -> None:
@@ -121,6 +121,15 @@ class TestEditedFiles:
             raise subprocess.TimeoutExpired(cmd="git", timeout=3.0)
 
         monkeypatch.setattr(subprocess, "run", _boom)
+        assert edited_files(str(repo)) == []
+
+    def test_missing_git_binary_returns_empty(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _no_git(*args: object, **kwargs: object) -> None:
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(subprocess, "run", _no_git)
         assert edited_files(str(repo)) == []
 
 
@@ -158,6 +167,33 @@ class TestCommitsSince:
 
     def test_non_repo_returns_empty(self, non_repo: Path) -> None:
         assert commits_since(str(non_repo), OLD_SINCE) == []
+
+    def test_show_signature_config_does_not_corrupt_parse(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        # With log.showSignature=true, GPG lines would interleave in the
+        # pretty output and get misread as filenames; --no-show-signature
+        # must suppress them. Unsigned commits cannot reproduce the
+        # corruption, so also pin the flag in the argv below.
+        _run_git(repo, _git_env(tmp_path), "config", "log.showSignature", "true")
+        commits = commits_since(str(repo), OLD_SINCE)
+        assert [c["message"] for c in commits] == ["second: add c", "first: add a and b"]
+        assert commits[0]["files"] == ["c.txt"]
+
+    def test_log_invocation_disables_signature_display(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        recorded: list[list[str]] = []
+        real_run = subprocess.run
+
+        def _record(cmd: list[str], **kwargs: object):
+            recorded.append(cmd)
+            return real_run(cmd, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", _record)
+        commits_since(str(repo), OLD_SINCE)
+        assert len(recorded) == 1
+        assert "--no-show-signature" in recorded[0]
 
 
 class TestInferTaskKey:
