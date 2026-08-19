@@ -127,6 +127,44 @@ NAM_EMBEDDING_MODEL=amazon.titan-embed-text-v2:0
 NAM_EMBEDDING_DIMENSIONS=1024
 ```
 
+### Local mode: Anthropic API key, no Bedrock
+
+If `ANTHROPIC_API_KEY` is set, the server does not use Bedrock at all:
+extraction (unified pass, temporal, contradiction, reasoning) routes to the
+Anthropic API via a runtime BAML ClientRegistry (`agent_memory_mcp/providers.py`;
+model `claude-opus-5`, override with `NAM_ANTHROPIC_MODEL`), embeddings default
+to local sentence-transformers (`all-MiniLM-L6-v2`, 384 dims — Anthropic has no
+embeddings API), and the startup credential preflight is satisfied by the key
+alone. An explicit `NAM_EMBEDDING_PROVIDER` still wins over the key-derived
+default.
+
+The whole stack runs on compose — Neo4j plus the server in one command:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d   # or put the key in .env
+```
+
+The server listens on `127.0.0.1:8080` (HTTP transport, bearer token
+`NAM_HTTP_TOKEN`, default `local-dev-token`; clients such as the recall hook
+read the same variable). The sentence-transformers model is downloaded on
+first search (~12 s) into the `hf-cache` volume; warm searches run in
+~400 ms. To run Neo4j alone (host-side server workflow):
+`docker compose up -d neo4j`.
+
+Host-side equivalent, without the container:
+
+```bash
+uv sync --extra local   # installs sentence-transformers (torch)
+ANTHROPIC_API_KEY=sk-ant-... NEO4J_PASSWORD=graphmemory \
+  MCP_TRANSPORT=http MCP_PORT=8080 uv run python run_server.py
+```
+
+> ⚠️ **Use a fresh graph.** Local embeddings are 384-dimensional; a graph
+> whose vector indexes were built by Bedrock Titan (1024) will fail every
+> vector query with a dimension mismatch. Wipe the data and drop the
+> `*_embedding_idx` vector indexes (they are recreated at 384 on first use),
+> or run a separate Neo4j volume for local mode.
+
 ### 3. Generate BAML Client
 
 ```bash
@@ -145,6 +183,44 @@ uv run neo4j-memory-mcp
 NAM_HTTP_TOKEN=$(openssl rand -hex 32) \
   uv run neo4j-memory-mcp --transport http --host 0.0.0.0 --port 8082
 ```
+
+### 5. Register the Recall Hook (optional)
+
+`memory_search` is a pull tool: the model has to decide to call it. The recall
+hook makes retrieval push-mode instead — it runs on every `UserPromptSubmit`,
+searches memory with the prompt, and injects compact triples as
+`additionalContext` before the model sees the prompt.
+
+Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project /path/to/neo4j-agent-memory-mcp neo4j-memory-recall-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+It needs the server running on HTTP (`docker compose up -d`, or step 4 with
+`--transport http`). The hook is fail-open: any error, timeout, or malformed
+payload exits 0 with no output, so a down server never blocks a prompt.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NAM_HOOK_URL` | `http://127.0.0.1:8080/mcp` | Server endpoint |
+| `NAM_HTTP_TOKEN` | — | Bearer token, if the server requires one |
+| `NAM_HOOK_TIMEOUT` | `5` | Whole-call budget, seconds |
+| `NAM_HOOK_MAX_CHARS` | `4000` | Cap on injected context size |
+| `NAM_HOOK_THRESHOLD` | `0.5` | Similarity cutoff (lower than the server's 0.7) |
 
 ## MCP Tools
 

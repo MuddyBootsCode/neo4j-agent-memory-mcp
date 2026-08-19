@@ -177,11 +177,14 @@ async def detect_and_invalidate(
             for c in candidates
         ]
 
+        from agent_memory_mcp.providers import default_baml_options
+
         result = await baml.DetectContradictions(
             new_fact_subject=subject,
             new_fact_predicate=predicate,
             new_fact_object=obj,
             candidates=baml_candidates,
+            baml_options=default_baml_options(),
         )
 
         contradicted_indices = result.contradicted_indices or []

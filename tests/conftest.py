@@ -15,6 +15,21 @@ from fastmcp import FastMCP
 from agent_memory_mcp.mcp._tools import register_tools
 
 
+# ── Environment isolation ────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_anthropic_key(monkeypatch):
+    """Keep a developer's exported ANTHROPIC_API_KEY out of the test run.
+
+    The key flips provider selection globally (extraction -> Anthropic API,
+    embeddings -> local sentence-transformers), so without this the suite
+    fails on any machine that has the variable exported. Tests that need
+    Anthropic-direct mode set the key themselves via monkeypatch.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
 # ── BAML Mocking ─────────────────────────────────────────────────────
 
 
