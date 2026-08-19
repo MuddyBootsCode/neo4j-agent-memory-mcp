@@ -638,3 +638,70 @@ class TestMemorySearchDefaultTypes:
         # Traces should be searched by default
         mock_traces.assert_called_once()
         assert "traces" in result["results"]
+
+
+class TestMemorySearchThresholdForwarding:
+    """memory_search must forward its threshold to every branch that accepts one.
+
+    Regression test for MUD-396: the preferences branch called
+    search_preferences() without threshold, so the upstream 0.7 default
+    always applied regardless of what the caller requested.
+    """
+
+    def _make_client(self):
+        mock_messages = AsyncMock(return_value=[])
+        mock_entities = AsyncMock(return_value=[])
+        mock_preferences = AsyncMock(return_value=[])
+        mock_traces = AsyncMock(return_value=[])
+        mock_facts = AsyncMock(return_value=[])
+
+        mock_client = MagicMock()
+        mock_client.short_term.search_messages = mock_messages
+        mock_client.long_term.search_entities = mock_entities
+        mock_client.long_term.search_preferences = mock_preferences
+        mock_client.reasoning.get_similar_traces = mock_traces
+        mock_client.long_term.search_facts = mock_facts
+        mock_client.graph.execute_read = AsyncMock(return_value=[])
+        return mock_client
+
+    async def _run_search(self, monkeypatch, mock_ctx, mock_client, **kwargs):
+        monkeypatch.setattr(
+            "agent_memory_mcp.mcp._tools.get_client",
+            lambda ctx: mock_client,
+        )
+
+        from agent_memory_mcp.mcp._tools import register_tools
+        from fastmcp import FastMCP
+
+        mcp = FastMCP("test")
+        register_tools(mcp)
+
+        tool_fn = None
+        for tool in mcp._tool_manager._tools.values():
+            if tool.name == "memory_search":
+                tool_fn = tool.fn
+                break
+        assert tool_fn is not None
+
+        result_str = await tool_fn(mock_ctx, query="test query", **kwargs)
+        return json.loads(result_str)
+
+    async def test_custom_threshold_forwarded_to_search_preferences(self, monkeypatch, mock_ctx):
+        """A caller-supplied threshold must reach search_preferences."""
+        mock_client = self._make_client()
+
+        await self._run_search(monkeypatch, mock_ctx, mock_client, threshold=0.5)
+
+        mock_client.long_term.search_preferences.assert_called_once()
+        _, kwargs = mock_client.long_term.search_preferences.call_args
+        assert kwargs["threshold"] == 0.5
+
+    async def test_default_threshold_forwarded_to_search_preferences(self, monkeypatch, mock_ctx):
+        """With no threshold argument, the tool's own 0.7 default must still be forwarded."""
+        mock_client = self._make_client()
+
+        await self._run_search(monkeypatch, mock_ctx, mock_client)
+
+        mock_client.long_term.search_preferences.assert_called_once()
+        _, kwargs = mock_client.long_term.search_preferences.call_args
+        assert kwargs["threshold"] == 0.7

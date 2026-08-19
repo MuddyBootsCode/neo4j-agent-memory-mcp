@@ -276,6 +276,7 @@ def register_tools(mcp: FastMCP) -> None:
                 entities = await client.long_term.search_entities(
                     query=query,
                     limit=limit,
+                    threshold=threshold,
                 )
                 results["entities"] = [
                     {
@@ -293,6 +294,7 @@ def register_tools(mcp: FastMCP) -> None:
                 preferences = await client.long_term.search_preferences(
                     query=query,
                     limit=limit,
+                    threshold=threshold,
                 )
                 results["preferences"] = [
                     {
