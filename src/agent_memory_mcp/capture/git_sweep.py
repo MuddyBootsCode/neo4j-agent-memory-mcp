@@ -62,14 +62,22 @@ def current_branch(repo_dir: str) -> str | None:
 
 
 def repo_name(repo_dir: str) -> str | None:
-    """Basename of the repository's top-level directory, or None."""
-    out = _git(repo_dir, "rev-parse", "--show-toplevel")
+    """Repository identity: basename of the MAIN repository directory, or None.
+
+    Derived from the common .git directory, not --show-toplevel, so every
+    linked worktree of a repo maps to the same identity. This is what makes
+    agent-overlap warnings work across worktree agents: sessions in
+    .worktrees/feature-x and the main checkout must share one repo key.
+    """
+    out = _git(repo_dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if out is None:
         return None
-    toplevel = out.strip()
-    if not toplevel:
+    common = out.strip()
+    if not common:
         return None
-    return os.path.basename(toplevel)
+    # <repo>/.git for normal and linked-worktree cases; a bare repo ends in
+    # .git too rarely enough that basename-of-parent stays correct in practice.
+    return os.path.basename(os.path.dirname(common))
 
 
 def edited_files(repo_dir: str, cap: int = 50) -> list[str]:
