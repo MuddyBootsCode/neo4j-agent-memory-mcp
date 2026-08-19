@@ -149,3 +149,19 @@ class TestPreflight:
 
         with pytest.raises(RuntimeError):
             check_resilient_provider_credentials()
+
+
+class TestOllamaClientOptions:
+    """reasoning_effort control on the local client (MUD-394 finding)."""
+
+    def test_reasoning_effort_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("NAM_OLLAMA_REASONING", raising=False)
+        from agent_memory_mcp.providers import ollama_client_options
+
+        assert ollama_client_options()["reasoning_effort"] == "none"
+
+    def test_reasoning_effort_env_override(self, monkeypatch):
+        monkeypatch.setenv("NAM_OLLAMA_REASONING", "low")
+        from agent_memory_mcp.providers import ollama_client_options
+
+        assert ollama_client_options()["reasoning_effort"] == "low"
