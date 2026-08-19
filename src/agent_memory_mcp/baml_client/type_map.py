@@ -43,6 +43,9 @@ type_map = {
     "types.ExtractedReasoningStep": types.ExtractedReasoningStep,
     "stream_types.ExtractedReasoningStep": stream_types.ExtractedReasoningStep,
 
+    "types.MemoryJudgement": types.MemoryJudgement,
+    "stream_types.MemoryJudgement": stream_types.MemoryJudgement,
+
     "types.ReasoningChainInput": types.ReasoningChainInput,
     "stream_types.ReasoningChainInput": stream_types.ReasoningChainInput,
 
