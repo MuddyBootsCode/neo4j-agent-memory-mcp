@@ -30,6 +30,13 @@ def _stub_coding_baml(monkeypatch, *, decisions=(), gotchas=(), dead_ends=(),
         "agent_memory_mcp.baml_client.async_client.b.ExtractCodingMemory",
         mock_fn,
     )
+    # These tests exercise routing, not the judge screen (MUD-397) — stub
+    # the judge to keep everything so it never makes a real BAML call.
+    judge = SimpleNamespace(supported=True, embedded_directive=False, confidence=0.9)
+    monkeypatch.setattr(
+        "agent_memory_mcp.baml_client.async_client.b.JudgeExtractedMemory",
+        AsyncMock(return_value=judge),
+    )
     return mock_fn
 
 

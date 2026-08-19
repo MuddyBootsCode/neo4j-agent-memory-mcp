@@ -150,6 +150,20 @@ class BamlSyncClient:
                 "text": text,"reference_time": reference_time,
             })
             return typing.cast(types.TemporalExtraction, __result__.cast_to(types, types, stream_types, False, __runtime__))
+    def JudgeExtractedMemory(self, item: str,transcript: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.MemoryJudgement:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            __stream__ = self.stream.JudgeExtractedMemory(item=item,transcript=transcript,
+                baml_options=baml_options)
+            return __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = self.__options.merge_options(baml_options).call_function_sync(function_name="JudgeExtractedMemory", args={
+                "item": item,"transcript": transcript,
+            })
+            return typing.cast(types.MemoryJudgement, __result__.cast_to(types, types, stream_types, False, __runtime__))
     def SynthesizeExplanation(self, chain: types.ReasoningChainInput,
         baml_options: BamlCallOptions = {},
     ) -> str:
@@ -221,6 +235,18 @@ class BamlStreamClient:
           lambda x: typing.cast(types.TemporalExtraction, x.cast_to(types, types, stream_types, False, __runtime__)),
           __ctx__,
         )
+    def JudgeExtractedMemory(self, item: str,transcript: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.MemoryJudgement, types.MemoryJudgement]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_sync_stream(function_name="JudgeExtractedMemory", args={
+            "item": item,"transcript": transcript,
+        })
+        return baml_py.BamlSyncStream[stream_types.MemoryJudgement, types.MemoryJudgement](
+          __result__,
+          lambda x: typing.cast(stream_types.MemoryJudgement, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.MemoryJudgement, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
     def SynthesizeExplanation(self, chain: types.ReasoningChainInput,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[str, str]:
@@ -269,6 +295,13 @@ class BamlHttpRequestClient:
             "text": text,"reference_time": reference_time,
         }, mode="request")
         return __result__
+    def JudgeExtractedMemory(self, item: str,transcript: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="JudgeExtractedMemory", args={
+            "item": item,"transcript": transcript,
+        }, mode="request")
+        return __result__
     def SynthesizeExplanation(self, chain: types.ReasoningChainInput,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -310,6 +343,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTemporalContext", args={
             "text": text,"reference_time": reference_time,
+        }, mode="stream")
+        return __result__
+    def JudgeExtractedMemory(self, item: str,transcript: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="JudgeExtractedMemory", args={
+            "item": item,"transcript": transcript,
         }, mode="stream")
         return __result__
     def SynthesizeExplanation(self, chain: types.ReasoningChainInput,
