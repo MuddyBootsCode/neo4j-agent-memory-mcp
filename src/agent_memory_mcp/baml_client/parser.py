@@ -29,11 +29,11 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="DetectContradictions", llm_response=llm_response, mode="request")
         return typing.cast(types.ContradictionResult, __result__)
 
-    def ExtractMemory(
+    def ExtractCodingMemory(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.MemoryExtraction:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="request")
-        return typing.cast(types.MemoryExtraction, __result__)
+    ) -> types.CodingMemoryExtraction:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCodingMemory", llm_response=llm_response, mode="request")
+        return typing.cast(types.CodingMemoryExtraction, __result__)
 
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -67,11 +67,11 @@ class LlmStreamParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="DetectContradictions", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.ContradictionResult, __result__)
 
-    def ExtractMemory(
+    def ExtractCodingMemory(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.MemoryExtraction:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractMemory", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.MemoryExtraction, __result__)
+    ) -> stream_types.CodingMemoryExtraction:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractCodingMemory", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.CodingMemoryExtraction, __result__)
 
     def ExtractReasoning(
         self, llm_response: str, baml_options: BamlCallOptions = {},

@@ -52,3 +52,29 @@ client<llm> Resilient {
     ]
   }
 }
+
+// --- Local models ---
+// Ollama's OpenAI-compatible endpoint. Opt-in only: never added to the
+// Resilient fallback chain, because a 35B local model silently catching a
+// Bedrock outage is not a failover anyone asked for. Select it explicitly
+// with NAM_LLM_PROVIDER=ollama, which builds this client at runtime with
+// NAM_OLLAMA_MODEL / NAM_OLLAMA_URL overrides.
+//
+// qwen-judge is a derived tag: the upstream coder build ships a red-team
+// operator persona as its SYSTEM, which biases any judging task. The tag
+// keeps the weights and replaces that prompt.
+//
+// max_tokens is the OUTPUT budget, not the context window — the model
+// declares num_ctx 262144 itself. Thinking is on and thinking tokens count
+// against this budget, the same trap providers.py documents for opus-5.
+client<llm> QwenCoder {
+  provider openai-generic
+  retry_policy StandardRetry
+  options {
+    base_url "http://localhost:11434/v1"
+    model "qwen-judge"
+    api_key "ollama"
+    temperature 0
+    max_tokens 32768
+  }
+}

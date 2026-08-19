@@ -44,6 +44,37 @@ BEDROCK_CONFIG = {
     "aws_profile": "graphable-aws",
 }
 
+# Fully-local mode: NAM_TEST_PROVIDER=local runs embeddings on
+# sentence-transformers (384-dim) and expects extraction to be routed to a
+# local model via NAM_LLM_PROVIDER=ollama (read by default_baml_options at
+# call time). Use a dedicated NAM_TEST_DB for local runs — the vector
+# indexes are dimension-typed, so a database seeded with 1024-dim Titan
+# vectors cannot serve 384-dim local embeddings.
+LOCAL_EMBEDDING_CONFIG = {
+    "provider": "sentence_transformers",
+    "model": "all-MiniLM-L6-v2",
+    "dimensions": 384,
+}
+
+
+def _local_mode() -> bool:
+    """Explicit opt-in, mirroring providers.ollama_enabled's philosophy."""
+    return os.environ.get("NAM_TEST_PROVIDER", "").strip().lower() == "local"
+
+
+def _ollama_reachable() -> bool:
+    """Cheap reachability probe for the local extraction endpoint."""
+    import urllib.request
+
+    from agent_memory_mcp.providers import DEFAULT_OLLAMA_URL
+
+    base = os.environ.get("NAM_OLLAMA_URL", DEFAULT_OLLAMA_URL)
+    try:
+        with urllib.request.urlopen(f"{base.rstrip('/')}/models", timeout=3):
+            return True
+    except Exception:
+        return False
+
 
 def _neo4j_uri() -> str:
     return os.environ.get("NEO4J_URI", "bolt://localhost:7687")
@@ -168,6 +199,15 @@ def bedrock_credentials():
     should see a clean pytest SKIP rather than an error raised deep inside
     MemoryClient construction or BAML extraction calls.
     """
+    if _local_mode():
+        if os.environ.get("NAM_LLM_PROVIDER", "").strip().lower() != "ollama":
+            pytest.skip(
+                "NAM_TEST_PROVIDER=local requires NAM_LLM_PROVIDER=ollama so "
+                "extraction routes to the local model"
+            )
+        if not _ollama_reachable():
+            pytest.skip("Ollama endpoint not reachable — skipping local-mode run")
+        return
     if not _bedrock_credentials_available():
         pytest.skip(
             "AWS Bedrock credentials not available for profile "
@@ -180,11 +220,12 @@ def bedrock_credentials():
 # ── Function-scoped: MemoryClient with Bedrock embeddings ───────────
 
 
-_ENV_OVERRIDES = {
-    "NAM_EXTRACTION__BAML_ENABLED": "true",
-    "AWS_REGION": "us-east-1",
-    "AWS_PROFILE": "graphable-aws",
-}
+def _env_overrides() -> dict[str, str]:
+    """Fixture-scoped env: AWS vars only when running against Bedrock."""
+    overrides = {"NAM_EXTRACTION__BAML_ENABLED": "true"}
+    if not _local_mode():
+        overrides.update({"AWS_REGION": "us-east-1", "AWS_PROFILE": "graphable-aws"})
+    return overrides
 
 
 class _EnvContext:
@@ -214,7 +255,7 @@ def _apply_patches():
     Goes through the single fail-loud bootstrap (R27) — the same path every
     server construction uses. Safe to call multiple times — idempotent. The
     extractor patch routes ``add_message(extract_entities=True)`` through the
-    same unified ExtractMemory call the MCP tools use (gated on
+    same ExtractCodingMemory call the MCP tools use (gated on
     NAM_EXTRACTION__BAML_ENABLED, read at extractor-creation time). Does NOT
     set env vars — use _EnvContext for that.
     """
@@ -236,7 +277,9 @@ def _create_client_settings(test_database: str):
             password=_neo4j_auth()[1],
             database=test_database,
         ),
-        embedding=EmbeddingConfig(**BEDROCK_CONFIG),
+        embedding=EmbeddingConfig(
+            **(LOCAL_EMBEDDING_CONFIG if _local_mode() else BEDROCK_CONFIG)
+        ),
     )
 
 
@@ -254,7 +297,7 @@ async def memory_client(test_database, bedrock_credentials):
     _apply_patches()
     from neo4j_agent_memory import MemoryClient
 
-    with _EnvContext(_ENV_OVERRIDES):
+    with _EnvContext(_env_overrides()):
         async with MemoryClient(settings=_create_client_settings(test_database)) as client:
             await client.graph.execute_write("MATCH (n) DETACH DELETE n", {})
             yield client
@@ -272,7 +315,7 @@ async def memory_client_no_wipe(test_database, bedrock_credentials):
     _apply_patches()
     from neo4j_agent_memory import MemoryClient
 
-    with _EnvContext(_ENV_OVERRIDES):
+    with _EnvContext(_env_overrides()):
         async with MemoryClient(settings=_create_client_settings(test_database)) as client:
             yield client
 

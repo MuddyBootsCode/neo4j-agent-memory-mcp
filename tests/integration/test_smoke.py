@@ -92,94 +92,83 @@ class TestFixtureChain:
         assert rows[0]["count"] == 0, "Previous test data should be wiped"
 
 
-class TestEntityExtraction:
-    """Verify BAML entity extraction via Bedrock creates correct graph structure."""
+class TestMessageExtraction:
+    """Verify pivot-era message extraction semantics (MUD-395).
 
-    async def test_extraction_creates_entity_nodes(self, memory_client, cypher_session):
-        """Storing a message with extract_entities=True creates Entity nodes."""
-        await memory_client.short_term.add_message(
+    The org entity ontology is retired: storing a message with extraction
+    enabled runs the coding-memory extraction, which creates NO Entity nodes
+    and NO MENTIONS edges. Preferences stated in message content persist via
+    the ``extract_coding_memory`` → ``persist_preferences`` path — the exact
+    path the ``memory_store`` tool runs (the upstream ``add_message`` hook
+    discards extracted preferences, so persistence lives in our tool layer).
+    """
+
+    async def test_extraction_creates_no_entities_or_mentions(
+        self, memory_client, cypher_session
+    ):
+        """A message stored with extract_entities=True produces no org graph."""
+        msg = await memory_client.short_term.add_message(
             session_id="extraction-smoke",
             role="user",
             content="Michael is VP of Engineering at Graphable.",
             generate_embedding=True,
             extract_entities=True,
         )
+        assert msg.id is not None
 
         entities = await cypher_session.execute_read(
-            "MATCH (e:Entity) RETURN e.name AS name, e.type AS type "
-            "ORDER BY e.name",
-            {},
+            "MATCH (e:Entity) RETURN count(e) AS count", {},
         )
-        names = {e["name"] for e in entities}
-        assert "Michael" in names, f"Expected 'Michael' in {names}"
-        assert "Graphable" in names, f"Expected 'Graphable' in {names}"
-
-        # Verify types
-        type_map = {e["name"]: e["type"] for e in entities}
-        assert type_map["Michael"] == "PERSON"
-        assert type_map["Graphable"] == "ORGANIZATION"
-
-    async def test_extraction_creates_relationships(self, memory_client, cypher_session):
-        """Entity extraction creates RELATED_TO edges with relation_type."""
-        await memory_client.short_term.add_message(
-            session_id="extraction-rels",
-            role="user",
-            content="Sarah works at DataVault Solutions and drives a BMW X5.",
-            generate_embedding=True,
-            extract_entities=True,
-        )
-
-        rels = await cypher_session.execute_read(
-            "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) "
-            "RETURN a.name AS src, r.relation_type AS rel, b.name AS tgt",
-            {},
-        )
-        assert len(rels) >= 1, "Expected at least one relationship"
-
-        # At minimum, WORKS_AT should be extracted
-        rel_tuples = {(r["src"], r["rel"], r["tgt"]) for r in rels}
-        has_works_at = any(
-            src == "Sarah" and "WORK" in rel.upper()
-            for src, rel, tgt in rel_tuples
-        )
-        assert has_works_at, f"Expected WORKS_AT for Sarah, got {rel_tuples}"
-
-    async def test_extraction_creates_mentions_edges(self, memory_client, cypher_session):
-        """Messages link to extracted entities via MENTIONS edges."""
-        msg = await memory_client.short_term.add_message(
-            session_id="extraction-mentions",
-            role="user",
-            content="Raj Patel is the CTO of DataVault.",
-            generate_embedding=True,
-            extract_entities=True,
+        assert entities[0]["count"] == 0, (
+            f"Message extraction created {entities[0]['count']} Entity nodes "
+            "after the org-ontology retirement"
         )
 
         mentions = await cypher_session.execute_read(
-            "MATCH (m:Message {id: $id})-[:MENTIONS]->(e:Entity) "
-            "RETURN e.name AS name",
-            {"id": str(msg.id)},
+            "MATCH ()-[r:MENTIONS]->() RETURN count(r) AS count", {},
         )
-        mentioned_names = {m["name"] for m in mentions}
-        assert "Raj Patel" in mentioned_names or "Raj" in mentioned_names, (
-            f"Expected Raj in mentions, got {mentioned_names}"
+        assert mentions[0]["count"] == 0, (
+            f"Message extraction created {mentions[0]['count']} MENTIONS edges "
+            "after the org-ontology retirement"
         )
 
-    async def test_no_orphaned_entities(self, memory_client, cypher_session):
-        """Every extracted Entity should be linked to at least one Message."""
-        await memory_client.short_term.add_message(
-            session_id="orphan-check",
-            role="user",
-            content="Alice and Bob work at Acme Corp in Denver.",
-            generate_embedding=True,
-            extract_entities=True,
+    async def test_stated_preference_persists_and_is_searchable(
+        self, memory_client, cypher_session
+    ):
+        """A preference stated in message content survives extraction.
+
+        Runs the same extraction + persistence pair the memory_store tool
+        uses for message content, then finds the preference via search.
+        """
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+        from agent_memory_mcp.extraction.unified import persist_preferences
+
+        extracted = await extract_coding_memory(
+            "Please remember: I prefer pytest over unittest for all new "
+            "test code in this project.",
+            branch="",
+            task=None,
+            files=[],
+        )
+        assert len(extracted["preferences"]) >= 1, (
+            "Expected the stated pytest preference to be extracted, got "
+            f"{extracted['preferences']}"
         )
 
-        orphans = await cypher_session.execute_read(
-            "MATCH (e:Entity) "
-            "WHERE NOT (e)<-[:MENTIONS]-(:Message) "
-            "RETURN e.name AS name",
-            {},
+        stored = await persist_preferences(memory_client, extracted["preferences"])
+        assert stored >= 1
+
+        rows = await cypher_session.execute_read(
+            "MATCH (p:Preference) RETURN count(p) AS count", {},
         )
-        assert len(orphans) == 0, (
-            f"Orphaned entities (no MENTIONS edge): {[o['name'] for o in orphans]}"
+        assert rows[0]["count"] >= 1
+
+        prefs = await memory_client.long_term.search_preferences(
+            query="which test framework does the user prefer?",
+            limit=5,
+            threshold=0.2,
+        )
+        assert any("pytest" in p.preference.lower() for p in prefs), (
+            f"Expected the pytest preference in search results, got "
+            f"{[p.preference for p in prefs]}"
         )
