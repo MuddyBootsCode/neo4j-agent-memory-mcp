@@ -101,6 +101,17 @@ class TestRepoName:
     def test_non_repo_returns_none(self, non_repo: Path) -> None:
         assert repo_name(str(non_repo)) is None
 
+    def test_linked_worktree_maps_to_main_repo_name(self, repo: Path) -> None:
+        # Overlap warnings depend on worktree agents sharing one repo key.
+        wt = repo.parent / "wt-feature-x"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", str(wt), "-b", "feature-x"],
+            capture_output=True,
+            check=True,
+            env=_git_env(repo.parent),
+        )
+        assert repo_name(str(wt)) == "sweep-repo"
+
 
 class TestEditedFiles:
     def test_union_of_dirty_staged_untracked(self, repo: Path) -> None:
