@@ -93,6 +93,28 @@ def check_resilient_provider_credentials() -> None:
     """
     from agent_memory_mcp import providers
 
+    if providers.ollama_enabled():
+        opts = providers.ollama_client_options()
+        try:
+            import urllib.request
+
+            base = str(opts["base_url"]).rstrip("/")
+            with urllib.request.urlopen(f"{base}/models", timeout=5):
+                pass
+        except Exception as exc:
+            raise RuntimeError(
+                "NAM_LLM_PROVIDER=ollama is set but the Ollama endpoint "
+                f"({opts['base_url']}) is not reachable: {exc}. Start the "
+                "Ollama daemon or fix NAM_OLLAMA_URL."
+            ) from exc
+        logger.info(
+            "NAM_LLM_PROVIDER=ollama — extraction will use the local model "
+            "(model=%s, url=%s); no cloud provider is required.",
+            opts["model"],
+            opts["base_url"],
+        )
+        return
+
     if providers.anthropic_enabled():
         logger.info(
             "ANTHROPIC_API_KEY detected — extraction will use the Anthropic "
@@ -315,11 +337,13 @@ try:
             lifespan=lifespan,
         )
 
+        from agent_memory_mcp.mcp._coding_tools import register_coding_tools
         from agent_memory_mcp.mcp._prompts import register_prompts
         from agent_memory_mcp.mcp._resources import register_resources
         from agent_memory_mcp.mcp._tools import register_tools
 
         register_tools(mcp)
+        register_coding_tools(mcp)
         register_resources(mcp)
         register_prompts(mcp)
 
@@ -377,11 +401,13 @@ try:
                 lifespan=_preconnected_lifespan,
             )
 
+            from agent_memory_mcp.mcp._coding_tools import register_coding_tools
             from agent_memory_mcp.mcp._prompts import register_prompts
             from agent_memory_mcp.mcp._resources import register_resources
             from agent_memory_mcp.mcp._tools import register_tools
 
             register_tools(self._mcp)
+            register_coding_tools(self._mcp)
             register_resources(self._mcp)
             register_prompts(self._mcp)
 

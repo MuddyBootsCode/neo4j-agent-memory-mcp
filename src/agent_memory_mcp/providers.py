@@ -11,6 +11,13 @@ Environment:
     NAM_ANTHROPIC_MODEL      Extraction model (default claude-opus-5).
     NAM_EMBEDDING_PROVIDER   Explicit embedder choice — overrides the
                              key-derived sentence_transformers default.
+    NAM_LLM_PROVIDER         Explicit LLM choice. "ollama" routes extraction
+                             to a local model and wins over the key-derived
+                             Anthropic default.
+    NAM_OLLAMA_MODEL         Local model tag (default qwen-judge).
+    NAM_OLLAMA_REASONING     reasoning_effort for the local model (default
+                             "none" — see ollama_client_options).
+    NAM_OLLAMA_URL           OpenAI-compatible base URL.
 """
 
 from __future__ import annotations
@@ -27,6 +34,17 @@ DEFAULT_ANTHROPIC_MODEL = "claude-opus-5"
 # budget can be spent before the structured extraction output is emitted,
 # truncating the response and failing BAML parsing.
 ANTHROPIC_MAX_TOKENS = 16000
+
+OLLAMA_CLIENT_NAME = "QwenCoder"
+# The derived tag, not the upstream coder build: upstream ships a red-team
+# operator persona as its SYSTEM prompt, which biases any judging or
+# extraction task. See baml_src/clients.baml.
+DEFAULT_OLLAMA_MODEL = "qwen-judge"
+DEFAULT_OLLAMA_URL = "http://localhost:11434/v1"
+# Output budget, not context window — the model declares num_ctx 262144
+# itself. Thinking is on and thinking tokens count against this, the same
+# trap ANTHROPIC_MAX_TOKENS documents above.
+OLLAMA_MAX_TOKENS = 32000
 
 LOCAL_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 LOCAL_EMBEDDING_DIMENSIONS = 384
@@ -67,12 +85,59 @@ def anthropic_registry() -> Any | None:
     return registry
 
 
-def default_baml_options() -> dict[str, Any]:
-    """baml_options for extraction calls: Anthropic-direct when keyed, else {}.
+def ollama_enabled() -> bool:
+    """True only on an explicit opt-in.
 
+    Deliberately not derived from any key or from a reachable Ollama daemon:
+    a local model is a deliberate choice about cost and quality, and nothing
+    in the environment can imply it the way an API key implies a provider.
+    """
+    return os.environ.get("NAM_LLM_PROVIDER", "").strip().lower() == "ollama"
+
+
+def ollama_client_options() -> dict[str, Any]:
+    """BAML client options for the runtime Ollama client.
+
+    reasoning_effort defaults to "none": extraction is a classification-shaped
+    task where thinking measurably doesn't help (MUD-394 method notes), and
+    with thinking on the model can out-generate BAML's request timeout on
+    adversarial or long transcripts. Override with NAM_OLLAMA_REASONING
+    (e.g. "low", "high"); unknown options pass through to the request body.
+    """
+    return {
+        "base_url": os.environ.get("NAM_OLLAMA_URL", DEFAULT_OLLAMA_URL),
+        "model": os.environ.get("NAM_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+        "api_key": "ollama",  # ignored by Ollama; openai-generic requires one
+        "temperature": 0,
+        "max_tokens": OLLAMA_MAX_TOKENS,
+        "reasoning_effort": os.environ.get("NAM_OLLAMA_REASONING", "none"),
+    }
+
+
+def ollama_registry() -> Any | None:
+    """ClientRegistry with the local model primary, or None when not opted in."""
+    if not ollama_enabled():
+        return None
+    from baml_py import ClientRegistry
+
+    registry = ClientRegistry()
+    registry.add_llm_client(
+        name=OLLAMA_CLIENT_NAME,
+        provider="openai-generic",
+        options=ollama_client_options(),
+        retry_policy="StandardRetry",
+    )
+    registry.set_primary(OLLAMA_CLIENT_NAME)
+    return registry
+
+
+def default_baml_options() -> dict[str, Any]:
+    """baml_options for extraction calls.
+
+    Explicit NAM_LLM_PROVIDER=ollama wins, then Anthropic-direct when keyed.
     An empty dict leaves each BAML function on its declared client (Bedrock).
     """
-    registry = anthropic_registry()
+    registry = ollama_registry() or anthropic_registry()
     return {"client_registry": registry} if registry else {}
 
 

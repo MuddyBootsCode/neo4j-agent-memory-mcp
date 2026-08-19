@@ -5,7 +5,8 @@ pipeline extractors — none of which are available in this deployment. When
 ``NAM_EXTRACTION__BAML_ENABLED=true``, route extractor creation to the
 :class:`~agent_memory_mcp.extraction.unified.UnifiedBamlExtractor` so the
 client-level path (``add_message(extract_entities=True)``) runs the same
-single-pass ``ExtractMemory`` call as the MCP ``memory_store`` tool.
+``ExtractCodingMemory`` call as the MCP ``memory_store`` tool (with no
+session context, so only preferences survive).
 
 The env var overrides regardless of the configured extractor_type, matching
 the pre-refactor factory_ext behaviour [RFI-F1]. Without the flag, the base

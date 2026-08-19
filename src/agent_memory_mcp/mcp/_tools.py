@@ -458,9 +458,10 @@ def register_tools(mcp: FastMCP) -> None:
         """Store a memory in the knowledge graph.
 
         Supports messages, facts (SPO triples), and user preferences. Storing a
-        message runs a single unified extraction pass that pulls entities
-        (POLE+O + domain types as labels), relationships, and preferences and
-        persists them to the graph.
+        message runs the coding-memory extraction pass over the content; with
+        no session context available here (no branch, task, or touched files),
+        only preferences are persisted — anchored coding memory (decisions,
+        gotchas, dead ends) comes from the hook capture path instead.
 
         Args:
             memory_type: Type of memory - 'message', 'fact', or 'preference'.
@@ -497,20 +498,28 @@ def register_tools(mcp: FastMCP) -> None:
                     generate_embedding=True,
                 )
 
-                # Unified extraction — never fatal to the stored message.
-                extraction_counts = None
+                # Coding-memory extraction — never fatal to the stored message.
+                # A stored message carries no session context (branch, task,
+                # touched files), so the anchored types (decisions, gotchas,
+                # dead ends) all drop by design; the hook capture path is the
+                # source of anchored coding memory. Only preferences flow here.
+                preferences_stored = None
                 try:
+                    from agent_memory_mcp.extraction.coding import (
+                        extract_coding_memory,
+                    )
                     from agent_memory_mcp.extraction.unified import (
-                        extract_memory,
-                        persist_memory,
+                        persist_preferences,
                     )
 
-                    extraction = await extract_memory(content)
-                    extraction_counts = await persist_memory(
-                        client, str(message.id), extraction
+                    coding = await extract_coding_memory(
+                        content, branch="", task=None, files=[]
+                    )
+                    preferences_stored = await persist_preferences(
+                        client, coding["preferences"]
                     )
                 except Exception as extract_err:
-                    logger.warning("Unified extraction failed: %s", extract_err)
+                    logger.warning("Coding-memory extraction failed: %s", extract_err)
 
                 result_data = {
                     "stored": True,
@@ -518,10 +527,12 @@ def register_tools(mcp: FastMCP) -> None:
                     "id": str(message.id),
                     "session_id": session_id,
                 }
-                if extraction_counts:
-                    result_data["entities"] = extraction_counts["entities"]
-                    result_data["relations"] = extraction_counts["relations"]
-                    result_data["preferences"] = extraction_counts["preferences"]
+                if preferences_stored is not None:
+                    # Entities/relations died with the org ontology; the keys
+                    # stay (always 0) so the response shape remains stable.
+                    result_data["entities"] = 0
+                    result_data["relations"] = 0
+                    result_data["preferences"] = preferences_stored
 
             elif memory_type == "preference":
                 if not category:

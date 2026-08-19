@@ -98,17 +98,20 @@ class TestEmbeddingKwargs:
 
 
 class TestCallSitesThreadRegistry:
-    async def test_unified_extraction_passes_baml_options(self, monkeypatch):
+    async def test_unified_extractor_passes_baml_options(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         captured = {}
 
         class _StubBaml:
-            async def ExtractMemory(self, *, text, baml_options=None):
+            async def ExtractCodingMemory(
+                self, *, transcript, context, baml_options=None
+            ):
                 captured["baml_options"] = baml_options
 
                 class _R:
-                    entities = []
-                    relations = []
+                    decisions = []
+                    gotchas = []
+                    dead_ends = []
                     preferences = []
 
                 return _R()
@@ -117,9 +120,9 @@ class TestCallSitesThreadRegistry:
 
         monkeypatch.setattr(ac, "b", _StubBaml())
 
-        from agent_memory_mcp.extraction.unified import extract_memory
+        from agent_memory_mcp.extraction.unified import UnifiedBamlExtractor
 
-        await extract_memory("Sarah delegates to Marcus")
+        await UnifiedBamlExtractor().extract("switched the db driver to asyncpg")
         from baml_py import ClientRegistry
 
         assert isinstance(captured["baml_options"].get("client_registry"), ClientRegistry)
@@ -146,3 +149,19 @@ class TestPreflight:
 
         with pytest.raises(RuntimeError):
             check_resilient_provider_credentials()
+
+
+class TestOllamaClientOptions:
+    """reasoning_effort control on the local client (MUD-394 finding)."""
+
+    def test_reasoning_effort_defaults_to_none(self, monkeypatch):
+        monkeypatch.delenv("NAM_OLLAMA_REASONING", raising=False)
+        from agent_memory_mcp.providers import ollama_client_options
+
+        assert ollama_client_options()["reasoning_effort"] == "none"
+
+    def test_reasoning_effort_env_override(self, monkeypatch):
+        monkeypatch.setenv("NAM_OLLAMA_REASONING", "low")
+        from agent_memory_mcp.providers import ollama_client_options
+
+        assert ollama_client_options()["reasoning_effort"] == "low"

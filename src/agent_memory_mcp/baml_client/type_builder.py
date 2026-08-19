@@ -20,22 +20,18 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["CandidateFact","ContradictionResult","ExtractedEntity","ExtractedPreference","ExtractedReasoningStep","ExtractedRelation","MemoryExtraction","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","TemporalExtraction",]
+          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","TemporalExtraction",]
         ), enums=set(
-          ["EntityType",]
+          []
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 1
+    # Generated enums 0
     # #########################################################################
-
-    @property
-    def EntityType(self) -> "EntityTypeViewer":
-        return EntityTypeViewer(self)
 
 
     # #########################################################################
-    # Generated classes 11
+    # Generated classes 13
     # #########################################################################
 
     @property
@@ -43,28 +39,36 @@ class TypeBuilder(type_builder.TypeBuilder):
         return CandidateFactViewer(self)
 
     @property
+    def CodingMemoryExtraction(self) -> "CodingMemoryExtractionViewer":
+        return CodingMemoryExtractionViewer(self)
+
+    @property
+    def CodingSessionContext(self) -> "CodingSessionContextViewer":
+        return CodingSessionContextViewer(self)
+
+    @property
     def ContradictionResult(self) -> "ContradictionResultViewer":
         return ContradictionResultViewer(self)
 
     @property
-    def ExtractedEntity(self) -> "ExtractedEntityViewer":
-        return ExtractedEntityViewer(self)
+    def ExtractedCodingPreference(self) -> "ExtractedCodingPreferenceViewer":
+        return ExtractedCodingPreferenceViewer(self)
 
     @property
-    def ExtractedPreference(self) -> "ExtractedPreferenceViewer":
-        return ExtractedPreferenceViewer(self)
+    def ExtractedDeadEnd(self) -> "ExtractedDeadEndViewer":
+        return ExtractedDeadEndViewer(self)
+
+    @property
+    def ExtractedDecision(self) -> "ExtractedDecisionViewer":
+        return ExtractedDecisionViewer(self)
+
+    @property
+    def ExtractedGotcha(self) -> "ExtractedGotchaViewer":
+        return ExtractedGotchaViewer(self)
 
     @property
     def ExtractedReasoningStep(self) -> "ExtractedReasoningStepViewer":
         return ExtractedReasoningStepViewer(self)
-
-    @property
-    def ExtractedRelation(self) -> "ExtractedRelationViewer":
-        return ExtractedRelationViewer(self)
-
-    @property
-    def MemoryExtraction(self) -> "MemoryExtractionViewer":
-        return MemoryExtractionViewer(self)
 
     @property
     def ReasoningChainInput(self) -> "ReasoningChainInputViewer":
@@ -85,118 +89,12 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated enums 1
+# Generated enums 0
 # #########################################################################
-
-class EntityTypeAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.enum("EntityType")
-        self._values: typing.Set[str] = set([  "PERSON",  "ORGANIZATION",  "LOCATION",  "EVENT",  "OBJECT",  "MEETING",  "AGENDA_ITEM",  "ACTION_ITEM",  "DECISION",  "PROJECT",  "TASK",  "MILESTONE",  "DELIVERABLE",  "NOTE",  "FINDING",  "SOURCE",  "TOPIC",  "EXPERIMENT",  ])
-        self._vals = EntityTypeValues(self._bldr, self._values)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def values(self) -> "EntityTypeValues":
-        return self._vals
-
-
-class EntityTypeViewer(EntityTypeAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    
-    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
-        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
-    
-
-class EntityTypeValues:
-    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
-        self.__bldr = enum_bldr
-        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    
-    
-    @property
-    def PERSON(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("PERSON"))
-    
-    @property
-    def ORGANIZATION(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("ORGANIZATION"))
-    
-    @property
-    def LOCATION(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("LOCATION"))
-    
-    @property
-    def EVENT(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("EVENT"))
-    
-    @property
-    def OBJECT(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("OBJECT"))
-    
-    @property
-    def MEETING(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("MEETING"))
-    
-    @property
-    def AGENDA_ITEM(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("AGENDA_ITEM"))
-    
-    @property
-    def ACTION_ITEM(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("ACTION_ITEM"))
-    
-    @property
-    def DECISION(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("DECISION"))
-    
-    @property
-    def PROJECT(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("PROJECT"))
-    
-    @property
-    def TASK(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("TASK"))
-    
-    @property
-    def MILESTONE(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("MILESTONE"))
-    
-    @property
-    def DELIVERABLE(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("DELIVERABLE"))
-    
-    @property
-    def NOTE(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("NOTE"))
-    
-    @property
-    def FINDING(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("FINDING"))
-    
-    @property
-    def SOURCE(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("SOURCE"))
-    
-    @property
-    def TOPIC(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("TOPIC"))
-    
-    @property
-    def EXPERIMENT(self) -> type_builder.EnumValueViewer:
-        return type_builder.EnumValueViewer(self.__bldr.value("EXPERIMENT"))
-    
-    
-
 
 
 # #########################################################################
-# Generated classes 11
+# Generated classes 13
 # #########################################################################
 
 class CandidateFactAst:
@@ -254,6 +152,104 @@ class CandidateFactProperties:
     
 
 
+class CodingMemoryExtractionAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("CodingMemoryExtraction")
+        self._properties: typing.Set[str] = set([  "decisions",  "gotchas",  "dead_ends",  "preferences",  ])
+        self._props = CodingMemoryExtractionProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "CodingMemoryExtractionProperties":
+        return self._props
+
+
+class CodingMemoryExtractionViewer(CodingMemoryExtractionAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class CodingMemoryExtractionProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def decisions(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("decisions"))
+    
+    @property
+    def gotchas(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("gotchas"))
+    
+    @property
+    def dead_ends(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("dead_ends"))
+    
+    @property
+    def preferences(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("preferences"))
+    
+    
+
+
+class CodingSessionContextAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("CodingSessionContext")
+        self._properties: typing.Set[str] = set([  "branch",  "task",  "files",  ])
+        self._props = CodingSessionContextProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "CodingSessionContextProperties":
+        return self._props
+
+
+class CodingSessionContextViewer(CodingSessionContextAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class CodingSessionContextProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def branch(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("branch"))
+    
+    @property
+    def task(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("task"))
+    
+    @property
+    def files(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("files"))
+    
+    
+
+
 class ContradictionResultAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
@@ -301,22 +297,22 @@ class ContradictionResultProperties:
     
 
 
-class ExtractedEntityAst:
+class ExtractedCodingPreferenceAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("ExtractedEntity")
-        self._properties: typing.Set[str] = set([  "name",  "type",  "subtype",  "status",  "priority",  "date",  "confidence",  ])
-        self._props = ExtractedEntityProperties(self._bldr, self._properties)
+        self._bldr = _tb.class_("ExtractedCodingPreference")
+        self._properties: typing.Set[str] = set([  "category",  "preference",  "confidence",  ])
+        self._props = ExtractedCodingPreferenceProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
         return self._bldr.field()
 
     @property
-    def props(self) -> "ExtractedEntityProperties":
+    def props(self) -> "ExtractedCodingPreferenceProperties":
         return self._props
 
 
-class ExtractedEntityViewer(ExtractedEntityAst):
+class ExtractedCodingPreferenceViewer(ExtractedCodingPreferenceAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
@@ -326,70 +322,7 @@ class ExtractedEntityViewer(ExtractedEntityAst):
     
 
 
-class ExtractedEntityProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    
-    
-    @property
-    def name(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
-    
-    @property
-    def type(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
-    @property
-    def subtype(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("subtype"))
-    
-    @property
-    def status(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("status"))
-    
-    @property
-    def priority(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("priority"))
-    
-    @property
-    def date(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("date"))
-    
-    @property
-    def confidence(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
-    
-    
-
-
-class ExtractedPreferenceAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("ExtractedPreference")
-        self._properties: typing.Set[str] = set([  "category",  "preference",  "context",  "confidence",  ])
-        self._props = ExtractedPreferenceProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "ExtractedPreferenceProperties":
-        return self._props
-
-
-class ExtractedPreferenceViewer(ExtractedPreferenceAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
-
-
-class ExtractedPreferenceProperties:
+class ExtractedCodingPreferenceProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
         self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
@@ -405,8 +338,165 @@ class ExtractedPreferenceProperties:
         return type_builder.ClassPropertyViewer(self.__bldr.property("preference"))
     
     @property
-    def context(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("context"))
+    def confidence(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
+    
+    
+
+
+class ExtractedDeadEndAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ExtractedDeadEnd")
+        self._properties: typing.Set[str] = set([  "attempt",  "why_failed",  "anchor_files",  "concerns_task",  "confidence",  ])
+        self._props = ExtractedDeadEndProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ExtractedDeadEndProperties":
+        return self._props
+
+
+class ExtractedDeadEndViewer(ExtractedDeadEndAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ExtractedDeadEndProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def attempt(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("attempt"))
+    
+    @property
+    def why_failed(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("why_failed"))
+    
+    @property
+    def anchor_files(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("anchor_files"))
+    
+    @property
+    def concerns_task(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("concerns_task"))
+    
+    @property
+    def confidence(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
+    
+    
+
+
+class ExtractedDecisionAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ExtractedDecision")
+        self._properties: typing.Set[str] = set([  "text",  "reason",  "anchor_files",  "concerns_task",  "confidence",  ])
+        self._props = ExtractedDecisionProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ExtractedDecisionProperties":
+        return self._props
+
+
+class ExtractedDecisionViewer(ExtractedDecisionAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ExtractedDecisionProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def text(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("text"))
+    
+    @property
+    def reason(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reason"))
+    
+    @property
+    def anchor_files(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("anchor_files"))
+    
+    @property
+    def concerns_task(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("concerns_task"))
+    
+    @property
+    def confidence(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
+    
+    
+
+
+class ExtractedGotchaAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ExtractedGotcha")
+        self._properties: typing.Set[str] = set([  "text",  "anchor_files",  "concerns_task",  "confidence",  ])
+        self._props = ExtractedGotchaProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ExtractedGotchaProperties":
+        return self._props
+
+
+class ExtractedGotchaViewer(ExtractedGotchaAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ExtractedGotchaProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def text(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("text"))
+    
+    @property
+    def anchor_files(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("anchor_files"))
+    
+    @property
+    def concerns_task(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("concerns_task"))
     
     @property
     def confidence(self) -> type_builder.ClassPropertyViewer:
@@ -466,104 +556,6 @@ class ExtractedReasoningStepProperties:
     @property
     def confidence(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
-    
-    
-
-
-class ExtractedRelationAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("ExtractedRelation")
-        self._properties: typing.Set[str] = set([  "source",  "target",  "relation_type",  "confidence",  ])
-        self._props = ExtractedRelationProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "ExtractedRelationProperties":
-        return self._props
-
-
-class ExtractedRelationViewer(ExtractedRelationAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
-
-
-class ExtractedRelationProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    
-    
-    @property
-    def source(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("source"))
-    
-    @property
-    def target(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("target"))
-    
-    @property
-    def relation_type(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("relation_type"))
-    
-    @property
-    def confidence(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
-    
-    
-
-
-class MemoryExtractionAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("MemoryExtraction")
-        self._properties: typing.Set[str] = set([  "entities",  "relations",  "preferences",  ])
-        self._props = MemoryExtractionProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "MemoryExtractionProperties":
-        return self._props
-
-
-class MemoryExtractionViewer(MemoryExtractionAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
-
-
-class MemoryExtractionProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    
-    
-    @property
-    def entities(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("entities"))
-    
-    @property
-    def relations(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("relations"))
-    
-    @property
-    def preferences(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("preferences"))
     
     
 
