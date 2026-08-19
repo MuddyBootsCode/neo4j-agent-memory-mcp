@@ -66,6 +66,7 @@ FENCE_TAGS = {
     "reasoning.baml": ("stored_content",),
     "temporal.baml": ("stored_content",),
     "coding.baml": ("session_context", "session_transcript"),
+    "coding_judge.baml": ("judged_item", "judged_transcript"),
 }
 
 # The exact minijinja filter every untrusted interpolation must carry. It
@@ -109,6 +110,12 @@ UNTRUSTED_INTERPOLATIONS = {
         "ExtractCodingMemory": {
             "session_context": ("context.branch", "context.task", "file"),
             "session_transcript": ("transcript",),
+        },
+    },
+    "coding_judge.baml": {
+        "JudgeExtractedMemory": {
+            "judged_item": ("item",),
+            "judged_transcript": ("transcript",),
         },
     },
 }
@@ -530,6 +537,8 @@ class TestOfflineRenderedPrompts:
                     branch=value, task=value, files=[value]
                 ),
             )
+        elif function_name == "JudgeExtractedMemory":
+            request = build(item=value, transcript=value)
         else:  # ExtractReasoning
             request = build(text=value)
         return cls._prompt_text(request)
@@ -541,6 +550,7 @@ class TestOfflineRenderedPrompts:
         ("DetectContradictions", {"stored_content": 6}),
         ("ExtractTemporalContext", {"stored_content": 1}),
         ("ExtractCodingMemory", {"session_context": 3, "session_transcript": 1}),
+        ("JudgeExtractedMemory", {"judged_item": 1, "judged_transcript": 1}),
     ]
 
     @pytest.mark.parametrize("function_name,copies_by_tag", CASES)

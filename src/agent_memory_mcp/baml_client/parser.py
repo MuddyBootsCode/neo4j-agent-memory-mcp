@@ -47,6 +47,12 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="request")
         return typing.cast(types.TemporalExtraction, __result__)
 
+    def JudgeExtractedMemory(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.MemoryJudgement:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="JudgeExtractedMemory", llm_response=llm_response, mode="request")
+        return typing.cast(types.MemoryJudgement, __result__)
+
     def SynthesizeExplanation(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> str:
@@ -84,6 +90,12 @@ class LlmStreamParser:
     ) -> stream_types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.TemporalExtraction, __result__)
+
+    def JudgeExtractedMemory(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.MemoryJudgement:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="JudgeExtractedMemory", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.MemoryJudgement, __result__)
 
     def SynthesizeExplanation(
         self, llm_response: str, baml_options: BamlCallOptions = {},

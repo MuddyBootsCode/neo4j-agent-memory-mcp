@@ -42,6 +42,7 @@ class TestExtractCodingMemory:
         "preferences": [],
         "anchor_rate": None,
         "dropped_unanchored": 0,
+        "judged_out": 0,
     }
 
     def _stub(self, monkeypatch, *, decisions=(), gotchas=(), dead_ends=(), preferences=()):
@@ -58,6 +59,14 @@ class TestExtractCodingMemory:
         monkeypatch.setattr(
             "agent_memory_mcp.baml_client.async_client.b.ExtractCodingMemory",
             mock_fn,
+        )
+        # These tests exercise anchor sanitization, not the judge screen
+        # (see test_coding_judge_screen.py for that) — stub the judge to
+        # keep everything so it never makes a real BAML/network call here.
+        judge = SimpleNamespace(supported=True, embedded_directive=False, confidence=0.9)
+        monkeypatch.setattr(
+            "agent_memory_mcp.baml_client.async_client.b.JudgeExtractedMemory",
+            AsyncMock(return_value=judge),
         )
         return mock_fn
 
