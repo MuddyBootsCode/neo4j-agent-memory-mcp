@@ -16,7 +16,14 @@ from agent_memory_mcp.mcp import server as server_module
 
 
 def _clear_provider_env(monkeypatch):
-    for var in ("AWS_REGION", "AWS_PROFILE", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+    for var in (
+        "AWS_REGION",
+        "AWS_PROFILE",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "NAM_LLM_PROVIDER",
+        "ANTHROPIC_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -138,3 +145,38 @@ class TestResilientChainPreflight:
         # OpenAI/Gemini are still absent — that's a fallback-only warning, not fatal.
         assert "OpenAI" in messages
         assert "Gemini" in messages
+
+
+class TestOllamaPreflight:
+    """NAM_LLM_PROVIDER=ollama short-circuits the Resilient chain check."""
+
+    def test_ollama_reachable_passes_without_cloud_credentials(self, monkeypatch):
+        _clear_provider_env(monkeypatch)
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        import urllib.request
+
+        monkeypatch.setattr(
+            urllib.request, "urlopen", lambda *a, **k: _FakeResponse()
+        )
+        server_module.check_resilient_provider_credentials()  # must not raise
+
+    def test_ollama_unreachable_raises_loudly(self, monkeypatch):
+        _clear_provider_env(monkeypatch)
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+
+        import urllib.request
+
+        def _refuse(*a, **k):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _refuse)
+        with pytest.raises(RuntimeError, match="Ollama endpoint"):
+            server_module.check_resilient_provider_credentials()
