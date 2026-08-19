@@ -15,6 +15,8 @@ Environment:
                              to a local model and wins over the key-derived
                              Anthropic default.
     NAM_OLLAMA_MODEL         Local model tag (default qwen-judge).
+    NAM_OLLAMA_REASONING     reasoning_effort for the local model (default
+                             "none" — see ollama_client_options).
     NAM_OLLAMA_URL           OpenAI-compatible base URL.
 """
 
@@ -94,13 +96,21 @@ def ollama_enabled() -> bool:
 
 
 def ollama_client_options() -> dict[str, Any]:
-    """BAML client options for the runtime Ollama client."""
+    """BAML client options for the runtime Ollama client.
+
+    reasoning_effort defaults to "none": extraction is a classification-shaped
+    task where thinking measurably doesn't help (MUD-394 method notes), and
+    with thinking on the model can out-generate BAML's request timeout on
+    adversarial or long transcripts. Override with NAM_OLLAMA_REASONING
+    (e.g. "low", "high"); unknown options pass through to the request body.
+    """
     return {
         "base_url": os.environ.get("NAM_OLLAMA_URL", DEFAULT_OLLAMA_URL),
         "model": os.environ.get("NAM_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
         "api_key": "ollama",  # ignored by Ollama; openai-generic requires one
         "temperature": 0,
         "max_tokens": OLLAMA_MAX_TOKENS,
+        "reasoning_effort": os.environ.get("NAM_OLLAMA_REASONING", "none"),
     }
 
 
