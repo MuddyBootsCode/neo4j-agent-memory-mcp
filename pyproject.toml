@@ -17,6 +17,12 @@ dependencies = [
 
 [project.scripts]
 neo4j-memory-mcp = "agent_memory_mcp.mcp.server:main"
+neo4j-memory-recall-hook = "agent_memory_mcp.hook.recall_hook:main"
+
+[project.optional-dependencies]
+local = [
+    "sentence-transformers>=3.0",
+]
 
 [dependency-groups]
 dev = [

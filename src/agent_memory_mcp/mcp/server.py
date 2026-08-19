@@ -85,7 +85,22 @@ def check_resilient_provider_credentials() -> None:
     providers in the chain is usable — in that case every BAML call
     (extraction, reasoning) would fail outright, so we fail loudly at
     startup instead of on the first request.
+
+    Anthropic-direct mode short-circuits all of this: with ANTHROPIC_API_KEY
+    set, extraction routes to the Anthropic API via a runtime ClientRegistry
+    (see ``agent_memory_mcp.providers``) and the Resilient chain is never
+    consulted, so no AWS/OpenAI/Gemini credentials are required.
     """
+    from agent_memory_mcp import providers
+
+    if providers.anthropic_enabled():
+        logger.info(
+            "ANTHROPIC_API_KEY detected — extraction will use the Anthropic "
+            "API directly (model=%s); Bedrock is not required.",
+            providers.anthropic_client_options()["model"],
+        )
+        return
+
     bedrock_ok, bedrock_reason = _check_bedrock_available()
     openai_ok, openai_reason = _check_openai_available()
     gemini_ok, gemini_reason = _check_gemini_available()
@@ -449,26 +464,12 @@ try:
         from neo4j_agent_memory import MemorySettings
         from neo4j_agent_memory.config.settings import EmbeddingConfig, Neo4jConfig
 
-        # Build embedding config from env vars — defaults to Bedrock
-        embedding_provider = os.environ.get("NAM_EMBEDDING_PROVIDER", "bedrock")
-        embedding_kwargs: dict[str, Any] = {
-            "provider": embedding_provider,
-        }
-        if embedding_provider == "bedrock":
-            embedding_kwargs.update({
-                "model": os.environ.get(
-                    "NAM_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0"
-                ),
-                "dimensions": int(os.environ.get("NAM_EMBEDDING_DIMENSIONS", "1024")),
-                "aws_region": os.environ.get("AWS_REGION", "us-east-1"),
-                "aws_profile": os.environ.get("AWS_PROFILE"),
-            })
-        elif embedding_provider == "openai":
-            embedding_kwargs.update({
-                "model": os.environ.get(
-                    "NAM_EMBEDDING_MODEL", "text-embedding-3-small"
-                ),
-            })
+        # Build embedding config from env vars. Defaults to Bedrock, or to
+        # local sentence-transformers in Anthropic-direct mode; an explicit
+        # NAM_EMBEDDING_PROVIDER always wins. See agent_memory_mcp.providers.
+        from agent_memory_mcp.providers import embedding_kwargs_from_env
+
+        embedding_kwargs = embedding_kwargs_from_env()
 
         settings = MemorySettings(
             neo4j=Neo4jConfig(

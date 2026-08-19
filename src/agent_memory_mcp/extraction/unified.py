@@ -41,9 +41,12 @@ async def extract_memory(text: str) -> dict[str, list[dict[str, Any]]]:
     if not text or not text.strip():
         return {"entities": [], "relations": [], "preferences": []}
 
-    from agent_memory_mcp.baml_client.async_client import b
+    import agent_memory_mcp.baml_client.async_client as _async_client
+    from agent_memory_mcp.providers import default_baml_options
 
-    result = await b.ExtractMemory(text=text)
+    result = await _async_client.b.ExtractMemory(
+        text=text, baml_options=default_baml_options()
+    )
 
     entities: list[dict[str, Any]] = []
     for e in result.entities:
