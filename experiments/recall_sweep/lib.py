@@ -14,18 +14,35 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
-SRC = os.path.join(REPO_ROOT, "src")
+TOOLING_ROOT = os.path.dirname(os.path.dirname(HERE))
+SRC = os.path.join(TOOLING_ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 RESULTS_DIR = os.path.join(HERE, "results")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-REPO_NAME = "neo4j-agent-memory-mcp"
-TRANSCRIPTS_DIR = (
-    "/Users/muddybootscode/.claude/projects/"
-    "-Users-muddybootscode-Projects-neo4j-agent-memory-mcp"
+
+def claude_project_dir(repo_root: str) -> str:
+    """Claude Code's transcript directory for a repo checkout.
+
+    The project path is encoded by replacing every "/" and "." with "-", so
+    /Users/me/Projects/foo becomes -Users-me-Projects-foo.
+    """
+    slug = repo_root.rstrip("/").replace("/", "-").replace(".", "-")
+    return os.path.join(os.path.expanduser("~/.claude/projects"), slug)
+
+
+# Which repo's Claude Code sessions form the corpus. Defaults to this repo --
+# what MUD-395 measured -- and is repointed via the environment (MUD-401),
+# because anchor-first recall can only be measured on a corpus whose sessions
+# revisit the same files.
+CORPUS_REPO_ROOT = os.path.abspath(
+    os.environ.get("SWEEP_REPO_ROOT") or TOOLING_ROOT
+)
+REPO_NAME = os.environ.get("SWEEP_REPO_NAME") or os.path.basename(CORPUS_REPO_ROOT)
+TRANSCRIPTS_DIR = os.environ.get("SWEEP_TRANSCRIPTS_DIR") or claude_project_dir(
+    CORPUS_REPO_ROOT
 )
 SWEEP_DB = "sweepcorpus"
 
@@ -35,7 +52,7 @@ OLLAMA_MODEL = "qwen-judge"
 # Repo-root prefix stripped from absolute tool_input.file_path values to get
 # repo-relative CodeFile paths, matching the convention edited_files() (git
 # status --porcelain -C repo_dir) already produces.
-_REPO_PREFIX = REPO_ROOT.rstrip("/") + "/"
+_REPO_PREFIX = CORPUS_REPO_ROOT.rstrip("/") + "/"
 
 # Synthetic content injected into the transcript that is NOT something a
 # human typed: task notifications, system reminders, command-name/message
@@ -97,7 +114,9 @@ def split_sessions(sessions: list[dict], corpus_fraction: float = 0.6) -> tuple[
     return sessions[:k], sessions[k:]
 
 
-_WORKTREE_MARKER = "/.worktrees/"
+# Linked-worktree layouts seen in the wild. Longest first: ".claude/worktrees"
+# also contains "/worktrees/", so order decides which prefix gets stripped.
+_WORKTREE_MARKERS = ("/.claude/worktrees/", "/.worktrees/")
 
 
 def _repo_relative(path: str) -> str | None:
@@ -107,16 +126,18 @@ def _repo_relative(path: str) -> str | None:
     paths are relative to the session's cwd — the worktree root when the
     session ran inside a linked worktree, not the main checkout root. A path
     under .worktrees/<name>/... is therefore normalized relative to that
-    worktree, not to REPO_ROOT, so a file edited in a worktree lines up with
+    worktree, not to CORPUS_REPO_ROOT, so a file edited in a worktree lines up with
     the same file edited in the main checkout (git worktrees share one repo
     identity — see git_sweep.repo_name). Anything else falls back to
-    stripping REPO_ROOT.
+    stripping CORPUS_REPO_ROOT.
     """
     if not isinstance(path, str) or not path:
         return None
-    marker = path.find(_WORKTREE_MARKER)
-    if marker != -1:
-        rest = path[marker + len(_WORKTREE_MARKER):]  # "<worktree-name>/rel/path"
+    for marker in _WORKTREE_MARKERS:
+        at = path.find(marker)
+        if at == -1:
+            continue
+        rest = path[at + len(marker):]  # "<worktree-name>/rel/path"
         parts = rest.split("/", 1)
         if len(parts) == 2 and parts[1]:
             return parts[1]
