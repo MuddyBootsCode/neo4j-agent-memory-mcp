@@ -27,15 +27,8 @@ def _grade_for(grades_for_query: dict, item_id: str):
     return grades_for_query.get(item_id)
 
 
-def main() -> None:
-    candidates = load_json("candidates.json") or []
-    grades = load_json("grades.json") or {}
-    corpus_stats = load_json("corpus_stats.json") or {}
-    config_errors = load_json("config_errors.json") or []
-    grade_errors = load_json("grade_errors.json") or []
-    queries = load_json("queries.json") or []
-    split = load_json("session_split.json") or {}
-
+def _tally(candidates: list[dict], grades: dict) -> tuple[dict, list[dict]]:
+    """Per-config metrics and per-query rows over the given candidate records."""
     n_queries = len(candidates)
     per_query_records = []
     metrics = {
@@ -96,6 +89,7 @@ def main() -> None:
         gradeable = m["injected"] - m["excluded"]
         precision = (m["relevant"] / gradeable) if gradeable > 0 else None
         summary[c] = {
+            "n_queries": n_queries,
             "injected_total": m["injected"],
             "relevant_total": m["relevant"],
             "excluded_total": m["excluded"],
@@ -104,6 +98,45 @@ def main() -> None:
             "coverage": m["queries_with_relevant"] / n_queries if n_queries else None,
             "zero_injection_rate": m["zero_injection_queries"] / n_queries if n_queries else None,
         }
+    return summary, per_query_records
+
+
+def _table(title: str, summary: dict) -> None:
+    print(f"\n{title}")
+    print(f"{'config':<8}{'queries':<9}{'precision':<12}{'items/query':<14}{'coverage':<12}{'zero-inj rate':<14}")
+    for c in CONFIGS:
+        s = summary[c]
+        prec = f"{s['precision']:.0%}" if s["precision"] is not None else "n/a"
+        cov = f"{s['coverage']:.0%}" if s["coverage"] is not None else "n/a"
+        zir = f"{s['zero_injection_rate']:.0%}" if s["zero_injection_rate"] is not None else "n/a"
+        ipq = f"{s['items_per_query']:.2f}" if s["items_per_query"] is not None else "n/a"
+        print(f"{c:<8}{s['n_queries']:<9}{prec:<12}{ipq:<14}{cov:<12}{zir:<14}")
+
+
+def main() -> None:
+    candidates = load_json("candidates.json") or []
+    grades = load_json("grades.json") or {}
+    corpus_stats = load_json("corpus_stats.json") or {}
+    config_errors = load_json("config_errors.json") or []
+    grade_errors = load_json("grade_errors.json") or []
+    queries = load_json("queries.json") or []
+    split = load_json("session_split.json") or {}
+
+    n_queries = len(candidates)
+    summary, per_query_records = _tally(candidates, grades)
+
+    # Stratified runs deliberately over-sample queries that config B could
+    # answer at all, so a single average over the whole set is not an estimate
+    # of anything. Break the strata out; report each on its own terms.
+    anchorable = {q["query_id"]: q.get("anchorable") for q in queries}
+    strata = {}
+    if any(v is not None for v in anchorable.values()):
+        for name, want in (("anchorable", True), ("unanchorable", False)):
+            subset = [r for r in candidates if anchorable.get(r["query_id"]) is want]
+            if subset:
+                strata[name], _ = _tally(subset, grades)
+        for r in per_query_records:
+            r["anchorable"] = anchorable.get(r["query_id"])
 
     results = {
         "meta": {
@@ -114,6 +147,7 @@ def main() -> None:
         },
         "corpus_stats": corpus_stats,
         "summary": summary,
+        "strata": strata,
         "per_query": per_query_records,
         "config_errors": config_errors,
         "grade_errors": grade_errors,
@@ -124,15 +158,10 @@ def main() -> None:
     with open(os.path.join(HERE, "results.json"), "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2, default=str)
 
-    # ---- console table ----
-    print(f"\n{'config':<8}{'precision':<12}{'items/query':<14}{'coverage':<12}{'zero-inj rate':<14}")
-    for c in CONFIGS:
-        s = summary[c]
-        prec = f"{s['precision']:.0%}" if s["precision"] is not None else "n/a"
-        cov = f"{s['coverage']:.0%}" if s["coverage"] is not None else "n/a"
-        zir = f"{s['zero_injection_rate']:.0%}" if s["zero_injection_rate"] is not None else "n/a"
-        ipq = f"{s['items_per_query']:.2f}" if s["items_per_query"] is not None else "n/a"
-        print(f"{c:<8}{prec:<12}{ipq:<14}{cov:<12}{zir:<14}")
+    # ---- console tables ----
+    _table("ALL QUERIES" + (" (stratified sample -- see strata below)" if strata else ""), summary)
+    for name, sub in strata.items():
+        _table(name.upper() + " QUERIES", sub)
 
     print(f"\nwrote results.json ({n_queries} queries, {len(candidates)} candidate records)")
 
