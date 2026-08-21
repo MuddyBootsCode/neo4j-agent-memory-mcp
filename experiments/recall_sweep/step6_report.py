@@ -7,7 +7,7 @@ import os
 
 from lib import HERE, load_json, save_json
 
-CONFIGS = ["A", "B", "C"]
+CONFIGS = ["A", "B", "C", "D"]
 
 
 def _config_items(record: dict, config: str) -> list[dict]:
@@ -18,6 +18,8 @@ def _config_items(record: dict, config: str) -> list[dict]:
     if config == "C":
         by_id = {it["id"]: it for it in (record.get("config_b") or [])}
         return [by_id[i] for i in (record.get("config_c_ids") or []) if i in by_id]
+    if config == "D":
+        return list(record.get("config_d") or [])
     raise ValueError(config)
 
 

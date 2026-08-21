@@ -98,6 +98,42 @@ async def _config_b(client, files: list[str]) -> list[dict]:
     return rendered
 
 
+# Config D: the MUD-401 hybrid read. Same import-don't-copy rule as B --
+# this is the query coding_recall runs today, with its real constants.
+async def _config_d(client, prompt: str, files: list[str]) -> list[dict]:
+    from agent_memory_mcp.mcp._coding_tools import (
+        ANCHOR_BOOST,
+        CODING_MEMORY_INDEX,
+        HYBRID_CANDIDATES,
+        HYBRID_THRESHOLD,
+        _HYBRID_QUERY,
+        _embed,
+        _render_memory,
+    )
+
+    embedding = await _embed(client, prompt)
+    if embedding is None:
+        return []
+    rows = await client.graph.execute_read(
+        _HYBRID_QUERY,
+        {
+            "index": CODING_MEMORY_INDEX,
+            "embedding": embedding,
+            "candidates": HYBRID_CANDIDATES,
+            "threshold": HYBRID_THRESHOLD,
+            "anchor_boost": ANCHOR_BOOST,
+            "limit": CAP,
+            "repo": REPO_NAME,
+            "files": files,
+            "task_key": None,
+        },
+    )
+    rendered = [_render_memory(row) for row in rows][:CAP]
+    for i, item in enumerate(rendered):
+        item["id"] = f"D{i}"
+    return rendered
+
+
 async def _config_c(prompt: str, b_items: list[dict]) -> tuple[list[str], dict]:
     """Gate config B's items. Returns (kept_ids, trace)."""
     if not b_items:
@@ -137,13 +173,18 @@ async def main() -> None:
             except Exception as exc:  # noqa: BLE001
                 b_items = []
                 errors.append({"query_id": qid, "stage": "config_b", "error": str(exc)[:300]})
+            try:
+                d_items = await _config_d(client, q["prompt"], q["files"])
+            except Exception as exc:  # noqa: BLE001
+                d_items = []
+                errors.append({"query_id": qid, "stage": "config_d", "error": str(exc)[:300]})
 
             c_ids, gate_trace = await _config_c(q["prompt"], b_items)
             if not gate_trace.get("ok") and b_items:
                 errors.append({"query_id": qid, "stage": "config_c_gate", "error": gate_trace.get("error")})
 
             print(
-                f"  A={len(a_items)} B={len(b_items)} C(kept from B)={len(c_ids)}"
+                f"  A={len(a_items)} B={len(b_items)} C(kept from B)={len(c_ids)} D={len(d_items)}"
                 + ("" if gate_trace.get('ok', True) else f"  GATE FAIL: {gate_trace.get('error')}")
             )
 
@@ -155,6 +196,7 @@ async def main() -> None:
                 "config_a": a_items,
                 "config_b": b_items,
                 "config_c_ids": c_ids,
+                "config_d": d_items,
                 "gate_trace": gate_trace,
             })
 

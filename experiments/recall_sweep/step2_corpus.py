@@ -111,6 +111,11 @@ def _session_turns(transcript_path: str) -> list[tuple[str, str]]:
 
 async def main() -> None:
     from agent_memory_mcp.capture.cypher import anchored_memory_write, session_upsert
+    from agent_memory_mcp.mcp._coding_tools import (
+        _embed,
+        ensure_coding_memory_index,
+        memory_embedding_text,
+    )
     from agent_memory_mcp.extraction.coding import extract_coding_memory
     from agent_memory_mcp.extraction.unified import persist_preferences
     from agent_memory_mcp.hook.capture_hook import extract_transcript_text
@@ -183,9 +188,19 @@ async def main() -> None:
                         de["anchor_files"], None,
                     ))
 
+                # Embed every lesson exactly as capture_session_memory does,
+                # so config D measures production's real read against
+                # production's real write.
+                await ensure_coding_memory_index(client)
                 for kind, props, anchor_paths, task_key in items:
+                    vector = await _embed(
+                        client, memory_embedding_text(kind, props)
+                    )
+                    if vector is not None:
+                        stats["embedded"] = stats.get("embedded", 0) + 1
                     q, p = anchored_memory_write(
-                        kind, props, session_id, REPO_NAME, anchor_paths, task_key, ts
+                        kind, props, session_id, REPO_NAME, anchor_paths, task_key,
+                        ts, embedding=vector,
                     )
                     await client.graph.execute_write(q, p)
                     stats["by_kind"][kind] += 1

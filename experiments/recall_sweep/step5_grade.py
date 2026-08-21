@@ -44,9 +44,16 @@ including ones you judge irrelevant.
 
 
 def _combined_items(record: dict) -> list[dict]:
-    """Union of config_a and config_b items for one query, each with its id."""
+    """Union of every retrieving config's items for one query, each with its id.
+
+    Config C is a subset of B by construction, so it reuses B's grades rather
+    than triggering a second pass. A and D can overlap in content but carry
+    distinct ids, and are graded independently -- one judge call per query
+    sees all of them together.
+    """
     combined = list(record.get("config_a") or [])
     combined += list(record.get("config_b") or [])
+    combined += list(record.get("config_d") or [])
     return combined
 
 
