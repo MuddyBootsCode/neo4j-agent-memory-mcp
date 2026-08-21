@@ -1,9 +1,12 @@
 """MCP tools for the coding-memory planes.
 
 Three push-model tools. The first two run inside the recall hook before the
-model round trip, so they must be cheap and deterministic — no LLM calls.
-The third runs at session end, where latency is free, and is the one place
-the extracted plane gets written.
+model round trip, so their cost is paid on every prompt. record_coding_activity
+is deterministic; coding_recall makes ONE batched LLM call to screen what it
+retrieved (~1.5s at the default depth of 10), because cosine ranking alone
+could not tell relevant lessons from irrelevant ones. The third runs at
+session end, where latency is free, and is the one place the extracted plane
+gets written.
 
 - record_coding_activity: write the session/editing/commit facts for a
   coding session via the pure builders in ``capture/cypher.py``.
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -60,6 +64,17 @@ _RECALL_KINDS = ("Decision", "Gotcha", "DeadEnd")
 # Memories returned per recall call. Matches the anchor-first LIMIT it
 # replaces, so the hook's context budget is unchanged.
 _RECALL_LIMIT = 10
+
+# Candidates fetched for the relevance gate to screen. Measured on 20
+# queries at depth 20: cosine ordering barely discriminates (a relevant
+# lesson is about as likely at rank 19 as rank 1), so the top-5 cut reached
+# only 33% of the relevant lessons the retriever could see. Ranks 1-10 hold
+# 55% of them, and a batched gate over 10 candidates costs ~1.5s against
+# ~1.0s for 5 and ~4.3s for 20. 10 is the knee of that curve.
+GATE_DEPTH = int(os.environ.get("NAM_RECALL_GATE_DEPTH", "10"))
+# Set NAM_RECALL_GATE=0 to skip the gate and return the top _RECALL_LIMIT by
+# score -- the MUD-401 behaviour, ~33% precision instead of ~69%.
+GATE_ENABLED = os.environ.get("NAM_RECALL_GATE", "1") != "0"
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
 # constant, never user input — so this is not an injection surface. It keeps
@@ -229,6 +244,61 @@ async def ensure_coding_memory_index(client: Any) -> bool:
     except Exception as e:  # pragma: no cover - DDL permissions vary
         logger.warning(f"could not ensure {CODING_MEMORY_INDEX}: {e}")
         return False
+
+
+def _candidate_block(memories: list[dict[str, Any]]) -> str:
+    """Numbered candidate lines for the gate, ids matching list position."""
+    return "\n".join(
+        f"{i}. [{m.get('kind')}] {m.get('text', '')}"
+        for i, m in enumerate(memories)
+    )
+
+
+async def screen_memories(
+    prompt: str, memories: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Keep only the candidates a judge finds genuinely on point.
+
+    Fail-open in the strong sense: any error, timeout, or malformed verdict
+    set returns the input untouched. A gate that cannot run must degrade to
+    MUD-401 behaviour, never to an empty recall -- the hook injects whatever
+    comes back, so an exception here would silently blind the model.
+
+    A verdict set that does not cover every candidate is discarded whole
+    rather than treated as "the missing ones are rejects": a truncated or
+    confused judge would otherwise look exactly like a decisive one.
+    """
+    if not memories:
+        return memories
+
+    from agent_memory_mcp.baml_client.async_client import b
+    from agent_memory_mcp.providers import default_baml_options
+
+    try:
+        screen = await b.ScreenRecalledMemories(
+            query=prompt,
+            candidates=_candidate_block(memories),
+            baml_options=default_baml_options(),
+        )
+        verdicts = {
+            v.id: bool(v.keep)
+            for v in screen.verdicts
+            if 0 <= v.id < len(memories)
+        }
+    except Exception:
+        logger.warning("recall gate failed; returning ungated", exc_info=True)
+        return memories
+
+    if len(verdicts) != len(memories):
+        logger.warning(
+            f"recall gate covered {len(verdicts)}/{len(memories)} candidates; "
+            "returning ungated"
+        )
+        return memories
+
+    kept = [m for i, m in enumerate(memories) if verdicts.get(i)]
+    logger.info(f"recall gate kept {len(kept)}/{len(memories)}")
+    return kept
 
 
 # Cross-agent overlap read, anchored from the data: start at the given
@@ -583,7 +653,16 @@ def register_coding_tools(mcp: FastMCP) -> None:
         Push-model recall tool — the prompt hook calls this before the model
         round trip. Memories (Decision, Gotcha, DeadEnd) are ranked by
         similarity to ``prompt``, with a boost for candidates anchored to
-        ``files`` or ``task_key`` (strategy "hybrid").
+        ``files`` or ``task_key``, then screened by a relevance judge
+        (strategy "hybrid+gate").
+
+        The gate exists because ranking alone does not discriminate:
+        measured at depth 20, a relevant lesson was about as likely to land
+        at rank 19 as rank 1, so a top-5 cut reached only 33% of the
+        relevant lessons the retriever could see. GATE_DEPTH candidates are
+        fetched and screened in one batched call; the judge scored 69%
+        precision where cosine scored 33%. Set NAM_RECALL_GATE=0 to skip it
+        and take the ungated top ``_RECALL_LIMIT`` instead.
 
         v1 ranked anchor-first and ignored the prompt entirely. Measured on
         a corpus with real file continuity, that scored 12% precision to
@@ -627,7 +706,11 @@ def register_coding_tools(mcp: FastMCP) -> None:
                             "candidates": HYBRID_CANDIDATES,
                             "threshold": HYBRID_THRESHOLD,
                             "anchor_boost": ANCHOR_BOOST,
-                            "limit": _RECALL_LIMIT,
+                            "limit": (
+                                max(GATE_DEPTH, _RECALL_LIMIT)
+                                if GATE_ENABLED
+                                else _RECALL_LIMIT
+                            ),
                             "repo": repo,
                             "files": file_list,
                             "task_key": task_key,
@@ -635,6 +718,10 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     )
                     memories = [_render_memory(row) for row in rows]
                     strategy = "hybrid"
+                    if GATE_ENABLED:
+                        memories = await screen_memories(prompt, memories)
+                        strategy = "hybrid+gate"
+                    memories = memories[:_RECALL_LIMIT]
                 except Exception as e:
                     # Most likely the index does not exist yet (nothing has
                     # been captured since the upgrade). Anchor-first still

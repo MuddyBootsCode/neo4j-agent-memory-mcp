@@ -20,7 +20,7 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","MemoryJudgement","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","TemporalExtraction",]
+          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","MemoryJudgement","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","RecallScreen","RecallVerdict","TemporalExtraction",]
         ), enums=set(
           []
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
@@ -31,7 +31,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 14
+    # Generated classes 16
     # #########################################################################
 
     @property
@@ -87,6 +87,14 @@ class TypeBuilder(type_builder.TypeBuilder):
         return ReasoningStepInputViewer(self)
 
     @property
+    def RecallScreen(self) -> "RecallScreenViewer":
+        return RecallScreenViewer(self)
+
+    @property
+    def RecallVerdict(self) -> "RecallVerdictViewer":
+        return RecallVerdictViewer(self)
+
+    @property
     def TemporalExtraction(self) -> "TemporalExtractionViewer":
         return TemporalExtractionViewer(self)
 
@@ -98,7 +106,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated classes 14
+# Generated classes 16
 # #########################################################################
 
 class CandidateFactAst:
@@ -752,6 +760,88 @@ class ReasoningStepInputProperties:
     @property
     def observation(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("observation"))
+    
+    
+
+
+class RecallScreenAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("RecallScreen")
+        self._properties: typing.Set[str] = set([  "verdicts",  ])
+        self._props = RecallScreenProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "RecallScreenProperties":
+        return self._props
+
+
+class RecallScreenViewer(RecallScreenAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class RecallScreenProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def verdicts(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("verdicts"))
+    
+    
+
+
+class RecallVerdictAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("RecallVerdict")
+        self._properties: typing.Set[str] = set([  "id",  "keep",  ])
+        self._props = RecallVerdictProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "RecallVerdictProperties":
+        return self._props
+
+
+class RecallVerdictViewer(RecallVerdictAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class RecallVerdictProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def id(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("id"))
+    
+    @property
+    def keep(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("keep"))
     
     
 
