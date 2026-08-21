@@ -19,6 +19,14 @@ from typing import Any
 # only string interpolated into any query in this module.
 ANCHORED_KINDS = frozenset({"Decision", "Gotcha", "DeadEnd", "CodingPreference"})
 
+# Kinds coding_recall serves. They carry a shared :CodingMemory label in
+# addition to their own so a single vector index spans all three -- Neo4j
+# vector indexes are per-label, and three indexes would mean three queries to
+# merge by hand. CodingPreference is excluded from recall, so it stays
+# unlabelled and unindexed.
+SHARED_RECALL_LABEL = "CodingMemory"
+RECALL_KINDS = frozenset({"Decision", "Gotcha", "DeadEnd"})
+
 _PRIMITIVES = (str, int, float, bool)
 
 
@@ -143,6 +151,7 @@ def anchored_memory_write(
     anchor_paths: list[str],
     task_key: str | None,
     ts: str,
+    embedding: list[float] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Persist an extracted memory node anchored to files, session, and task.
 
@@ -157,6 +166,12 @@ def anchored_memory_write(
     built when ``task_key`` is given. MATCHes the session; if it does not
     exist the whole write is a silent no-op — run session_upsert first.
     ``ts`` is an ISO 8601 string.
+
+    ``embedding`` travels outside ``props`` because it is a list, which the
+    primitive guard above rejects — Neo4j stores a float list fine, the guard
+    exists to catch nested containers. It is set only for
+    :data:`RECALL_KINDS`, which also gain the :data:`SHARED_RECALL_LABEL` so
+    one vector index serves all of them.
     """
     if kind not in ANCHORED_KINDS:
         raise ValueError(
@@ -170,9 +185,13 @@ def anchored_memory_write(
                 f"got {type(value).__name__}"
             )
 
+    labels = kind
+    if kind in RECALL_KINDS:
+        labels = f"{kind}:{SHARED_RECALL_LABEL}"
+
     query = f"""
         MATCH (s:CodingSession {{id: $session_id}})
-        CREATE (m:{kind})
+        CREATE (m:{labels})
         SET m = $props, m.created_at = datetime($ts)
         MERGE (m)-[:MADE_IN]->(s)
     """
@@ -183,6 +202,11 @@ def anchored_memory_write(
         "anchor_paths": anchor_paths,
         "ts": ts,
     }
+    if embedding is not None and kind in RECALL_KINDS:
+        query += """
+        SET m.embedding = $embedding
+        """
+        params["embedding"] = embedding
     if task_key is not None:
         query += """
         MERGE (t:WorkTask {key: $task_key})
