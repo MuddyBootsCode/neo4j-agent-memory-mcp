@@ -44,6 +44,10 @@ REPO_NAME = os.environ.get("SWEEP_REPO_NAME") or os.path.basename(CORPUS_REPO_RO
 TRANSCRIPTS_DIR = os.environ.get("SWEEP_TRANSCRIPTS_DIR") or claude_project_dir(
     CORPUS_REPO_ROOT
 )
+# Sessions run inside a linked worktree get their own project directory, but
+# git worktrees share one repo identity (git_sweep.repo_name), so their
+# transcripts belong to the same corpus. Opt in with SWEEP_INCLUDE_WORKTREES=1.
+INCLUDE_WORKTREES = os.environ.get("SWEEP_INCLUDE_WORKTREES") == "1"
 SWEEP_DB = "sweepcorpus"
 
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
@@ -56,12 +60,14 @@ _REPO_PREFIX = CORPUS_REPO_ROOT.rstrip("/") + "/"
 
 # Synthetic content injected into the transcript that is NOT something a
 # human typed: task notifications, system reminders, command-name/message
-# expansions, local-command output. These arrive as type:"user" turns and
-# would otherwise pass the "real prompt" filter.
+# expansions, local-command output, `! ...` bash-mode input, and the body of
+# any custom slash command (<*-command>). These arrive as type:"user" turns
+# and would otherwise pass the "real prompt" filter.
 _SYNTHETIC_PREFIX_RE = re.compile(
     r"^<(task-notification|system-reminder|command-message|command-name|"
     r"local-command-stdout|user-prompt-submit-hook|automated-reminder|"
-    r"command-args)\b"
+    r"command-args|bash-input|bash-stdout|bash-stderr|"
+    r"[a-z0-9-]+-command)\b"
 )
 
 
@@ -84,12 +90,16 @@ def save_json(name: str, data) -> None:
 
 
 def list_sessions() -> list[dict]:
-    """All session transcripts directly under TRANSCRIPTS_DIR, oldest first.
+    """All session transcripts for the corpus repo, oldest first.
 
-    Ignores the memory/ subdirectory (per instructions) and anything not a
-    top-level *.jsonl file.
+    Top-level *.jsonl under TRANSCRIPTS_DIR, plus the same for each linked
+    worktree's project directory when INCLUDE_WORKTREES is set. Ignores the
+    memory/ and subagents/ subdirectories -- only sessions a human drove.
     """
-    paths = glob.glob(os.path.join(TRANSCRIPTS_DIR, "*.jsonl"))
+    dirs = [TRANSCRIPTS_DIR]
+    if INCLUDE_WORKTREES:
+        dirs += sorted(glob.glob(TRANSCRIPTS_DIR + "--claude-worktrees-*"))
+    paths = [p for d in dirs for p in glob.glob(os.path.join(d, "*.jsonl"))]
     sessions = []
     for path in paths:
         stem = os.path.splitext(os.path.basename(path))[0]
