@@ -210,6 +210,14 @@ async def ensure_coding_memory_index(client: Any) -> bool:
     embedder = _embedder(client)
     dims = getattr(embedder, "dimensions", None) if embedder else None
     if not isinstance(dims, int) or dims <= 0:
+        # Silence here is how a whole run ends up with embedded nodes and no
+        # index to find them through. Embedders are created lazily, so this
+        # usually means the caller ran before anything was embedded.
+        logger.warning(
+            f"skipping {CODING_MEMORY_INDEX}: embedder "
+            f"{type(embedder).__name__ if embedder else None} reports "
+            f"dimensions={dims!r}; embed something first"
+        )
         return False
     try:
         # $dims cannot be a query parameter in index DDL, so it is formatted

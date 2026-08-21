@@ -190,14 +190,21 @@ async def main() -> None:
 
                 # Embed every lesson exactly as capture_session_memory does,
                 # so config D measures production's real read against
-                # production's real write.
-                await ensure_coding_memory_index(client)
-                for kind, props, anchor_paths, task_key in items:
+                # production's real write -- including the order. The
+                # embedder is created lazily, so ensuring the index before
+                # the first embed finds no dimensions and silently skips.
+                vectors = []
+                for kind, props, _paths, _task in items:
                     vector = await _embed(
                         client, memory_embedding_text(kind, props)
                     )
                     if vector is not None:
                         stats["embedded"] = stats.get("embedded", 0) + 1
+                    vectors.append(vector)
+                if any(v is not None for v in vectors):
+                    await ensure_coding_memory_index(client)
+
+                for (kind, props, anchor_paths, task_key), vector in zip(items, vectors):
                     q, p = anchored_memory_write(
                         kind, props, session_id, REPO_NAME, anchor_paths, task_key,
                         ts, embedding=vector,
