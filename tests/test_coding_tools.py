@@ -709,7 +709,7 @@ class TestHybridRecall:
             agent_id="agent-1", repo="my-repo",
         ))
 
-        assert result["strategy"] == "hybrid"
+        assert result["strategy"] == "hybrid+gate"
         assert result["fallback"] is False
         assert result["memories"][0]["text"] == "pin it"
         assert result["memories"][0]["score"] == 0.61
@@ -779,7 +779,7 @@ class TestHybridRecall:
             repo="my-repo", files=["a.py"],
         ))
 
-        assert result["strategy"] == "hybrid"
+        assert result["strategy"] == "hybrid+gate"
         assert result["memories"] == []
         # Only the vector leg and overlaps — the anchor-first query never ran.
         assert not any("ORDER BY m.created_at DESC" in q for q, _ in graph.reads)
@@ -846,3 +846,115 @@ class TestCaptureEmbeds:
         ))
         assert result["embedded"] == 0
         assert not any(CODING_MEMORY_INDEX in q for q, _ in graph2.writes)
+
+
+class TestRecallGate:
+    """MUD-401 follow-up: cosine ranking cannot tell relevant from irrelevant."""
+
+    @staticmethod
+    def _screen(monkeypatch, verdicts=None, raises=False):
+        """Patch the BAML screen; verdicts is {id: keep}."""
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        async def fake(query, candidates, baml_options=None):
+            if raises:
+                raise RuntimeError("judge down")
+            out = MagicMock()
+            out.verdicts = [
+                types.SimpleNamespace(id=i, keep=k)
+                for i, k in (verdicts or {}).items()
+            ]
+            return out
+
+        mod = types.ModuleType("agent_memory_mcp.baml_client.async_client")
+        mod.b = MagicMock()
+        mod.b.ScreenRecalledMemories = fake
+        monkeypatch.setitem(
+            sys.modules, "agent_memory_mcp.baml_client.async_client", mod
+        )
+
+    @staticmethod
+    def _rows(n):
+        return [{
+            "labels": ["Gotcha", "CodingMemory"], "props": {"text": f"lesson {i}"},
+            "files": [], "task": None, "at": "2026-08-21T00:00:00Z",
+            "score": 0.6, "anchored": False,
+        } for i in range(n)]
+
+    async def test_gate_drops_what_the_judge_rejects(self, monkeypatch, mock_ctx):
+        self._screen(monkeypatch, {0: True, 1: False, 2: True})
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert result["strategy"] == "hybrid+gate"
+        assert [m["text"] for m in result["memories"]] == ["lesson 0", "lesson 2"]
+
+    async def test_gate_failure_returns_ungated(self, monkeypatch, mock_ctx):
+        """A dead judge must degrade to MUD-401 behaviour, never to empty recall."""
+        self._screen(monkeypatch, raises=True)
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert len(result["memories"]) == 3
+
+    async def test_partial_verdicts_are_discarded_whole(self, monkeypatch, mock_ctx):
+        """A truncated judge must not look like a decisive one."""
+        self._screen(monkeypatch, {0: True})  # 1 verdict for 3 candidates
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert len(result["memories"]) == 3
+
+    async def test_gate_can_be_disabled(self, monkeypatch, mock_ctx):
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "GATE_ENABLED", False)
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert result["strategy"] == "hybrid"
+        assert graph.reads[0][1]["limit"] == ct._RECALL_LIMIT
+
+    async def test_gate_retrieves_at_gate_depth(self, monkeypatch, mock_ctx):
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        self._screen(monkeypatch, {i: True for i in range(10)})
+        graph = FakeGraph(read_results=[self._rows(10)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        await tools["coding_recall"](mock_ctx, prompt="q", agent_id="a", repo="r")
+
+        assert graph.reads[0][1]["limit"] == max(ct.GATE_DEPTH, ct._RECALL_LIMIT)
+
+    async def test_result_is_capped_at_recall_limit(self, monkeypatch, mock_ctx):
+        """Gate depth may exceed the return limit; the caller's budget is fixed."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "GATE_DEPTH", 14)
+        self._screen(monkeypatch, {i: True for i in range(14)})
+        graph = FakeGraph(read_results=[self._rows(14)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert len(result["memories"]) == ct._RECALL_LIMIT
