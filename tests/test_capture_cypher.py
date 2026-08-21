@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from agent_memory_mcp.capture.cypher import (
+    RECALL_KINDS,
     anchored_memory_write,
     commit_upsert,
     editing_upsert,
@@ -209,7 +210,13 @@ class TestAnchoredMemoryWrite:
     @pytest.mark.parametrize("kind", ALLOWED_KINDS)
     def test_accepts_each_allowlisted_kind(self, kind):
         query, _ = anchored_memory_write(kind, {"text": "x"}, "s", "r", [], None, TS)
-        assert f"CREATE (m:{kind})" in query
+        # Recall kinds carry the shared label so one vector index spans them.
+        expected = (
+            f"CREATE (m:{kind}:CodingMemory)"
+            if kind in RECALL_KINDS
+            else f"CREATE (m:{kind})"
+        )
+        assert expected in query
 
     @pytest.mark.parametrize(
         "bad_value", [{"nested": 1}, [1, 2], (1,), {1, 2}]

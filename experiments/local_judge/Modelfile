@@ -1,0 +1,2 @@
+FROM rafw007/Qwen3.6-35B-A3B-mlx-claude-coder-abliterated:latest
+SYSTEM "You are a precise assistant. Follow the user's instructions exactly."
