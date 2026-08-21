@@ -10,41 +10,49 @@ with real file continuity and got an answer.
 
 ## Headline (MUD-401, gradgraph-auth-platform + worktrees)
 
+Four configs. **B is what production shipped; D is what it does now.**
+
 Anchorable queries — the stratum chosen to give anchor-first its best case:
 
 | config | precision | items/query | coverage | zero-injection |
 |---|---|---|---|---|
-| A. cosine-only | **52%** (78/150) | 5.00 | 97% | 0% |
-| B. anchor-first | **12%** (17/147) | 4.90 | 33% | 0% |
-| C. anchor-first + judge gate | **24%** (15/63) | 2.10 | 33% | 17% |
+| A. cosine over messages | **51%** (77/150) | 5.00 | 93% | 0% |
+| B. anchor-first (v1) | **13%** (19/147) | 4.90 | 27% | 0% |
+| C. anchor-first + judge gate | 25% (18/73) | 2.43 | 27% | 7% |
+| D. hybrid: similarity + anchor boost | **25%** (38/150) | 5.00 | 67% | 0% |
 
-**Anchor-first is four times worse than cosine-only on precision, on the
-queries selected to favour it.** The judge gate doubles B's precision by
-discarding 57% of its items, and still lands less than half of A.
-
-Config B is production's `_MEMORIES_QUERY`, imported directly rather than
-copied — this is what `coding_recall` returns today.
-
-Unanchorable queries (the other half of the sample):
+Unanchorable queries — the other half of the sample:
 
 | config | precision | items/query | coverage | zero-injection |
 |---|---|---|---|---|
-| A. cosine-only | 50% (73/147) | 5.00 | 87% | 0% |
-| B. anchor-first | n/a — 0 candidates | 0.00 | 0% | 100% |
-| C. anchor-first + judge | n/a — inherits B | 0.00 | 0% | 100% |
+| A. cosine over messages | 41% (61/150) | 5.00 | 77% | 0% |
+| B / C | n/a — 0 candidates | 0.00 | 0% | 100% |
+| D. hybrid | **33%** (49/149) | 5.00 | 63% | 0% |
 
-A holds 50% precision where B returns nothing at all. Cosine-only degrades
-gracefully; anchor-first degrades to silence.
+**The fix works.** Against the v1 read it replaces, on identical data graded
+in the same pass by the same judge: precision roughly doubles (13% -> 25%),
+coverage goes from 27% to 67%, and the 100% zero-injection rate on
+unanchorable queries goes to 0% at 33% precision. Anchor-first answered half
+the queries; the hybrid answers all of them.
+
+**It does not reach config A**, and that comparison is not like-for-like: A
+searches 2,581 messages and 68 preferences, D searches 178 lessons. A is
+fourteen times the corpus. A also returns raw conversation turns rather than
+distilled lessons, so it is a different product, not a drop-in replacement --
+but the gap is large enough to be worth a follow-up: the recall hook
+currently reaches the message plane only when coding_recall declares
+fallback, and on this evidence it should reach it every time.
 
 ## What this says about the design
 
 1. **The anchor is the wrong retrieval key.** Sharing a file with a past
    session says the two are *near* each other, not that the past lesson
-   answers the present question. 88% of what B returned was judged
+   answers the present question. 87% of what B returned was judged
    off-point.
-2. **The prompt is the signal, and `coding_recall` throws it away.** Its
-   own docstring says `prompt` is "accepted for future relevance ranking
-   but unused in v1". Config A does nothing but use it, and wins fourfold.
+2. **The prompt is the signal, and v1 `coding_recall` threw it away.** Its
+   docstring said `prompt` was "accepted for future relevance ranking but
+   unused in v1". Using it doubles precision (config D) and using it over a
+   larger corpus quadruples it (config A).
 3. **Anchor-first cannot fire most of the time.** Only 30 of 146 candidate
    prompts (21%) had a touched file the corpus had also seen. Most prompts
    arrive before anything has been edited in that session, so there is
@@ -53,8 +61,9 @@ gracefully; anchor-first degrades to silence.
    precision at half the volume — but it is a filter, not a retriever. It
    cannot rescue candidates the anchor never surfaced.
 
-The cheapest change consistent with all four: rank by prompt similarity and
-use the anchor as a boost, not as the gate.
+The cheapest change consistent with all four -- shipped as config D and now
+production's read: rank by prompt similarity and use the anchor as a boost,
+not as the gate.
 
 ## Corpus
 
@@ -92,10 +101,16 @@ a deliberately biased sample estimates nothing.
   actually fired here (63 items kept from 147), so this bias is live.
 - **Stratified sample.** The "ALL QUERIES" table over-samples anchorable
   queries 30/60 against a true rate of 21%. Read the strata, not the total.
+- **Run-to-run variance is real.** The first MUD-401 run scored A at 52%/50%
+  across the two strata; this one, after a corpus rebuild, scores 51%/41%.
+  Extraction runs on a local model and grading is a fresh LLM pass, so treat
+  single-run gaps under ~10 points as noise. The B-vs-D comparison is not
+  exposed to this: both were retrieved from the same corpus and graded in the
+  same pass by the same judge.
 - **Corpus from one project**, extracted by a local 35B model with
   384-dimensional local embeddings. No claim of generalization to other
   codebases, working styles, or extraction models.
-- **Judge compliance was good**: 3 of 447 graded item-slots (0.7%) came back
+- **Judge compliance was good**: 1 of 596 graded item-slots (0.7%) came back
   without a verdict and were excluded from precision's denominator. Zero
   config errors, zero grading errors.
 
@@ -130,6 +145,9 @@ pairs then, 51% on 297 now (151/297 across both strata).
    - **B** — production's `_MEMORIES_QUERY`, imported from
      `src/agent_memory_mcp/mcp/_coding_tools.py`.
    - **C** — every config-B item screened by `qwen-judge`.
+   - **D** — production's `_HYBRID_QUERY` with its real constants
+     (`HYBRID_THRESHOLD`, `ANCHOR_BOOST`, `HYBRID_CANDIDATES`), also
+     imported rather than copied.
 5. **Grading** (`step5_grade.py`). Every injected pair graded by `qwen-judge`
    under an audit framing worded independently of the gate, explicitly
    warning against crediting shared vocabulary over genuine relevance.
