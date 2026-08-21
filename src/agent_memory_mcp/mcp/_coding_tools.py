@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Context
 
 from agent_memory_mcp.capture.cypher import (
+    RECALL_KINDS,
+    SHARED_RECALL_LABEL,
     anchored_memory_write,
     commit_upsert,
     editing_upsert,
@@ -54,6 +56,10 @@ _CAPTURE_KINDS = ("Decision", "Gotcha", "DeadEnd", "CodingPreference")
 # Extracted-memory kinds served by coding_recall (CodingPreference is
 # deliberately excluded from anchor-first recall in v1).
 _RECALL_KINDS = ("Decision", "Gotcha", "DeadEnd")
+
+# Memories returned per recall call. Matches the anchor-first LIMIT it
+# replaces, so the hook's context budget is unchanged.
+_RECALL_LIMIT = 10
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
 # constant, never user input — so this is not an injection surface. It keeps
@@ -91,6 +97,131 @@ _MEMORIES_QUERY = """
            head(tasks) AS task,
            toString(m.created_at) AS at
 """.replace("__KIND_DISJUNCTION__", _KIND_DISJUNCTION)
+
+# --- Hybrid recall (MUD-401) ------------------------------------------
+#
+# The anchor-first query above is what MUD-395 shipped and MUD-401 measured:
+# on a corpus with real file continuity it scored 12% precision against 52%
+# for plain embedding search, because sharing a file with a past session says
+# the two are NEAR each other, not that the old lesson answers the new
+# question. The prompt is the signal, and v1 threw it away.
+#
+# So: retrieve by prompt similarity, and use the anchor as a boost rather
+# than the gate. A lesson anchored to a file the caller is editing outranks
+# an equally-similar one that is not, but an unanchored lesson can still be
+# returned, and an anchored-but-irrelevant one no longer crowds the list.
+CODING_MEMORY_INDEX = "coding_memory_embedding_idx"
+
+# Added to cosine similarity when a candidate is anchored to one of the
+# caller's files or their task. Cosine over MiniLM lands most real
+# neighbours in 0.3-0.7, so 0.15 reorders within a band without letting a
+# weak anchored match jump a strong unanchored one.
+ANCHOR_BOOST = 0.15
+# Floor for the vector leg. Deliberately below the server's 0.7 default:
+# prompts are questions and lessons are statements, so honest matches score
+# lower than statement-to-statement pairs would.
+HYBRID_THRESHOLD = 0.45
+# Vector candidates fetched before boosting and trimming to the caller's
+# limit. Oversampling is what gives the boost something to reorder.
+HYBRID_CANDIDATES = 40
+
+_HYBRID_QUERY = """
+    CALL db.index.vector.queryNodes($index, $candidates, $embedding)
+    YIELD node AS m, score
+    WHERE score >= $threshold
+    MATCH (m)-[:MADE_IN]->(s:CodingSession {repo: $repo})
+    WITH DISTINCT m, score
+    WITH m, score,
+         CASE WHEN EXISTS {
+                  MATCH (m)-[:ABOUT]->(f:CodeFile)
+                  WHERE f.repo = $repo AND f.path IN $files
+              }
+              OR EXISTS {
+                  MATCH (m)-[:CONCERNS]->(t:WorkTask)
+                  WHERE t.key = $task_key
+              }
+         THEN $anchor_boost ELSE 0.0 END AS boost
+    WITH m, score, score + boost AS ranked, boost > 0 AS anchored
+    ORDER BY ranked DESC
+    LIMIT $limit
+    OPTIONAL MATCH (m)-[:ABOUT]->(af:CodeFile)
+    OPTIONAL MATCH (m)-[:CONCERNS]->(wt:WorkTask)
+    WITH m, score, ranked, anchored,
+         [p IN collect(DISTINCT af.path) WHERE p IS NOT NULL] AS files,
+         [k IN collect(DISTINCT wt.key) WHERE k IS NOT NULL] AS tasks
+    ORDER BY ranked DESC
+    RETURN labels(m) AS labels,
+           properties(m) AS props,
+           files,
+           head(tasks) AS task,
+           toString(m.created_at) AS at,
+           score,
+           anchored
+"""
+
+_CREATE_INDEX = (
+    f"CREATE VECTOR INDEX {CODING_MEMORY_INDEX} IF NOT EXISTS "
+    f"FOR (m:{SHARED_RECALL_LABEL}) ON (m.embedding) "
+    "OPTIONS {indexConfig: {`vector.dimensions`: $dims, "
+    "`vector.similarity_function`: 'cosine'}}"
+)
+
+
+def memory_embedding_text(kind: str, props: dict[str, Any]) -> str:
+    """The text embedded for a lesson node.
+
+    DeadEnd carries its meaning across two properties, so both go in; the
+    others embed the one field a reader would recognise the lesson by.
+    """
+    if kind == "DeadEnd":
+        return f"{props.get('attempt', '')} — failed: {props.get('why_failed', '')}".strip()
+    return str(props.get("text", "")).strip()
+
+
+def _embedder(client: Any) -> Any:
+    """The client's embedder, or None when embeddings are unavailable."""
+    return getattr(client.long_term, "_embedder", None)
+
+
+async def _embed(client: Any, text: str) -> list[float] | None:
+    """Embed one string, or return None if that is not possible.
+
+    Never raises: every caller has a working non-embedded path, so an
+    embedder that is missing, misconfigured, or failing degrades to the
+    anchor-first behaviour instead of failing the write or the read.
+    """
+    embedder = _embedder(client)
+    if embedder is None or not text:
+        return None
+    try:
+        return await embedder.embed(text)
+    except Exception as e:  # pragma: no cover - provider-specific failures
+        logger.warning(f"embedding failed, falling back to anchor-only: {e}")
+        return None
+
+
+async def ensure_coding_memory_index(client: Any) -> bool:
+    """Create the lesson vector index if it does not exist yet.
+
+    Idempotent (``IF NOT EXISTS``) and best-effort: returns False when the
+    embedder reports no usable integer dimension count or the DDL fails,
+    which sends recall down the anchor-first path rather than erroring.
+    """
+    embedder = _embedder(client)
+    dims = getattr(embedder, "dimensions", None) if embedder else None
+    if not isinstance(dims, int) or dims <= 0:
+        return False
+    try:
+        # $dims cannot be a query parameter in index DDL, so it is formatted
+        # in -- it is an int from the embedder config, never user input.
+        await client.graph.execute_write(
+            _CREATE_INDEX.replace("$dims", str(dims)), {}
+        )
+        return True
+    except Exception as e:  # pragma: no cover - DDL permissions vary
+        logger.warning(f"could not ensure {CODING_MEMORY_INDEX}: {e}")
+        return False
+
 
 # Cross-agent overlap read, anchored from the data: start at the given
 # CodeFiles / WorkTask and traverse to sessions and agents, so the match never
@@ -134,13 +265,18 @@ def _render_memory(row: dict[str, Any]) -> dict[str, Any]:
         text = f"{props.get('attempt', '')} — failed: {props.get('why_failed', '')}"
     else:
         text = props.get("text", "")
-    return {
+    rendered = {
         "kind": kind,
         "text": text,
         "files": row.get("files") or [],
         "task": row.get("task"),
         "at": row.get("at"),
     }
+    # Only the hybrid query returns these; the anchor-first one has no score.
+    if row.get("score") is not None:
+        rendered["score"] = round(float(row["score"]), 4)
+        rendered["anchored"] = bool(row.get("anchored"))
+    return rendered
 
 
 def register_coding_tools(mcp: FastMCP) -> None:
@@ -278,8 +414,14 @@ def register_coding_tools(mcp: FastMCP) -> None:
         not MERGEd, so the retry contract is NOT idempotent — a retry
         after a partial failure may duplicate already-stored items.
 
+        Every Decision/Gotcha/DeadEnd is embedded before it is written so
+        coding_recall can rank it against a prompt; ``embedded`` reports how
+        many got a vector. An unavailable embedder is not an error — the
+        item is stored without one and is simply unreachable by the vector
+        leg of recall.
+
         Returns JSON: {"stored", "by_kind", "dropped_unanchored",
-        "anchor_rate"}.
+        "anchor_rate", "embedded"}.
         """
         client = get_client(ctx)
 
@@ -297,6 +439,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
         by_kind = {kind: 0 for kind in _CAPTURE_KINDS}
         dropped_unanchored = 0
         anchor_rate = None
+        embedded = 0
 
         try:
             extracted = await extract_coding_memory(
@@ -361,16 +504,34 @@ def register_coding_tools(mcp: FastMCP) -> None:
                 )
 
             if items:
+                # Embed before writing anything: the index only needs to
+                # exist if at least one vector is going in, so an absent or
+                # broken embedder costs no DDL and no behaviour change.
+                embeddings: list[list[float] | None] = []
+                for kind, props, _anchor_paths, _task in items:
+                    vector = None
+                    if kind in RECALL_KINDS:
+                        vector = await _embed(
+                            client, memory_embedding_text(kind, props)
+                        )
+                        if vector is not None:
+                            embedded += 1
+                    embeddings.append(vector)
+
                 # Session first — the memory writes MATCH the session node.
                 query, params = session_upsert(
                     agent_id, session_id, repo, branch, task_key, ts
                 )
                 await client.graph.execute_write(query, params)
+                if embedded:
+                    await ensure_coding_memory_index(client)
 
-                for kind, props, anchor_paths, item_task_key in items:
+                for (kind, props, anchor_paths, item_task_key), vector in zip(
+                    items, embeddings
+                ):
                     query, params = anchored_memory_write(
                         kind, props, session_id, repo, anchor_paths,
-                        item_task_key, ts,
+                        item_task_key, ts, embedding=vector,
                     )
                     await client.graph.execute_write(query, params)
                     by_kind[kind] += 1
@@ -381,6 +542,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     "by_kind": by_kind,
                     "dropped_unanchored": dropped_unanchored,
                     "anchor_rate": anchor_rate,
+                    "embedded": embedded,
                 }
             )
 
@@ -393,6 +555,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     "by_kind": by_kind,
                     "dropped_unanchored": dropped_unanchored,
                     "anchor_rate": anchor_rate,
+                    "embedded": embedded,
                 }
             )
 
@@ -407,38 +570,80 @@ def register_coding_tools(mcp: FastMCP) -> None:
         task_key: str | None = None,
         overlap_window_hours: float = 24.0,
     ) -> str:
-        """Recall coding memories anchored to files or a task, plus overlaps.
+        """Recall coding memories relevant to the prompt, plus overlaps.
 
         Push-model recall tool — the prompt hook calls this before the model
-        round trip. Memories (Decision, Gotcha, DeadEnd) are fetched
-        anchor-first: reached from the given files (ABOUT) or task
-        (CONCERNS), newest first, limit 10. ``prompt`` is accepted for future
-        relevance ranking but unused in v1.
+        round trip. Memories (Decision, Gotcha, DeadEnd) are ranked by
+        similarity to ``prompt``, with a boost for candidates anchored to
+        ``files`` or ``task_key`` (strategy "hybrid").
+
+        v1 ranked anchor-first and ignored the prompt entirely. Measured on
+        a corpus with real file continuity, that scored 12% precision to
+        plain embedding search's 52% — sharing a file with a past session
+        means the two are near each other, not that the old lesson answers
+        the new question. The anchor is now a tiebreaker, not the gate.
+
+        Falls back to the v1 anchor-first read (strategy "anchor") only when
+        the hybrid leg cannot run at all — no embedder, no vector index, or
+        an empty prompt — never merely because it matched nothing. An
+        anchored candidate the prompt does not match is the 88% this change
+        exists to stop injecting.
 
         Overlaps report sessions of OTHER agents that touched the same files
-        or task within ``overlap_window_hours``.
+        or task within ``overlap_window_hours``; they are anchor-based and
+        unaffected.
 
-        When neither ``files`` nor ``task_key`` is given, no queries run and
-        ``fallback`` is true — callers should fall back to memory_search.
+        ``fallback`` is true when neither leg could run, and callers should
+        fall back to memory_search.
 
-        Returns JSON: {"memories": [...], "fallback": bool, "overlaps":
-        [...]}.
+        Returns JSON: {"memories": [...], "fallback": bool, "strategy":
+        "hybrid"|"anchor"|null, "overlaps": [...]}.
         """
         client = get_client(ctx)
         file_list = list(files or [])
-        fallback = not file_list and task_key is None
+        has_anchor = bool(file_list) or task_key is not None
 
         try:
             memories: list[dict[str, Any]] = []
             overlaps: list[dict[str, Any]] = []
+            strategy = None
 
-            if not fallback:
+            embedding = await _embed(client, (prompt or "").strip())
+            if embedding is not None:
+                try:
+                    rows = await client.graph.execute_read(
+                        _HYBRID_QUERY,
+                        {
+                            "index": CODING_MEMORY_INDEX,
+                            "embedding": embedding,
+                            "candidates": HYBRID_CANDIDATES,
+                            "threshold": HYBRID_THRESHOLD,
+                            "anchor_boost": ANCHOR_BOOST,
+                            "limit": _RECALL_LIMIT,
+                            "repo": repo,
+                            "files": file_list,
+                            "task_key": task_key,
+                        },
+                    )
+                    memories = [_render_memory(row) for row in rows]
+                    strategy = "hybrid"
+                except Exception as e:
+                    # Most likely the index does not exist yet (nothing has
+                    # been captured since the upgrade). Anchor-first still
+                    # works on un-embedded nodes, so use it.
+                    logger.warning(f"hybrid recall unavailable: {e}")
+
+            if strategy is None and has_anchor:
                 rows = await client.graph.execute_read(
                     _MEMORIES_QUERY,
                     {"repo": repo, "files": file_list, "task_key": task_key},
                 )
                 memories = [_render_memory(row) for row in rows]
+                strategy = "anchor"
 
+            fallback = strategy is None
+
+            if has_anchor:
                 overlap_rows = await client.graph.execute_read(
                     _OVERLAPS_QUERY,
                     {
@@ -460,7 +665,12 @@ def register_coding_tools(mcp: FastMCP) -> None:
                 ]
 
             return json.dumps(
-                {"memories": memories, "fallback": fallback, "overlaps": overlaps}
+                {
+                    "memories": memories,
+                    "fallback": fallback,
+                    "strategy": strategy,
+                    "overlaps": overlaps,
+                }
             )
 
         except Exception as e:
