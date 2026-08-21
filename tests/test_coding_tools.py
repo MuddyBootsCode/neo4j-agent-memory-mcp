@@ -39,10 +39,32 @@ def mock_ctx():
     return MagicMock()
 
 
-def _register(monkeypatch, graph):
-    """Register the coding tools against a fake client wrapping ``graph``."""
+class FakeEmbedder:
+    """Embedder returning a fixed vector, or raising when asked to."""
+
+    def __init__(self, dimensions=4, fail=False):
+        self.dimensions = dimensions
+        self.fail = fail
+        self.texts = []
+
+    async def embed(self, text):
+        self.texts.append(text)
+        if self.fail:
+            raise RuntimeError("embedder down")
+        return [0.1] * self.dimensions
+
+
+def _register(monkeypatch, graph, embedder=None):
+    """Register the coding tools against a fake client wrapping ``graph``.
+
+    ``embedder`` is attached where the production code looks for it
+    (``client.long_term._embedder``); the default MagicMock has no usable
+    one, which is what keeps the anchor-only paths under test.
+    """
     mock_client = MagicMock()
     mock_client.graph = graph
+    if embedder is not None:
+        mock_client.long_term._embedder = embedder
     monkeypatch.setattr(
         "agent_memory_mcp.mcp._coding_tools.get_client",
         lambda ctx: mock_client,
@@ -267,9 +289,16 @@ class TestCodingRecall:
             repo="my-repo",
         )
 
+        # No embedder in the fake client, so the hybrid leg cannot run; with
+        # no files and no task there is no anchor leg either.
         assert graph.reads == []
         result = json.loads(result_str)
-        assert result == {"memories": [], "fallback": True, "overlaps": []}
+        assert result == {
+            "memories": [],
+            "fallback": True,
+            "strategy": None,
+            "overlaps": [],
+        }
 
     async def test_overlaps_shape_window_and_self_exclusion(
         self, monkeypatch, mock_ctx
@@ -460,7 +489,7 @@ class TestCaptureSessionMemory:
         assert len(ts_values) == 1
 
         d1_query, d1_params = graph.writes[1]
-        assert "CREATE (m:Decision)" in d1_query
+        assert "CREATE (m:Decision:CodingMemory)" in d1_query
         # Prop names must match coding_recall's _MEMORIES_QUERY contract.
         assert set(d1_params["props"]) == {"text", "reason", "confidence"}
         assert d1_params["props"]["text"] == "use uv everywhere"
@@ -470,19 +499,19 @@ class TestCaptureSessionMemory:
         assert "CONCERNS" in d1_query
 
         d2_query, d2_params = graph.writes[2]
-        assert "CREATE (m:Decision)" in d2_query
+        assert "CREATE (m:Decision:CodingMemory)" in d2_query
         # concerns_task=False: no task edge even though task_key was given.
         assert "task_key" not in d2_params
         assert "CONCERNS" not in d2_query
         assert d2_params["anchor_paths"] == ["b.py"]
 
         g_query, g_params = graph.writes[3]
-        assert "CREATE (m:Gotcha)" in g_query
+        assert "CREATE (m:Gotcha:CodingMemory)" in g_query
         assert set(g_params["props"]) == {"text", "confidence"}
         assert g_params["anchor_paths"] == ["a.py", "b.py"]
 
         de_query, de_params = graph.writes[4]
-        assert "CREATE (m:DeadEnd)" in de_query
+        assert "CREATE (m:DeadEnd:CodingMemory)" in de_query
         assert set(de_params["props"]) == {"attempt", "why_failed", "confidence"}
         assert de_params["task_key"] == "MUD-395"
 
@@ -504,6 +533,7 @@ class TestCaptureSessionMemory:
             },
             "dropped_unanchored": 1,
             "anchor_rate": 0.8,
+            "embedded": 0,
         }
 
     async def test_empty_transcript_skips_extraction_and_writes(
@@ -616,6 +646,7 @@ class TestCaptureSessionMemory:
             },
             "dropped_unanchored": 2,
             "anchor_rate": None,
+            "embedded": 0,
         }
 
     async def test_write_failure_reports_partial_counts(
@@ -644,3 +675,174 @@ class TestCaptureSessionMemory:
         assert result["by_kind"]["Decision"] == 1
         assert result["by_kind"]["Gotcha"] == 0
         assert result["dropped_unanchored"] == 1
+
+
+class TestHybridRecall:
+    """MUD-401: rank by prompt similarity, anchor as a boost not a gate."""
+
+    def test_embedding_text_joins_dead_end_fields(self):
+        from agent_memory_mcp.mcp._coding_tools import memory_embedding_text
+
+        assert memory_embedding_text("Gotcha", {"text": "pin the version"}) == (
+            "pin the version"
+        )
+        assert memory_embedding_text(
+            "DeadEnd", {"attempt": "used a stash", "why_failed": "it was a no-op"}
+        ) == "used a stash — failed: it was a no-op"
+
+    async def test_prompt_alone_is_enough_no_anchors_needed(
+        self, monkeypatch, mock_ctx
+    ):
+        """v1 returned nothing without files or a task; the vector leg does not need them."""
+        from agent_memory_mcp.mcp._coding_tools import CODING_MEMORY_INDEX
+
+        rows = [{
+            "labels": ["Gotcha", "CodingMemory"], "props": {"text": "pin it"},
+            "files": [], "task": None, "at": "2026-08-21T00:00:00Z",
+            "score": 0.61, "anchored": False,
+        }]
+        graph = FakeGraph(read_results=[rows])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="why is the version floating?",
+            agent_id="agent-1", repo="my-repo",
+        ))
+
+        assert result["strategy"] == "hybrid"
+        assert result["fallback"] is False
+        assert result["memories"][0]["text"] == "pin it"
+        assert result["memories"][0]["score"] == 0.61
+        assert result["memories"][0]["anchored"] is False
+        # One read: the vector leg. No anchors, so no overlaps query.
+        assert len(graph.reads) == 1
+        assert graph.reads[0][1]["index"] == CODING_MEMORY_INDEX
+
+    async def test_hybrid_passes_boost_threshold_and_anchors(
+        self, monkeypatch, mock_ctx
+    ):
+        from agent_memory_mcp.mcp._coding_tools import (
+            ANCHOR_BOOST,
+            HYBRID_THRESHOLD,
+            _RECALL_LIMIT,
+        )
+
+        embedder = FakeEmbedder()
+        graph = FakeGraph(read_results=[[], []])
+        tools = _register(monkeypatch, graph, embedder=embedder)
+
+        await tools["coding_recall"](
+            mock_ctx, prompt="what broke the deploy?", agent_id="agent-1",
+            repo="my-repo", files=["infra/api.ts"], task_key="MUD-401",
+        )
+
+        assert embedder.texts == ["what broke the deploy?"]
+        params = graph.reads[0][1]
+        assert params["anchor_boost"] == ANCHOR_BOOST
+        assert params["threshold"] == HYBRID_THRESHOLD
+        assert params["limit"] == _RECALL_LIMIT
+        assert params["files"] == ["infra/api.ts"]
+        assert params["task_key"] == "MUD-401"
+        # Anchors present, so overlaps still runs.
+        assert len(graph.reads) == 2
+
+    async def test_missing_index_falls_back_to_anchor_first(
+        self, monkeypatch, mock_ctx
+    ):
+        """Nothing captured since the upgrade means no index; anchor-first still works."""
+        class ExplodingGraph(FakeGraph):
+            async def execute_read(self, query, params):
+                if "db.index.vector.queryNodes" in query:
+                    raise RuntimeError("no such index")
+                return await super().execute_read(query, params)
+
+        graph = ExplodingGraph(read_results=[[], []])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="anything", agent_id="agent-1", repo="my-repo",
+            files=["a.py"],
+        ))
+
+        assert result["strategy"] == "anchor"
+        assert result["fallback"] is False
+
+    async def test_empty_hybrid_result_does_not_fall_back(
+        self, monkeypatch, mock_ctx
+    ):
+        """An anchored candidate the prompt does not match is the 88% we stopped injecting."""
+        graph = FakeGraph(read_results=[[], []])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="unrelated question", agent_id="agent-1",
+            repo="my-repo", files=["a.py"],
+        ))
+
+        assert result["strategy"] == "hybrid"
+        assert result["memories"] == []
+        # Only the vector leg and overlaps — the anchor-first query never ran.
+        assert not any("ORDER BY m.created_at DESC" in q for q, _ in graph.reads)
+
+    async def test_broken_embedder_uses_anchor_path(self, monkeypatch, mock_ctx):
+        graph = FakeGraph(read_results=[[], []])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder(fail=True))
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="anything", agent_id="agent-1", repo="my-repo",
+            files=["a.py"],
+        ))
+
+        assert result["strategy"] == "anchor"
+
+
+class TestCaptureEmbeds:
+    async def test_lessons_are_embedded_preferences_are_not(
+        self, monkeypatch, mock_ctx
+    ):
+        embedder = FakeEmbedder()
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph, embedder=embedder)
+        _stub_extract(monkeypatch)
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="agent-1", session_id="sess-1", repo="my-repo",
+            branch="main", transcript="user: hi", files=["a.py"],
+        ))
+
+        # 4 of the 5 stubbed items are recall kinds; the preference is not.
+        assert result["embedded"] == 4
+        assert len(embedder.texts) == 4
+        embedded_writes = [
+            params for _q, params in graph.writes if "embedding" in params
+        ]
+        assert len(embedded_writes) == 4
+        assert all(p["embedding"] == [0.1] * 4 for p in embedded_writes)
+
+    async def test_index_is_ensured_only_when_something_was_embedded(
+        self, monkeypatch, mock_ctx
+    ):
+        from agent_memory_mcp.mcp._coding_tools import CODING_MEMORY_INDEX
+
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+        _stub_extract(monkeypatch)
+
+        await tools["capture_session_memory"](
+            mock_ctx, agent_id="agent-1", session_id="sess-1", repo="my-repo",
+            branch="main", transcript="user: hi", files=["a.py"],
+        )
+        ddl = [q for q, _ in graph.writes if CODING_MEMORY_INDEX in q]
+        assert len(ddl) == 1
+        assert "`vector.dimensions`: 4" in ddl[0]
+
+        # No embedder: nothing to index, so no DDL and no behaviour change.
+        graph2 = FakeGraph()
+        tools2 = _register(monkeypatch, graph2)
+        _stub_extract(monkeypatch)
+        result = json.loads(await tools2["capture_session_memory"](
+            mock_ctx, agent_id="agent-1", session_id="sess-1", repo="my-repo",
+            branch="main", transcript="user: hi", files=["a.py"],
+        ))
+        assert result["embedded"] == 0
+        assert not any(CODING_MEMORY_INDEX in q for q, _ in graph2.writes)
