@@ -55,6 +55,12 @@ type_map = {
     "types.ReasoningStepInput": types.ReasoningStepInput,
     "stream_types.ReasoningStepInput": stream_types.ReasoningStepInput,
 
+    "types.RecallScreen": types.RecallScreen,
+    "stream_types.RecallScreen": stream_types.RecallScreen,
+
+    "types.RecallVerdict": types.RecallVerdict,
+    "stream_types.RecallVerdict": stream_types.RecallVerdict,
+
     "types.TemporalExtraction": types.TemporalExtraction,
     "stream_types.TemporalExtraction": stream_types.TemporalExtraction,
 

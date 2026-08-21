@@ -41,7 +41,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (14)
+# Generated classes (16)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -119,6 +119,13 @@ class ReasoningStepInput(BaseModel):
     thought: str = Field(description='Why this action was chosen')
     action: str = Field(description='What was done')
     observation: str = Field(description='What was learned')
+
+class RecallScreen(BaseModel):
+    verdicts: typing.List["RecallVerdict"] = Field(description='exactly one entry per candidate, including rejects')
+
+class RecallVerdict(BaseModel):
+    id: int = Field(description='the candidate\'s id, exactly as given')
+    keep: bool = Field(description='true only if this candidate genuinely bears on the query')
 
 class TemporalExtraction(BaseModel):
     valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')
