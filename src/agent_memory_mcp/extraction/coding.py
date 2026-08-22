@@ -36,6 +36,12 @@ from .unified import _clamp
 logger = logging.getLogger(__name__)
 
 _JUDGE_KILL_SWITCH_ENV = "NAM_CAPTURE_JUDGE"
+# Below this share of candidates covered by verdicts the curator is treated
+# as broken and everything is kept (fail-open). At or above it, the
+# verdicts given are applied and the few uncovered candidates are handled
+# individually — a local model that drops one id out of twenty must not
+# turn into twenty writes.
+MIN_VERDICT_COVERAGE = 0.8
 
 # Candidate kinds in the order the curator sees them and the tool writes them.
 CANDIDATE_KINDS = ("Decision", "Gotcha", "DeadEnd", "CodingPreference")
@@ -275,7 +281,8 @@ async def curate_coding_memory(
         counts["write"] = len(candidates)
         return {"kept": list(candidates), "counts": counts}
 
-    if len(verdicts) != len(candidates):
+    coverage = len(verdicts) / len(candidates)
+    if coverage < MIN_VERDICT_COVERAGE:
         logger.warning(
             "CurateCodingMemory covered %d/%d candidates; keeping all",
             len(verdicts), len(candidates),
@@ -283,11 +290,24 @@ async def curate_coding_memory(
         counts["write"] = len(candidates)
         return {"kept": list(candidates), "counts": counts}
 
+    # A nearly complete verdict set is applied as given. Candidates the
+    # model skipped are kept only when they came from the extractor; a raw
+    # error step with no verdict is not a lesson anyone asked for.
     kept: list[dict[str, Any]] = []
     for i, c in enumerate(candidates):
-        action = verdicts[i]
+        action = verdicts.get(i)
+        if action is None:
+            counts["uncovered"] = counts.get("uncovered", 0) + 1
+            if c.get("source") != "error_step":
+                kept.append(c)
+            continue
         counts[action] = counts.get(action, 0) + 1
         if action == "write":
             kept.append(c)
+    if counts.get("uncovered"):
+        logger.warning(
+            "CurateCodingMemory covered %d/%d candidates; applied the verdicts given",
+            len(verdicts), len(candidates),
+        )
     logger.info("CurateCodingMemory: %s", counts)
     return {"kept": kept, "counts": counts}
