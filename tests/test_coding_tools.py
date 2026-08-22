@@ -240,6 +240,9 @@ class TestCodingRecall:
                 "at": "2026-08-17T10:00:00+00:00",
             },
         ]
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "GATE_ENABLED", False)
         graph = FakeGraph(read_results=[mem_rows, []])
         tools = _register(monkeypatch, graph)
 
@@ -251,14 +254,20 @@ class TestCodingRecall:
             files=["a.py"],
         )
 
+        # No embedder, so the BM25 leg alone serves (MUD-406), then overlaps.
         assert len(graph.reads) == 2
         mem_query, mem_params = graph.reads[0]
+        assert "db.index.fulltext.queryNodes" in mem_query
         assert mem_params["repo"] == "my-repo"
         assert mem_params["files"] == ["a.py"]
         assert mem_params["task_key"] is None
 
         result = json.loads(result_str)
         assert result["fallback"] is False
+        assert result["strategy"] == "fulltext"
+        for m in result["memories"]:
+            for key in ("score", "anchored", "ranks"):
+                m.pop(key, None)
         assert result["memories"] == [
             {
                 "kind": "Decision",
@@ -289,13 +298,13 @@ class TestCodingRecall:
             repo="my-repo",
         )
 
-        # No embedder in the fake client, so the hybrid leg cannot run; with
-        # no files and no task there is no anchor leg either.
-        assert graph.reads == []
+        # No embedder in the fake client, so only the BM25 leg runs; it
+        # finds nothing, and with no files and no task there is no anchor
+        # leg either.
+        assert len(graph.reads) == 1
+        assert "db.index.fulltext.queryNodes" in graph.reads[0][0]
         result = json.loads(result_str)
-        # Only the embed stage ran (and found no embedder); no vector, gate
-        # or overlap stage was timed.
-        assert set(result.pop("timing_ms")) == {"embed"}
+        assert set(result.pop("timing_ms")) == {"embed", "vector"}
         assert result == {
             "memories": [],
             "fallback": True,
@@ -743,26 +752,28 @@ class TestHybridRecall:
             agent_id="agent-1", repo="my-repo",
         ))
 
-        assert result["strategy"] == "hybrid+gate"
+        assert result["strategy"] == "vector+gate"
         assert result["fallback"] is False
         assert result["memories"][0]["text"] == "pin it"
-        assert result["memories"][0]["score"] == 0.61
+        # Fused score (RRF), not raw cosine; rank 0 on leg 0.
+        assert result["memories"][0]["score"] == round(1 / 61, 4)
+        assert result["memories"][0]["ranks"] == {"0": 0}
         assert result["memories"][0]["anchored"] is False
-        # One read: the vector leg. No anchors, so no overlaps query.
-        assert len(graph.reads) == 1
+        # Two reads: the vector leg and the BM25 leg. No anchors, so no overlaps query.
+        assert len(graph.reads) == 2
         assert graph.reads[0][1]["index"] == CODING_MEMORY_INDEX
 
-    async def test_hybrid_passes_boost_threshold_and_anchors(
+    async def test_legs_pass_threshold_limit_and_anchors(
         self, monkeypatch, mock_ctx
     ):
         from agent_memory_mcp.mcp._coding_tools import (
-            ANCHOR_BOOST,
+            CODING_MEMORY_TEXT_INDEX,
             HYBRID_THRESHOLD,
-            _RECALL_LIMIT,
+            LEG_LIMIT,
         )
 
         embedder = FakeEmbedder()
-        graph = FakeGraph(read_results=[[], []])
+        graph = FakeGraph(read_results=[[], [], []])
         tools = _register(monkeypatch, graph, embedder=embedder)
 
         await tools["coding_recall"](
@@ -771,14 +782,17 @@ class TestHybridRecall:
         )
 
         assert embedder.texts == ["what broke the deploy?"]
-        params = graph.reads[0][1]
-        assert params["anchor_boost"] == ANCHOR_BOOST
-        assert params["threshold"] == HYBRID_THRESHOLD
-        assert params["limit"] == _RECALL_LIMIT
-        assert params["files"] == ["infra/api.ts"]
-        assert params["task_key"] == "MUD-401"
-        # Anchors present, so overlaps still runs.
-        assert len(graph.reads) == 2
+        vec = graph.reads[0][1]
+        assert vec["threshold"] == HYBRID_THRESHOLD
+        assert vec["limit"] == LEG_LIMIT
+        assert vec["files"] == ["infra/api.ts"]
+        assert vec["task_key"] == "MUD-401"
+        text = graph.reads[1][1]
+        assert text["index"] == CODING_MEMORY_TEXT_INDEX
+        assert text["query"] == "broke deploy"
+        assert text["files"] == ["infra/api.ts"]
+        # Anchors present, so overlaps still runs after both legs.
+        assert len(graph.reads) == 3
 
     async def test_missing_index_falls_back_to_anchor_first(
         self, monkeypatch, mock_ctx
@@ -790,7 +804,7 @@ class TestHybridRecall:
                     raise RuntimeError("no such index")
                 return await super().execute_read(query, params)
 
-        graph = ExplodingGraph(read_results=[[], []])
+        graph = ExplodingGraph(read_results=[[], [], []])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
         result = json.loads(await tools["coding_recall"](
@@ -805,7 +819,7 @@ class TestHybridRecall:
         self, monkeypatch, mock_ctx
     ):
         """An anchored candidate the prompt does not match is the 88% we stopped injecting."""
-        graph = FakeGraph(read_results=[[], []])
+        graph = FakeGraph(read_results=[[], [], []])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
         result = json.loads(await tools["coding_recall"](
@@ -813,9 +827,9 @@ class TestHybridRecall:
             repo="my-repo", files=["a.py"],
         ))
 
-        assert result["strategy"] == "hybrid+gate"
+        assert result["strategy"] == "vector+gate"
         assert result["memories"] == []
-        # Only the vector leg and overlaps — the anchor-first query never ran.
+        # Only the two legs and overlaps — the anchor-first query never ran.
         assert not any("ORDER BY m.created_at DESC" in q for q, _ in graph.reads)
 
     async def test_broken_embedder_uses_anchor_path(self, monkeypatch, mock_ctx):
@@ -912,6 +926,7 @@ class TestRecallGate:
     @staticmethod
     def _rows(n):
         return [{
+            "eid": f"e{i}",
             "labels": ["Gotcha", "CodingMemory"], "props": {"text": f"lesson {i}"},
             "files": [], "task": None, "at": "2026-08-21T00:00:00Z",
             "score": 0.6, "anchored": False,
@@ -926,7 +941,7 @@ class TestRecallGate:
             mock_ctx, prompt="q", agent_id="a", repo="r",
         ))
 
-        assert result["strategy"] == "hybrid+gate"
+        assert result["strategy"] == "vector+gate"
         assert [m["text"] for m in result["memories"]] == ["lesson 0", "lesson 2"]
 
     async def test_gate_failure_returns_ungated(self, monkeypatch, mock_ctx):
@@ -964,8 +979,10 @@ class TestRecallGate:
             mock_ctx, prompt="q", agent_id="a", repo="r",
         ))
 
-        assert result["strategy"] == "hybrid"
-        assert graph.reads[0][1]["limit"] == ct._RECALL_LIMIT
+        assert result["strategy"] == "vector"
+        # Legs always fetch LEG_LIMIT; fusion cuts to the caller's limit.
+        assert graph.reads[0][1]["limit"] == ct.LEG_LIMIT
+        assert len(result["memories"]) == 3
 
     async def test_gate_retrieves_at_gate_depth(self, monkeypatch, mock_ctx):
         import agent_memory_mcp.mcp._coding_tools as ct
@@ -974,9 +991,10 @@ class TestRecallGate:
         graph = FakeGraph(read_results=[self._rows(10)])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
-        await tools["coding_recall"](mock_ctx, prompt="q", agent_id="a", repo="r")
+        result = json.loads(await tools["coding_recall"](mock_ctx, prompt="q", agent_id="a", repo="r"))
 
-        assert graph.reads[0][1]["limit"] == max(ct.GATE_DEPTH, ct._RECALL_LIMIT)
+        assert graph.reads[0][1]["limit"] == ct.LEG_LIMIT
+        assert len(result["memories"]) == max(ct.GATE_DEPTH, ct._RECALL_LIMIT)
 
     async def test_result_is_capped_at_recall_limit(self, monkeypatch, mock_ctx):
         """Gate depth may exceed the return limit; the caller's budget is fixed."""
