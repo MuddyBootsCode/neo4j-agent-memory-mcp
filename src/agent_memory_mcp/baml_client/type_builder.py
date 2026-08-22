@@ -20,18 +20,22 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","MemoryJudgement","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","RecallScreen","RecallVerdict","TemporalExtraction",]
+          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","CuratedMemories","CuratorVerdict","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","RecallScreen","RecallVerdict","TemporalExtraction",]
         ), enums=set(
-          []
+          ["CurateAction",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 0
+    # Generated enums 1
     # #########################################################################
+
+    @property
+    def CurateAction(self) -> "CurateActionViewer":
+        return CurateActionViewer(self)
 
 
     # #########################################################################
-    # Generated classes 16
+    # Generated classes 17
     # #########################################################################
 
     @property
@@ -49,6 +53,14 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def ContradictionResult(self) -> "ContradictionResultViewer":
         return ContradictionResultViewer(self)
+
+    @property
+    def CuratedMemories(self) -> "CuratedMemoriesViewer":
+        return CuratedMemoriesViewer(self)
+
+    @property
+    def CuratorVerdict(self) -> "CuratorVerdictViewer":
+        return CuratorVerdictViewer(self)
 
     @property
     def ExtractedCodingPreference(self) -> "ExtractedCodingPreferenceViewer":
@@ -69,10 +81,6 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def ExtractedReasoningStep(self) -> "ExtractedReasoningStepViewer":
         return ExtractedReasoningStepViewer(self)
-
-    @property
-    def MemoryJudgement(self) -> "MemoryJudgementViewer":
-        return MemoryJudgementViewer(self)
 
     @property
     def ReasoningChainInput(self) -> "ReasoningChainInputViewer":
@@ -101,12 +109,62 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated enums 0
+# Generated enums 1
 # #########################################################################
 
+class CurateActionAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("CurateAction")
+        self._values: typing.Set[str] = set([  "WRITE",  "ALREADY_KNOWN",  "NOT_DURABLE",  "UNSUPPORTED",  ])
+        self._vals = CurateActionValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "CurateActionValues":
+        return self._vals
+
+
+class CurateActionViewer(CurateActionAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class CurateActionValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def WRITE(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("WRITE"))
+    
+    @property
+    def ALREADY_KNOWN(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ALREADY_KNOWN"))
+    
+    @property
+    def NOT_DURABLE(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("NOT_DURABLE"))
+    
+    @property
+    def UNSUPPORTED(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("UNSUPPORTED"))
+    
+    
+
+
 
 # #########################################################################
-# Generated classes 16
+# Generated classes 17
 # #########################################################################
 
 class CandidateFactAst:
@@ -309,6 +367,88 @@ class ContradictionResultProperties:
     
 
 
+class CuratedMemoriesAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("CuratedMemories")
+        self._properties: typing.Set[str] = set([  "verdicts",  ])
+        self._props = CuratedMemoriesProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "CuratedMemoriesProperties":
+        return self._props
+
+
+class CuratedMemoriesViewer(CuratedMemoriesAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class CuratedMemoriesProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def verdicts(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("verdicts"))
+    
+    
+
+
+class CuratorVerdictAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("CuratorVerdict")
+        self._properties: typing.Set[str] = set([  "id",  "action",  ])
+        self._props = CuratorVerdictProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "CuratorVerdictProperties":
+        return self._props
+
+
+class CuratorVerdictViewer(CuratorVerdictAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class CuratorVerdictProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def id(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("id"))
+    
+    @property
+    def action(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("action"))
+    
+    
+
+
 class ExtractedCodingPreferenceAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
@@ -360,7 +500,7 @@ class ExtractedDeadEndAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ExtractedDeadEnd")
-        self._properties: typing.Set[str] = set([  "attempt",  "why_failed",  "anchor_files",  "concerns_task",  "confidence",  ])
+        self._properties: typing.Set[str] = set([  "symptom",  "attempt",  "why_failed",  "anchor_files",  "concerns_task",  "confidence",  ])
         self._props = ExtractedDeadEndProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -387,6 +527,10 @@ class ExtractedDeadEndProperties:
         self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
 
     
+    
+    @property
+    def symptom(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("symptom"))
     
     @property
     def attempt(self) -> type_builder.ClassPropertyViewer:
@@ -470,7 +614,7 @@ class ExtractedGotchaAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ExtractedGotcha")
-        self._properties: typing.Set[str] = set([  "text",  "anchor_files",  "concerns_task",  "confidence",  ])
+        self._properties: typing.Set[str] = set([  "symptom",  "text",  "anchor_files",  "concerns_task",  "confidence",  ])
         self._props = ExtractedGotchaProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -497,6 +641,10 @@ class ExtractedGotchaProperties:
         self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
 
     
+    
+    @property
+    def symptom(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("symptom"))
     
     @property
     def text(self) -> type_builder.ClassPropertyViewer:
@@ -564,53 +712,6 @@ class ExtractedReasoningStepProperties:
     @property
     def alternatives_considered(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("alternatives_considered"))
-    
-    @property
-    def confidence(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("confidence"))
-    
-    
-
-
-class MemoryJudgementAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("MemoryJudgement")
-        self._properties: typing.Set[str] = set([  "supported",  "embedded_directive",  "confidence",  ])
-        self._props = MemoryJudgementProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "MemoryJudgementProperties":
-        return self._props
-
-
-class MemoryJudgementViewer(MemoryJudgementAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
-
-
-class MemoryJudgementProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    
-    
-    @property
-    def supported(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("supported"))
-    
-    @property
-    def embedded_directive(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("embedded_directive"))
     
     @property
     def confidence(self) -> type_builder.ClassPropertyViewer:
