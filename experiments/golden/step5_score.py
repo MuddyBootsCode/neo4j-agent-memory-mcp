@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import statistics
 import time
 
 from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json

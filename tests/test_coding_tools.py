@@ -451,7 +451,23 @@ def _stub_extract(monkeypatch, result=None, exc=None):
     monkeypatch.setattr(
         "agent_memory_mcp.mcp._coding_tools.extract_coding_memory", fake
     )
+    _stub_curator(monkeypatch)
     return calls
+
+
+def _stub_curator(monkeypatch, keep=None):
+    """Curator keeps everything (or the given predicate) and no neighbour
+    lookup hits the graph, so the capture tests exercise the write path."""
+    async def fake_curate(candidates, transcript, existing):
+        kept = [c for c in candidates if keep is None or keep(c)]
+        return {"kept": kept, "counts": {"write": len(kept), "already_known": 0,
+                                         "not_durable": len(candidates) - len(kept), "unsupported": 0}}
+
+    async def no_neighbors(client, repo, embedding):
+        return []
+
+    monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.curate_coding_memory", fake_curate)
+    monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools._neighbors", no_neighbors)
 
 
 class TestCaptureSessionMemory:
@@ -537,6 +553,8 @@ class TestCaptureSessionMemory:
             "dropped_unanchored": 1,
             "anchor_rate": 0.8,
             "embedded": 0,
+            "windows": 1,
+            "curated": {"write": 5, "already_known": 0, "not_durable": 0, "unsupported": 0},
         }
 
     async def test_empty_transcript_skips_extraction_and_writes(
@@ -567,28 +585,39 @@ class TestCaptureSessionMemory:
             },
             "dropped_unanchored": 0,
             "anchor_rate": None,
+            "embedded": 0,
+            "windows": 0,
+            "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
         }
 
     async def test_transcript_tail_and_files_are_capped(self, monkeypatch, mock_ctx):
         graph = FakeGraph()
         tools = _register(monkeypatch, graph)
-        calls = _stub_extract(monkeypatch)
+        calls = _stub_extract(monkeypatch, result=_extraction(
+            decisions=[], gotchas=[], dead_ends=[], preferences=[], anchor_rate=None, dropped_unanchored=0,
+        ))
 
-        transcript = ("x" * 90_000) + "TAIL-MARKER"
-        await tools["capture_session_memory"](
+        # 450k chars of one-line filler: the server keeps the 400k tail and
+        # cuts it into windows, each an extraction call; the newest window
+        # carries the tail marker. Files are capped at 100.
+        transcript = "\n".join("x" * 99 for _ in range(4_500)) + "\nTAIL-MARKER"
+        result_str = await tools["capture_session_memory"](
             mock_ctx,
             agent_id="agent-1",
             session_id="sess-1",
             repo="my-repo",
             branch="main",
             transcript=transcript,
-            files=[f"f{i}.py" for i in range(120)],
+            files=[f"f{i}.py" for i in range(150)],
         )
 
-        sent = calls[0]["transcript"]
-        assert len(sent) == 80_000
-        assert sent.endswith("TAIL-MARKER")
-        assert len(calls[0]["files"]) == 100
+        assert calls, "extractor was never called"
+        assert sum(len(c["transcript"]) for c in calls) <= 400_000
+        assert calls[-1]["transcript"].endswith("TAIL-MARKER")
+        assert all(len(c["files"]) == 100 for c in calls)
+        result = json.loads(result_str)
+        assert result["windows"] == len(calls)
+        assert 1 <= result["windows"] <= 4
 
     async def test_extraction_failure_returns_error_without_writes(
         self, monkeypatch, mock_ctx
@@ -650,6 +679,8 @@ class TestCaptureSessionMemory:
             "dropped_unanchored": 2,
             "anchor_rate": None,
             "embedded": 0,
+            "windows": 1,
+            "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
         }
 
     async def test_write_failure_reports_partial_counts(
