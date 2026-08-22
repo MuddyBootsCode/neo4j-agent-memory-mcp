@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -684,20 +685,29 @@ def register_coding_tools(mcp: FastMCP) -> None:
         fall back to memory_search.
 
         Returns JSON: {"memories": [...], "fallback": bool, "strategy":
-        "hybrid"|"anchor"|null, "overlaps": [...]}.
+        "hybrid"|"anchor"|null, "overlaps": [...], "timing_ms": {...}}.
+        ``timing_ms`` holds per-stage wall time (embed, vector, gate,
+        overlaps) so the hook's headline number can be read stage by stage.
         """
         client = get_client(ctx)
         file_list = list(files or [])
         has_anchor = bool(file_list) or task_key is not None
+        timing: dict[str, float] = {}
+
+        def _lap(stage: str, started: float) -> None:
+            timing[stage] = round((time.perf_counter() - started) * 1000, 1)
 
         try:
             memories: list[dict[str, Any]] = []
             overlaps: list[dict[str, Any]] = []
             strategy = None
 
+            t0 = time.perf_counter()
             embedding = await _embed(client, (prompt or "").strip())
+            _lap("embed", t0)
             if embedding is not None:
                 try:
+                    t0 = time.perf_counter()
                     rows = await client.graph.execute_read(
                         _HYBRID_QUERY,
                         {
@@ -716,10 +726,13 @@ def register_coding_tools(mcp: FastMCP) -> None:
                             "task_key": task_key,
                         },
                     )
+                    _lap("vector", t0)
                     memories = [_render_memory(row) for row in rows]
                     strategy = "hybrid"
                     if GATE_ENABLED:
+                        t0 = time.perf_counter()
                         memories = await screen_memories(prompt, memories)
+                        _lap("gate", t0)
                         strategy = "hybrid+gate"
                     memories = memories[:_RECALL_LIMIT]
                 except Exception as e:
@@ -739,6 +752,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
             fallback = strategy is None
 
             if has_anchor:
+                t0 = time.perf_counter()
                 overlap_rows = await client.graph.execute_read(
                     _OVERLAPS_QUERY,
                     {
@@ -749,6 +763,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
                         "window": overlap_window_hours,
                     },
                 )
+                _lap("overlaps", t0)
                 overlaps = [
                     {
                         "agent": row.get("agent"),
@@ -759,12 +774,17 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     for row in overlap_rows
                 ]
 
+            logger.info(
+                f"coding_recall strategy={strategy} memories={len(memories)} "
+                f"timing_ms={timing}"
+            )
             return json.dumps(
                 {
                     "memories": memories,
                     "fallback": fallback,
                     "strategy": strategy,
                     "overlaps": overlaps,
+                    "timing_ms": timing,
                 }
             )
 
