@@ -56,17 +56,34 @@ class TestCurate:
         await curate_coding_memory(_cands()[:1], "t", [])
         assert mock.await_args.kwargs["existing"] == "(none)"
 
-    async def test_incomplete_verdicts_keep_everything(self, monkeypatch, caplog):
-        _stub(monkeypatch, _verdicts("UNSUPPORTED"))  # 1 verdict for 4 candidates
+    async def test_mostly_missing_verdicts_keep_everything(self, monkeypatch, caplog):
+        _stub(monkeypatch, _verdicts("UNSUPPORTED"))  # 1 verdict for 4 candidates: 25% coverage
         out = await curate_coding_memory(_cands(), "t", [])
         assert len(out["kept"]) == 4
         assert out["counts"]["write"] == 4
+        assert "keeping all" in caplog.text
 
-    async def test_out_of_range_ids_are_ignored_then_treated_as_incomplete(self, monkeypatch):
+    async def test_nearly_complete_verdicts_are_applied_and_uncovered_error_steps_dropped(self, monkeypatch):
+        # 9 of 10 covered: the one the model skipped is kept if it came from
+        # the extractor, dropped if it is a raw error step.
+        cands = [dict(_cands()[1], text=f"g{i}") for i in range(8)]
+        cands.append(dict(_cands()[2], source="error_step"))   # id 8, uncovered
+        cands.append(dict(_cands()[0], text="skipped decision"))  # id 9, uncovered
+        v = _verdicts(*(["WRITE"] * 4 + ["NOT_DURABLE"] * 4))  # ids 0-7 only
+        _stub(monkeypatch, v)
+        out = await curate_coding_memory(cands, "t", [])
+        kept_texts = [c.get("text") for c in out["kept"]]
+        assert kept_texts == ["g0", "g1", "g2", "g3", "skipped decision"]
+        assert out["counts"]["write"] == 4
+        assert out["counts"]["not_durable"] == 4
+        assert out["counts"]["uncovered"] == 2
+
+    async def test_out_of_range_ids_do_not_count_as_coverage(self, monkeypatch):
         v = _verdicts("UNSUPPORTED", "UNSUPPORTED", "UNSUPPORTED", "UNSUPPORTED")
         v.verdicts[3].id = 99
         _stub(monkeypatch, v)
         out = await curate_coding_memory(_cands(), "t", [])
+        # 3/4 = 75% < 80%: fail-open, keep all.
         assert len(out["kept"]) == 4
 
     async def test_curator_failure_keeps_everything(self, monkeypatch, caplog):
