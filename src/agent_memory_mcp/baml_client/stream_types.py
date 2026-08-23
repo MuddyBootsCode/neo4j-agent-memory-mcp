@@ -55,6 +55,7 @@ class CuratedMemories(BaseModel):
 class CuratorVerdict(BaseModel):
     id: typing.Optional[int] = Field(default=None, description='the candidate\'s id, exactly as given')
     action: typing.Optional[types.CurateAction] = None
+    known_as: typing.Optional[int] = Field(default=None, description='for ALREADY_KNOWN and SUPERSEDES: the number of the existing lesson it matches or replaces; null otherwise')
 
 class ExtractedCodingPreference(BaseModel):
     category: typing.Optional[str] = Field(default=None, description='Preference category: e.g. testing, style, tooling, workflow')

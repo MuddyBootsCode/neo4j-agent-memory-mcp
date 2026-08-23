@@ -219,7 +219,17 @@ class TestInferTaskKey:
         assert infer_task_key("feature/MUD-395-pivot", env={}) == "MUD-395"
 
     def test_plain_branch_falls_through_to_itself(self) -> None:
-        assert infer_task_key("main", env={}) == "main"
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 8, 22, tzinfo=timezone.utc)
+        # Long-lived branches are bucketed by ISO week (MUD-405).
+        assert infer_task_key("main", env={}, now=now) == "main/2026-W34"
+        assert infer_task_key("main", env={}, repo="r", now=now) == "r/main/2026-W34"
+        assert infer_task_key("feature/x", env={}, repo="r") == "r/feature/x"
+
+    def test_ticket_match_is_case_insensitive_and_uppercased(self):
+        assert infer_task_key("michael/mud-402-recall-gate", env={}) == "MUD-402"
+        assert infer_task_key("utf-8-fix", env={}) == "UTF-8"
 
     def test_none_and_empty_branch_return_none(self) -> None:
         assert infer_task_key(None, env={}) is None
@@ -235,7 +245,7 @@ class TestInferTaskKey:
         assert infer_task_key(None, env={"NAM_TASK_KEY": "MUD-1"}) == "MUD-1"
 
     def test_branch_fallback_scoped_by_repo(self) -> None:
-        assert infer_task_key("main", env={}, repo="alpha") == "alpha/main"
+        assert infer_task_key("release/x", env={}, repo="alpha") == "alpha/release/x"
 
     def test_ticket_branch_unaffected_by_repo(self) -> None:
         assert (

@@ -222,6 +222,7 @@ class TestCodingRecallArgs:
         assert args == {
             "prompt": "p",
             "agent_id": "agent-1",
+            "session_id": CTX.get("session_id") or "agent-1",
             "repo": "neo4j-agent-memory-mcp",
             "files": ["src/a.py"],
             "task_key": "MUD-395",
