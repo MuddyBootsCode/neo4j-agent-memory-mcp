@@ -42,7 +42,6 @@ class TestExtractCodingMemory:
         "preferences": [],
         "anchor_rate": None,
         "dropped_unanchored": 0,
-        "judged_out": 0,
     }
 
     def _stub(self, monkeypatch, *, decisions=(), gotchas=(), dead_ends=(), preferences=()):
@@ -59,14 +58,6 @@ class TestExtractCodingMemory:
         monkeypatch.setattr(
             "agent_memory_mcp.baml_client.async_client.b.ExtractCodingMemory",
             mock_fn,
-        )
-        # These tests exercise anchor sanitization, not the judge screen
-        # (see test_coding_judge_screen.py for that) — stub the judge to
-        # keep everything so it never makes a real BAML/network call here.
-        judge = SimpleNamespace(supported=True, embedded_directive=False, confidence=0.9)
-        monkeypatch.setattr(
-            "agent_memory_mcp.baml_client.async_client.b.JudgeExtractedMemory",
-            AsyncMock(return_value=judge),
         )
         return mock_fn
 
@@ -152,6 +143,7 @@ class TestExtractCodingMemory:
         ]
         assert result["gotchas"] == [
             {
+                "symptom": None,
                 "text": "never run migrations against the shared test DB",
                 "anchor_files": [],
                 "concerns_task": True,
@@ -160,6 +152,7 @@ class TestExtractCodingMemory:
         ]
         assert result["dead_ends"] == [
             {
+                "symptom": None,
                 "attempt": "patched the pool size in app startup",
                 "why_failed": "pool is created before config loads",
                 "anchor_files": ["src/app.py"],
@@ -336,3 +329,47 @@ class TestExtractCodingMemory:
 
         assert len(result["decisions"]) == 1
         assert result["decisions"][0]["concerns_task"] is False
+
+
+class TestSymptomAndPathNormalization:
+    FILES = ["src/app.py", "src/db.py"]
+
+    async def test_symptom_passes_through_and_blank_becomes_none(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
+        gotcha = SimpleNamespace(symptom="  pytest hangs after collection ", text="run with -m integration",
+                                 anchor_files=["src/db.py"], concerns_task=False, confidence=0.8)
+        dead_end = SimpleNamespace(symptom="   ", attempt="patched pool", why_failed="created before config",
+                                   anchor_files=["src/app.py"], concerns_task=False, confidence=0.6)
+        result = SimpleNamespace(decisions=[], gotchas=[gotcha], dead_ends=[dead_end], preferences=[])
+        monkeypatch.setattr("agent_memory_mcp.baml_client.async_client.b.ExtractCodingMemory",
+                            AsyncMock(return_value=result))
+        out = await extract_coding_memory("t", branch="b", task=None, files=self.FILES)
+        assert out["gotchas"][0]["symptom"] == "pytest hangs after collection"
+        assert out["dead_ends"][0]["symptom"] is None
+
+    async def test_anchor_paths_match_after_normalization_and_keep_caller_spelling(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from agent_memory_mcp.extraction.coding import extract_coding_memory
+
+        gotcha = SimpleNamespace(symptom=None, text="x", anchor_files=["./src/db.py", "src/../src/app.py", "/abs/src/db.py"],
+                                 concerns_task=False, confidence=0.8)
+        result = SimpleNamespace(decisions=[], gotchas=[gotcha], dead_ends=[], preferences=[])
+        monkeypatch.setattr("agent_memory_mcp.baml_client.async_client.b.ExtractCodingMemory",
+                            AsyncMock(return_value=result))
+        out = await extract_coding_memory("t", branch="b", task=None, files=["src/db.py", "./src/app.py"])
+        assert out["gotchas"][0]["anchor_files"] == ["src/db.py", "./src/app.py"]
+        assert out["dropped_unanchored"] == 0
+
+    def test_normalize_path(self):
+        from agent_memory_mcp.extraction.coding import normalize_path
+
+        assert normalize_path("./a/b.py") == "a/b.py"
+        assert normalize_path("a//b/../c.py") == "a/c.py"
+        assert normalize_path("   ") == ""
+        assert normalize_path(None) == ""

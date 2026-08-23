@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -38,7 +39,11 @@ from agent_memory_mcp.capture.cypher import (
     editing_upsert,
     session_upsert,
 )
-from agent_memory_mcp.extraction.coding import extract_coding_memory
+from agent_memory_mcp.extraction.coding import (
+    candidate_line,
+    curate_coding_memory,
+    extract_coding_memory,
+)
 from agent_memory_mcp.mcp._common import get_client
 from agent_memory_mcp.mcp._logging import log_tool_call
 
@@ -52,8 +57,25 @@ _MAX_EDITED_FILES = 100
 _MAX_COMMITS = 50
 # Caps the same payload as MAX_TRANSCRIPT_CHARS in hook/capture_hook.py —
 # one on the receiving side, one on the sending side. Move them together.
-_MAX_TRANSCRIPT_CHARS = 80_000
+_MAX_TRANSCRIPT_CHARS = 400_000
 _MAX_ANCHOR_FILES = 100
+_MAX_ERROR_STEPS = 40
+
+# The transcript is cut into windows (MUD-404) instead of a single 80k tail,
+# so a long session's early decisions are not lost. Windows are ranked by
+# how much failure/correction evidence they carry and the top
+# NAM_CAPTURE_MAX_WINDOWS get an extraction call each; the newest window is
+# always included.
+WINDOW_CHARS = int(os.environ.get("NAM_CAPTURE_WINDOW_CHARS", "60000"))
+MAX_WINDOWS = int(os.environ.get("NAM_CAPTURE_MAX_WINDOWS", "4"))
+_SIGNAL_RE = re.compile(
+    r"(?i)(\[error from |traceback|\bfailed\b|no, |instead|actually|revert|"
+    r"doesn't work|does not work|didn't work|still fails|wrong)"
+)
+# Existing lessons shown to the curator per candidate: nearest by cosine,
+# inside the repo, above this similarity.
+NEIGHBOR_LIMIT = 5
+NEIGHBOR_THRESHOLD = 0.6
 
 # Write order for extracted-plane items; also the by_kind key order.
 _CAPTURE_KINDS = ("Decision", "Gotcha", "DeadEnd", "CodingPreference")
@@ -186,12 +208,20 @@ _CREATE_INDEX = (
 def memory_embedding_text(kind: str, props: dict[str, Any]) -> str:
     """The text embedded for a lesson node.
 
-    DeadEnd carries its meaning across two properties, so both go in; the
-    others embed the one field a reader would recognise the lesson by.
+    Symptom first where there is one (MUD-404): it is what a later prompt
+    will contain — the error, the failing command — while ``text`` is the
+    fix, which only matches once you already know it. Decision embeds its
+    reason too; the reason carries the discriminating nouns.
     """
+    symptom = str(props.get("symptom") or "").strip()
     if kind == "DeadEnd":
-        return f"{props.get('attempt', '')} — failed: {props.get('why_failed', '')}".strip()
-    return str(props.get("text", "")).strip()
+        body = f"{props.get('attempt', '')} — failed: {props.get('why_failed', '')}".strip()
+    elif kind == "Decision":
+        reason = str(props.get("reason") or "").strip()
+        body = f"{props.get('text', '')} — {reason}".strip(" —") if reason else str(props.get("text", "")).strip()
+    else:
+        body = str(props.get("text", "")).strip()
+    return f"{symptom} | {body}" if symptom else body
 
 
 def _embedder(client: Any) -> Any:
@@ -358,6 +388,216 @@ def _render_memory(row: dict[str, Any]) -> dict[str, Any]:
     return rendered
 
 
+def transcript_windows(transcript: str, size: int = WINDOW_CHARS, max_windows: int = MAX_WINDOWS) -> list[str]:
+    """Cut a rendering into line-aligned windows and pick the ones worth an
+    extraction call: the newest always, then the highest-signal others."""
+    lines = transcript.splitlines()
+    windows: list[str] = []
+    current: list[str] = []
+    length = 0
+    for line in lines:
+        if current and length + len(line) + 1 > size:
+            windows.append("\n".join(current))
+            current, length = [], 0
+        current.append(line)
+        length += len(line) + 1
+    if current:
+        windows.append("\n".join(current))
+    if len(windows) <= max_windows:
+        return windows
+    newest = len(windows) - 1
+    scored = sorted(
+        (i for i in range(newest)),
+        key=lambda i: len(_SIGNAL_RE.findall(windows[i])),
+        reverse=True,
+    )
+    chosen = sorted(set(scored[: max_windows - 1]) | {newest})
+    return [windows[i] for i in chosen]
+
+
+def error_step_candidates(steps: list[dict], task_key: str | None) -> list[dict[str, Any]]:
+    """DeadEnd candidates from errored tool steps, no LLM involved. The
+    curator decides whether each is a durable lesson or a one-off."""
+    out: list[dict[str, Any]] = []
+    for step in steps[:_MAX_ERROR_STEPS]:
+        error = str(step.get("error") or "").strip()
+        if not error:
+            continue
+        tool = str(step.get("tool") or "tool")
+        attempt = f"{tool}: {step.get('input') or ''}".strip(": ")
+        file = step.get("file")
+        out.append({
+            "kind": "DeadEnd",
+            "symptom": error[:300],
+            "attempt": attempt[:200],
+            "why_failed": error[:300],
+            "anchor_files": [file] if isinstance(file, str) and file else [],
+            "concerns_task": task_key is not None,
+            "confidence": 0.5,
+            "source": "error_step",
+        })
+    return out
+
+
+_NEIGHBORS_QUERY = """
+    CALL db.index.vector.queryNodes($index, $limit, $embedding)
+    YIELD node AS m, score
+    WHERE score >= $threshold
+    MATCH (m)-[:MADE_IN]->(:CodingSession {repo: $repo})
+    RETURN labels(m) AS labels, properties(m) AS props, score
+    ORDER BY score DESC
+"""
+
+
+async def _neighbors(client: Any, repo: str, embedding: list[float] | None) -> list[str]:
+    """Rendered lines of the nearest stored lessons, or [] when the index is
+    missing or the lookup fails (a fresh store has no index yet)."""
+    if embedding is None:
+        return []
+    try:
+        rows = await client.graph.execute_read(
+            _NEIGHBORS_QUERY,
+            {"index": CODING_MEMORY_INDEX, "limit": NEIGHBOR_LIMIT,
+             "embedding": embedding, "threshold": NEIGHBOR_THRESHOLD, "repo": repo},
+        )
+    except Exception as e:
+        logger.debug(f"neighbor lookup skipped: {e}")
+        return []
+    lines = []
+    for row in rows:
+        kind = next((label for label in (row.get("labels") or []) if label in _RECALL_KINDS), None)
+        props = {k: v for k, v in (row.get("props") or {}).items() if k != "embedding"}
+        if kind:
+            lines.append(candidate_line({"kind": kind, **props}))
+    return lines
+
+
+def _candidates_from(extracted: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for d in extracted["decisions"]:
+        items.append({"kind": "Decision", **d})
+    for g in extracted["gotchas"]:
+        items.append({"kind": "Gotcha", **g})
+    for de in extracted["dead_ends"]:
+        items.append({"kind": "DeadEnd", **de})
+    for p in extracted["preferences"]:
+        items.append({"kind": "CodingPreference", **p})
+    return items
+
+
+def _node_props(item: dict[str, Any]) -> dict[str, Any]:
+    kind = item["kind"]
+    if kind == "Decision":
+        return {"text": item["text"], "reason": item["reason"], "confidence": item["confidence"]}
+    if kind == "Gotcha":
+        props = {"text": item["text"], "confidence": item["confidence"]}
+    elif kind == "DeadEnd":
+        props = {"attempt": item["attempt"], "why_failed": item["why_failed"], "confidence": item["confidence"]}
+    else:
+        return {"category": item["category"], "preference": item["preference"], "confidence": item["confidence"]}
+    if item.get("symptom"):
+        props["symptom"] = item["symptom"]
+    return props
+
+
+async def capture_transcript(
+    client: Any,
+    *,
+    transcript: str,
+    agent_id: str,
+    session_id: str,
+    repo: str,
+    branch: str,
+    task_key: str | None,
+    files: list[str],
+    error_steps: list[dict] | None = None,
+    ts: str | None = None,
+    progress: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The capture pipeline behind ``capture_session_memory``, callable
+    directly (the golden harness builds its pool through this so it
+    measures exactly what production writes).
+
+    Per window: extract → add error-step candidates (first window only) →
+    embed → nearest stored lessons → curate → write survivors. The session
+    upsert runs once, before the first write, and only if something is
+    written. Returns the tool's result dict.
+    """
+    by_kind = {kind: 0 for kind in _CAPTURE_KINDS}
+    # ``progress`` (if given) is updated in place so a caller that catches
+    # an exception mid-run still sees the counts written so far.
+    result: dict[str, Any] = progress if progress is not None else {}
+    result.update({
+        "stored": 0, "by_kind": by_kind, "dropped_unanchored": 0,
+        "anchor_rate": None, "embedded": 0, "windows": 0,
+        "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
+    })
+    if not transcript or not transcript.strip():
+        return result
+
+    ts = ts or datetime.now(timezone.utc).isoformat()
+    files = list(files)[:_MAX_ANCHOR_FILES]
+    windows = transcript_windows(transcript[-_MAX_TRANSCRIPT_CHARS:])
+    result["windows"] = len(windows)
+    anchor_rates: list[float] = []
+    session_written = False
+    index_ensured = False
+
+    for wi, window in enumerate(windows):
+        extracted = await extract_coding_memory(window, branch=branch, task=task_key, files=files)
+        result["dropped_unanchored"] += extracted["dropped_unanchored"]
+        if extracted["anchor_rate"] is not None:
+            anchor_rates.append(extracted["anchor_rate"])
+        candidates = _candidates_from(extracted)
+        if wi == 0 and error_steps:
+            candidates += error_step_candidates(error_steps, task_key)
+        if not candidates:
+            continue
+
+        # Embed before curating: the embedding finds the dedup context and,
+        # for survivors, is what gets stored.
+        embeddings: list[list[float] | None] = []
+        existing: dict[str, None] = {}
+        for c in candidates:
+            vector = None
+            if c["kind"] in RECALL_KINDS:
+                vector = await _embed(client, memory_embedding_text(c["kind"], _node_props(c)))
+                for line in await _neighbors(client, repo, vector):
+                    existing.setdefault(line, None)
+            embeddings.append(vector)
+
+        curated = await curate_coding_memory(candidates, window, list(existing))
+        for key, n in curated["counts"].items():
+            result["curated"][key] = result["curated"].get(key, 0) + n
+        kept_ids = {id(c) for c in curated["kept"]}
+
+        for c, vector in zip(candidates, embeddings):
+            if id(c) not in kept_ids:
+                continue
+            if not session_written:
+                q, p = session_upsert(agent_id, session_id, repo, branch, task_key, ts)
+                await client.graph.execute_write(q, p)
+                session_written = True
+            if vector is not None and not index_ensured:
+                await ensure_coding_memory_index(client)
+                index_ensured = True
+            if vector is not None:
+                result["embedded"] += 1
+            q, p = anchored_memory_write(
+                c["kind"], _node_props(c), session_id, repo,
+                list(c.get("anchor_files") or []),
+                task_key if c.get("concerns_task") else None,
+                ts, embedding=vector,
+            )
+            await client.graph.execute_write(q, p)
+            by_kind[c["kind"]] += 1
+            result["stored"] += 1
+
+    result["stored"] = sum(by_kind.values())
+    result["anchor_rate"] = (sum(anchor_rates) / len(anchor_rates)) if anchor_rates else None
+    return result
+
+
 def register_coding_tools(mcp: FastMCP) -> None:
     """Register the coding-memory tools on the FastMCP server."""
 
@@ -464,179 +704,54 @@ def register_coding_tools(mcp: FastMCP) -> None:
         transcript: str,
         task_key: str | None = None,
         files: list[str] | None = None,
+        error_steps: list[dict] | None = None,
     ) -> str:
         """Extract anchored memories from a session transcript and store them.
 
         Session-end capture tool — the SessionEnd hook calls this with the
-        rendered transcript and the session's git context. The transcript
-        goes through ExtractCodingMemory (a BAML/LLM call, so this tool is
-        slow); every kept item is written via ``anchored_memory_write``:
-        Decision/Gotcha/DeadEnd with their surviving anchor files as ABOUT
-        edges and a CONCERNS edge only when the item concerns the task,
-        CodingPreference always, session-anchored (MADE_IN) with no file or
-        task edges. Stored props follow coding_recall's read contract:
-        Decision {text, reason, confidence}, Gotcha {text, confidence},
-        DeadEnd {attempt, why_failed, confidence}, CodingPreference
-        {category, preference, confidence}.
+        rendered transcript (tool output included) and the session's git
+        context. The work is :func:`capture_transcript`: the transcript is
+        cut into windows, each window goes through ExtractCodingMemory,
+        errored tool steps become DeadEnd candidates for free, every
+        candidate is embedded and its nearest stored lessons fetched, and
+        one CurateCodingMemory call per window decides WRITE /
+        ALREADY_KNOWN / NOT_DURABLE / UNSUPPORTED. Survivors are written
+        via ``anchored_memory_write``: Decision/Gotcha/DeadEnd with their
+        anchor files as ABOUT edges and a CONCERNS edge when they concern
+        the task, CodingPreference session-anchored only. Stored props:
+        Decision {text, reason, confidence}, Gotcha {symptom?, text,
+        confidence}, DeadEnd {symptom?, attempt, why_failed, confidence},
+        CodingPreference {category, preference, confidence}.
 
-        Inputs are capped silently: the transcript at 80,000 chars keeping
-        the TAIL (recent turns matter most), ``files`` at 100 entries. An
-        empty or whitespace transcript returns immediately without calling
-        the extractor.
-
-        One timestamp is shared by every write. The session upsert runs
-        first — but only when extraction kept at least one item, so an
-        empty extraction (or an extraction failure) writes nothing at all.
-        Each write is its own transaction; on error the payload carries
-        the partial progress: {"error", "stored", "by_kind",
-        "dropped_unanchored", "anchor_rate"}. Memory nodes are CREATEd,
-        not MERGEd, so the retry contract is NOT idempotent — a retry
-        after a partial failure may duplicate already-stored items.
-
-        Every Decision/Gotcha/DeadEnd is embedded before it is written so
-        coding_recall can rank it against a prompt; ``embedded`` reports how
-        many got a vector. An unavailable embedder is not an error — the
-        item is stored without one and is simply unreachable by the vector
-        leg of recall.
+        Inputs are capped silently: transcript 400,000 chars (tail),
+        ``files`` 100, ``error_steps`` 40. Each write is its own
+        transaction; nodes are CREATEd, so a retry after a partial failure
+        may duplicate items the curator did not yet know about.
 
         Returns JSON: {"stored", "by_kind", "dropped_unanchored",
-        "anchor_rate", "embedded"}.
+        "anchor_rate", "embedded", "windows", "curated"}.
         """
         client = get_client(ctx)
-
-        if not transcript or not transcript.strip():
-            return json.dumps(
-                {
-                    "stored": 0,
-                    "by_kind": {kind: 0 for kind in _CAPTURE_KINDS},
-                    "dropped_unanchored": 0,
-                    "anchor_rate": None,
-                }
-            )
-
-        ts = datetime.now(timezone.utc).isoformat()
-        by_kind = {kind: 0 for kind in _CAPTURE_KINDS}
-        dropped_unanchored = 0
-        anchor_rate = None
-        embedded = 0
-
+        progress: dict[str, Any] = {}
         try:
-            extracted = await extract_coding_memory(
-                transcript[-_MAX_TRANSCRIPT_CHARS:],
+            result = await capture_transcript(
+                client,
+                transcript=transcript,
+                agent_id=agent_id,
+                session_id=session_id,
+                repo=repo,
                 branch=branch,
-                task=task_key,
-                files=list(files or [])[:_MAX_ANCHOR_FILES],
+                task_key=task_key,
+                files=list(files or []),
+                error_steps=list(error_steps or []),
+                progress=progress,
             )
-            dropped_unanchored = extracted["dropped_unanchored"]
-            anchor_rate = extracted["anchor_rate"]
-
-            # (kind, props, anchor_paths, task_key-or-None), in write order.
-            # concerns_task/anchor_files become edges, never node props.
-            items: list[tuple[str, dict[str, Any], list[str], str | None]] = []
-            for d in extracted["decisions"]:
-                items.append(
-                    (
-                        "Decision",
-                        {
-                            "text": d["text"],
-                            "reason": d["reason"],
-                            "confidence": d["confidence"],
-                        },
-                        d["anchor_files"],
-                        task_key if d.get("concerns_task") else None,
-                    )
-                )
-            for g in extracted["gotchas"]:
-                items.append(
-                    (
-                        "Gotcha",
-                        {"text": g["text"], "confidence": g["confidence"]},
-                        g["anchor_files"],
-                        task_key if g.get("concerns_task") else None,
-                    )
-                )
-            for de in extracted["dead_ends"]:
-                items.append(
-                    (
-                        "DeadEnd",
-                        {
-                            "attempt": de["attempt"],
-                            "why_failed": de["why_failed"],
-                            "confidence": de["confidence"],
-                        },
-                        de["anchor_files"],
-                        task_key if de.get("concerns_task") else None,
-                    )
-                )
-            for p in extracted["preferences"]:
-                items.append(
-                    (
-                        "CodingPreference",
-                        {
-                            "category": p["category"],
-                            "preference": p["preference"],
-                            "confidence": p["confidence"],
-                        },
-                        [],
-                        None,
-                    )
-                )
-
-            if items:
-                # Embed before writing anything: the index only needs to
-                # exist if at least one vector is going in, so an absent or
-                # broken embedder costs no DDL and no behaviour change.
-                embeddings: list[list[float] | None] = []
-                for kind, props, _anchor_paths, _task in items:
-                    vector = None
-                    if kind in RECALL_KINDS:
-                        vector = await _embed(
-                            client, memory_embedding_text(kind, props)
-                        )
-                        if vector is not None:
-                            embedded += 1
-                    embeddings.append(vector)
-
-                # Session first — the memory writes MATCH the session node.
-                query, params = session_upsert(
-                    agent_id, session_id, repo, branch, task_key, ts
-                )
-                await client.graph.execute_write(query, params)
-                if embedded:
-                    await ensure_coding_memory_index(client)
-
-                for (kind, props, anchor_paths, item_task_key), vector in zip(
-                    items, embeddings
-                ):
-                    query, params = anchored_memory_write(
-                        kind, props, session_id, repo, anchor_paths,
-                        item_task_key, ts, embedding=vector,
-                    )
-                    await client.graph.execute_write(query, params)
-                    by_kind[kind] += 1
-
-            return json.dumps(
-                {
-                    "stored": sum(by_kind.values()),
-                    "by_kind": by_kind,
-                    "dropped_unanchored": dropped_unanchored,
-                    "anchor_rate": anchor_rate,
-                    "embedded": embedded,
-                }
-            )
-
+            return json.dumps(result)
         except Exception as e:
+            # The payload carries the partial progress made before the
+            # failure, so a caller can see what landed.
             logger.error(f"Error in capture_session_memory: {e}")
-            return json.dumps(
-                {
-                    "error": str(e),
-                    "stored": sum(by_kind.values()),
-                    "by_kind": by_kind,
-                    "dropped_unanchored": dropped_unanchored,
-                    "anchor_rate": anchor_rate,
-                    "embedded": embedded,
-                }
-            )
+            return json.dumps({"error": str(e), **progress})
 
     @mcp.tool()
     @log_tool_call

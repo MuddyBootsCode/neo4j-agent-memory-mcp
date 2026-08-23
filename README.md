@@ -251,9 +251,15 @@ Add it to `~/.claude/settings.json` (or a project `.claude/settings.json`):
 
 Like the recall hook it needs the server running on HTTP and is fail-open:
 any error, timeout, or malformed payload exits 0. It prints nothing on
-success — `SessionEnd` output is not injected anywhere. Very long sessions
-are capped to the final 80,000 characters of transcript, so early-session
-decisions may not be captured.
+success — `SessionEnd` output is not injected anywhere. The rendering
+includes tool activity (edit/bash markers and tool output, errors nearly
+whole) and is capped at 400,000 characters; the server cuts it into
+60,000-character windows and extracts from the newest plus the windows
+with the most failure and correction evidence (`NAM_CAPTURE_MAX_WINDOWS`,
+default 4). Lessons anchor to files from the transcript's edits, the last
+24 hours of commits, and the working tree. One `CurateCodingMemory` call
+per window screens the candidates against the nearest lessons already
+stored (`NAM_CAPTURE_JUDGE=off` skips it).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

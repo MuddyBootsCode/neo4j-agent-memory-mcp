@@ -28,6 +28,12 @@ type_map = {
     "types.ContradictionResult": types.ContradictionResult,
     "stream_types.ContradictionResult": stream_types.ContradictionResult,
 
+    "types.CuratedMemories": types.CuratedMemories,
+    "stream_types.CuratedMemories": stream_types.CuratedMemories,
+
+    "types.CuratorVerdict": types.CuratorVerdict,
+    "stream_types.CuratorVerdict": stream_types.CuratorVerdict,
+
     "types.ExtractedCodingPreference": types.ExtractedCodingPreference,
     "stream_types.ExtractedCodingPreference": stream_types.ExtractedCodingPreference,
 
@@ -42,9 +48,6 @@ type_map = {
 
     "types.ExtractedReasoningStep": types.ExtractedReasoningStep,
     "stream_types.ExtractedReasoningStep": stream_types.ExtractedReasoningStep,
-
-    "types.MemoryJudgement": types.MemoryJudgement,
-    "stream_types.MemoryJudgement": stream_types.MemoryJudgement,
 
     "types.ReasoningChainInput": types.ReasoningChainInput,
     "stream_types.ReasoningChainInput": stream_types.ReasoningChainInput,
@@ -64,5 +67,7 @@ type_map = {
     "types.TemporalExtraction": types.TemporalExtraction,
     "stream_types.TemporalExtraction": stream_types.TemporalExtraction,
 
+
+    "types.CurateAction": types.CurateAction,
 
 }
