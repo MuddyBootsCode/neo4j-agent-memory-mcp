@@ -956,6 +956,33 @@ class TestRecallGate:
 
         assert len(result["memories"]) == 3
 
+    async def test_gate_timeout_returns_ungated(self, monkeypatch, mock_ctx):
+        """A hung judge must not hold the hook; the cap is the hook's budget, not BAML's."""
+        import asyncio
+        import sys
+        import types
+        from unittest.mock import MagicMock
+
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        async def hang(query, candidates, baml_options=None):
+            await asyncio.sleep(5)
+
+        mod = types.ModuleType("agent_memory_mcp.baml_client.async_client")
+        mod.b = MagicMock()
+        mod.b.ScreenRecalledMemories = hang
+        monkeypatch.setitem(sys.modules, "agent_memory_mcp.baml_client.async_client", mod)
+        monkeypatch.setattr(ct, "GATE_TIMEOUT_S", 0.05)
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert len(result["memories"]) == 3
+        assert result["timing_ms"]["gate"] < 1000
+
     async def test_partial_verdicts_are_discarded_whole(self, monkeypatch, mock_ctx):
         """A truncated judge must not look like a decisive one."""
         self._screen(monkeypatch, {0: True})  # 1 verdict for 3 candidates

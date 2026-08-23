@@ -21,6 +21,7 @@ ever interpolated into query text.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -98,6 +99,11 @@ GATE_DEPTH = int(os.environ.get("NAM_RECALL_GATE_DEPTH", "10"))
 # Set NAM_RECALL_GATE=0 to skip the gate and return the top _RECALL_LIMIT by
 # score -- the MUD-401 behaviour, ~33% precision instead of ~69%.
 GATE_ENABLED = os.environ.get("NAM_RECALL_GATE", "1") != "0"
+# Wall-clock cap on one gate call. BAML's own request timeout is 900 s; a
+# hung local model would otherwise hold the hook until Claude Code kills
+# it, which reads as an empty recall rather than a slow one (seen in the
+# MUD-403/404 golden runs: one query per run stalled for the full 900 s).
+GATE_TIMEOUT_S = float(os.environ.get("NAM_RECALL_GATE_TIMEOUT", "6"))
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
 # constant, never user input — so this is not an injection surface. It keeps
@@ -445,16 +451,22 @@ async def screen_memories(
     from agent_memory_mcp.providers import default_baml_options
 
     try:
-        screen = await b.ScreenRecalledMemories(
-            query=prompt,
-            candidates=_candidate_block(memories),
-            baml_options=default_baml_options(),
+        screen = await asyncio.wait_for(
+            b.ScreenRecalledMemories(
+                query=prompt,
+                candidates=_candidate_block(memories),
+                baml_options=default_baml_options(),
+            ),
+            timeout=GATE_TIMEOUT_S,
         )
         verdicts = {
             v.id: bool(v.keep)
             for v in screen.verdicts
             if 0 <= v.id < len(memories)
         }
+    except asyncio.TimeoutError:
+        logger.warning(f"recall gate exceeded {GATE_TIMEOUT_S}s; returning ungated")
+        return memories
     except Exception:
         logger.warning("recall gate failed; returning ungated", exc_info=True)
         return memories
