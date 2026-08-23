@@ -116,7 +116,7 @@ class CurateActionAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.enum("CurateAction")
-        self._values: typing.Set[str] = set([  "WRITE",  "ALREADY_KNOWN",  "NOT_DURABLE",  "UNSUPPORTED",  ])
+        self._values: typing.Set[str] = set([  "WRITE",  "ALREADY_KNOWN",  "SUPERSEDES",  "NOT_DURABLE",  "UNSUPPORTED",  ])
         self._vals = CurateActionValues(self._bldr, self._values)
 
     def type(self) -> baml_py.FieldType:
@@ -150,6 +150,10 @@ class CurateActionValues:
     @property
     def ALREADY_KNOWN(self) -> type_builder.EnumValueViewer:
         return type_builder.EnumValueViewer(self.__bldr.value("ALREADY_KNOWN"))
+    
+    @property
+    def SUPERSEDES(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("SUPERSEDES"))
     
     @property
     def NOT_DURABLE(self) -> type_builder.EnumValueViewer:
@@ -410,7 +414,7 @@ class CuratorVerdictAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("CuratorVerdict")
-        self._properties: typing.Set[str] = set([  "id",  "action",  ])
+        self._properties: typing.Set[str] = set([  "id",  "action",  "known_as",  ])
         self._props = CuratorVerdictProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -445,6 +449,10 @@ class CuratorVerdictProperties:
     @property
     def action(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("action"))
+    
+    @property
+    def known_as(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("known_as"))
     
     
 

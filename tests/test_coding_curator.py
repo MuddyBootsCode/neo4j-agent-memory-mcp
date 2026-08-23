@@ -26,7 +26,7 @@ def _cands():
 
 
 def _verdicts(*actions):
-    return SimpleNamespace(verdicts=[SimpleNamespace(id=i, action=SimpleNamespace(value=a)) for i, a in enumerate(actions)])
+    return SimpleNamespace(verdicts=[SimpleNamespace(id=i, action=SimpleNamespace(value=a), known_as=None) for i, a in enumerate(actions)])
 
 
 def _stub(monkeypatch, return_value=None, side_effect=None):
@@ -37,17 +37,54 @@ def _stub(monkeypatch, return_value=None, side_effect=None):
 
 class TestCurate:
     async def test_only_write_survives_and_counts_every_action(self, monkeypatch):
-        _stub(monkeypatch, _verdicts("WRITE", "ALREADY_KNOWN", "NOT_DURABLE", "UNSUPPORTED"))
-        out = await curate_coding_memory(_cands(), "transcript", ["- [Gotcha] run with -m integration"])
+        v = _verdicts("WRITE", "ALREADY_KNOWN", "NOT_DURABLE", "UNSUPPORTED")
+        v.verdicts[1].known_as = 0
+        _stub(monkeypatch, v)
+        out = await curate_coding_memory(_cands(), "transcript", ["[Gotcha] run with -m integration"])
         assert [c["kind"] for c in out["kept"]] == ["Decision"]
-        assert out["counts"] == {"write": 1, "already_known": 1, "not_durable": 1, "unsupported": 1}
+        assert out["counts"] == {"write": 1, "already_known": 1, "supersedes": 0, "not_durable": 1, "unsupported": 1}
+        assert out["known"] == [(_cands()[1], 0)]
+
+    async def test_already_known_needs_a_target_else_it_is_a_write(self, monkeypatch):
+        v = _verdicts("ALREADY_KNOWN")
+        _stub(monkeypatch, v)
+        out = await curate_coding_memory(_cands()[:1], "t", [])
+        assert len(out["kept"]) == 1
+        assert out["counts"]["write"] == 1
+        assert out["known"] == []
+
+    async def test_already_known_with_target_becomes_evidence_not_a_write(self, monkeypatch):
+        v = _verdicts("ALREADY_KNOWN")
+        v.verdicts[0].known_as = 1
+        _stub(monkeypatch, v)
+        cands = _cands()[:1]
+        out = await curate_coding_memory(cands, "t", ["[Gotcha] a", "[Gotcha] b"])
+        assert out["kept"] == []
+        assert out["counts"]["already_known"] == 1
+        assert out["known"] == [(cands[0], 1)]
+
+    async def test_supersedes_keeps_candidate_tagged_with_the_old_index(self, monkeypatch):
+        v = _verdicts("SUPERSEDES")
+        v.verdicts[0].known_as = 0
+        _stub(monkeypatch, v)
+        out = await curate_coding_memory(_cands()[:1], "t", ["[Gotcha] stale"])
+        assert out["kept"][0]["supersedes"] == 0
+        assert out["counts"]["supersedes"] == 1
+
+    async def test_supersedes_with_bad_target_is_a_write(self, monkeypatch):
+        v = _verdicts("SUPERSEDES")
+        v.verdicts[0].known_as = 7
+        _stub(monkeypatch, v)
+        out = await curate_coding_memory(_cands()[:1], "t", ["[Gotcha] stale"])
+        assert "supersedes" not in out["kept"][0]
+        assert out["counts"]["write"] == 1
 
     async def test_curator_sees_numbered_candidates_existing_and_transcript(self, monkeypatch):
         mock = _stub(monkeypatch, _verdicts("WRITE", "WRITE", "WRITE", "WRITE"))
         await curate_coding_memory(_cands(), "the transcript", ["[Gotcha] old lesson"])
         kwargs = mock.await_args.kwargs
         assert kwargs["candidates"].startswith("0. [Decision] chose asyncpg — async loop\n1. [Gotcha] symptom: pytest hangs | run with -m integration")
-        assert kwargs["existing"] == "- [Gotcha] old lesson"
+        assert kwargs["existing"] == "0. [Gotcha] old lesson"
         assert kwargs["transcript"] == "the transcript"
         assert "baml_options" in kwargs
 
@@ -102,7 +139,7 @@ class TestCurate:
     async def test_empty_candidates_skip_the_call(self, monkeypatch):
         mock = _stub(monkeypatch, _verdicts())
         out = await curate_coding_memory([], "t", [])
-        assert out == {"kept": [], "counts": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0}}
+        assert out == {"kept": [], "counts": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0}, "known": []}
         mock.assert_not_awaited()
 
     async def test_action_accepts_plain_string_enum(self, monkeypatch):

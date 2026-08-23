@@ -11,6 +11,7 @@ prompt submit.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 import re
 import subprocess
 from typing import Any
@@ -19,7 +20,7 @@ GIT_TIMEOUT = 3.0
 """Seconds before any single git subprocess is abandoned."""
 
 # Matches a ticket key like MUD-395 inside a branch name.
-_TASK_KEY_RE = re.compile(r"[A-Z]{2,}-\d+")
+_TASK_KEY_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]{2,}-\d+(?!\d)")
 
 # A commit header line from ``commits_since``: full sha, then the \x1f
 # unit separator. File lines never match — git quotes control characters
@@ -140,16 +141,22 @@ def commits_since(repo_dir: str, since_iso: str, cap: int = 20) -> list[dict[str
     return commits
 
 
+_LONG_LIVED_BRANCHES = frozenset({"main", "master", "develop", "dev", "trunk"})
+
+
 def infer_task_key(
-    branch: str | None, env: dict | None = None, repo: str | None = None
+    branch: str | None, env: dict | None = None, repo: str | None = None,
+    now: datetime | None = None,
 ) -> str | None:
     """Task key for the current work: env override, ticket in branch, branch.
 
     ``NAM_TASK_KEY`` (from ``env``, default ``os.environ``) wins when set and
     non-empty — an explicit override is global on purpose. Else the first
     ``ABC-123``-style match in the branch; ticket ids are meaningfully global,
-    so ``repo`` never touches them. Else the branch itself, scoped as
-    ``"repo/branch"`` when ``repo`` is given — a bare branch name like "main"
+    so ``repo`` never touches them; the match is case-insensitive
+    (``michael/mud-402-x`` → ``MUD-402``). Else the branch itself, scoped as
+    ``"repo/branch"`` when ``repo`` is given, and additionally by ISO week
+    for long-lived branches (main, master, develop) — a bare branch name like "main"
     would otherwise merge unrelated repos into one WorkTask and cross-warn
     their agents. None when the branch is None/empty with no override.
     """
@@ -161,5 +168,12 @@ def infer_task_key(
         return None
     match = _TASK_KEY_RE.search(branch)
     if match:
-        return match.group(0)
+        return match.group(0).upper()
+    # Long-lived branches collapse every session into one task forever
+    # (wellbore-diagram/main held 25 decisions). Bucket them by ISO week so
+    # overlap warnings and CONCERNS edges stay about the same stretch of work.
+    if branch in _LONG_LIVED_BRANCHES:
+        week = (now or datetime.now(timezone.utc)).strftime("%G-W%V")
+        scope = f"{repo}/{branch}" if repo else branch
+        return f"{scope}/{week}"
     return f"{repo}/{branch}" if repo else branch
