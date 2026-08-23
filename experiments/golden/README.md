@@ -13,6 +13,7 @@ committed under `results/<run>/`.
 | step | writes | what |
 |---|---|---|
 | `step1_corpus.py` | `session_split.json`, `corpus_stats.json` | 60/40 chronological split per repo; production capture over the earlier sessions into the scratch DB. `GOLDEN_REUSE_DB` skips extraction. |
+| `step1b_materialize.py` | `pool.json`, copies of queries/labels | Rebuilds the scratch DB from a committed `pool.json` under the current embedder, no LLM. Retrieval experiments reuse the labels. `GOLDEN_POOL_FROM`. |
 | `step2_pool.py` | `pool.json` | Lessons exported from the DB. Id = sha1(repo, kind, embedding text), so a rebuild that reproduces a lesson keeps its labels. |
 | `step3_queries.py` | `queries.json` | 100 real human prompts from the query sessions, 25 per cell of anchorable × short, each with the files edited before it. |
 | `step4_label.py` | `labels.json`, `label_usage.json` | Claude Opus 5 labels every (query, lesson) pair in the same repo. Rubric + 50 sorted lessons cached in `system`, query in `messages`, structured output. Chunk-major so one cache prefix stays hot. Stops if the second call on a chunk shows no cache read. Resumable. |
@@ -32,9 +33,10 @@ BAML call local.
 
 ## Re-scoring a change
 
-Retrieval changes (MUD-406): keep the pool, rerun `step5_score.py` with the
-new code or embedder (`NAM_EMBEDDING_MODEL`, `NAM_EMBEDDING_DIMENSIONS`), new
-`GOLDEN_RUN` name. Capture changes (MUD-404): rebuild the pool with `step1`,
+Retrieval changes (MUD-406): `GOLDEN_POOL_FROM=results/<run>/pool.json
+step1b_materialize.py`, then `step5_score.py` (`NAM_EMBEDDING_MODEL`,
+`NAM_EMBEDDING_DIMENSIONS`, `GOLDEN_QUERY_CONTEXT` to prepend prior turns),
+then `step6_teardown.py`, under a new `GOLDEN_RUN` name. Capture changes (MUD-404): rebuild the pool with `step1`,
 relabel with `step4` (only lessons whose text changed cost new calls), then
 score. Compare `scores.json` across runs.
 

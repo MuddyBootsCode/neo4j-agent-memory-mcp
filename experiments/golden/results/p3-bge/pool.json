@@ -1,0 +1,3044 @@
+[
+  {
+    "id": "017635d28c12",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "GRA-588 ticket lists only 7 tools as applying pre-grad exclusion, but metro is now the 8th. | Updating GRA-588 to include metro in the count of appliers. \u2014 failed: GRA-588 is a uniformity ticket about disclosure consistency; metro's problem is a correctness defect (disclosing the opposite of the truth) and is not covered by GRA-588's scope, which focuses on inconsistent disclosure among the 7 tools. Metro's issue is better handled as a separate fix (GRA-591) with its own ticket.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-9ba584a3-4edb-4cd8-8aff-1703f236faa7",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "0197ee583544",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to resolve the `org_id` derivation in GRA-448 by deriving it at export time via `user_id` \u2192 `org_memberships` rather than at write time. \u2014 The transcript states that `mcp_server/tool_logger.py:36` still resolves org via a `LEFT JOIN` at write time and migration 034 says 'No backfill is possible or intended', so deriving at export time is the correct approach.",
+    "reason": "The transcript states that `mcp_server/tool_logger.py:36` still resolves org via a `LEFT JOIN` at write time and migration 034 says 'No backfill is possible or intended', so deriving at export time is the correct approach.",
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0268129da0de",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose completeness enforcement over globbing for migration-mount validation because the postgres entrypoint ignores directories under initdb.d, making globbing infeasible. \u2014 The postgres entrypoint ignores directories under initdb.d, so a glob-based approach would miss mounted directories; completeness enforcement (checking every file is either mounted or explicitly excluded) is the robust mechanism.",
+    "reason": "The postgres entrypoint ignores directories under initdb.d, so a glob-based approach would miss mounted directories; completeness enforcement (checking every file is either mounted or explicitly excluded) is the robust mechanism.",
+    "files": [
+      "docker-compose.yml",
+      "scripts/check_compose_mounts.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "026b7e4b5eec",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: tests/fixtures/usage_harness/export_month_mismatch/calls_...json: window month is '2026-06' but this run expects '2026-07'. Mixing months in one analysis silently averages two windows into one set of numbers. | Validate that the export directory's window month matches the expected analysis window to avoid silently averaging two different time periods.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "02c581fde945",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "argparse rejects ensure --dsn ... when the option lives only on the top-level parser | Place the --dsn flag on the top-level argparse parser, not on the subcommand parser, so it is accepted after the subcommand name.",
+    "reason": null,
+    "files": [
+      "scripts/rotate_tool_call_log_partitions.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "02e360fa5cca",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Client gets KeyError on `result['job_titles']` when the institution is not resolved. | Ensure the early return for unresolved institutions includes the `job_titles` key (e.g., `return {\"institution\": ..., \"data\": [], \"job_titles\": []}`) so all code paths return the same shape.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "03fbf76d5e65",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Mass General now = 1120, but live tool returns 291 | Key three-way joins on (company_name, city) instead of the table's unique key (company_slug) to prevent fan-out inflation.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0520a020601a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to validate `cip4_code` format at the top of each tool body (before institution resolution) rather than relying on the existing validation idiom inside the `try` block. \u2014 A bad argument must surface as an error even when the institution fails to resolve, rather than vanishing into a not-found payload that hides which of the two things was actually wrong.",
+    "reason": "A bad argument must surface as an error even when the institution fails to resolve, rather than vanishing into a not-found payload that hides which of the two things was actually wrong.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0521f817f6fe",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to add the two career-exploration skills to the shared `DEPARTMENT_BLUEPRINT` in `libraryDepartments.ts` rather than the Merrimack-specific config. \u2014 The user confirmed the tab is defined in a shared blueprint that Merrimack and Briar Cliff both render, ensuring future branded libraries also get the pair.",
+    "reason": "The user confirmed the tab is defined in a shared blueprint that Merrimack and Briar Cliff both render, ensuring future branded libraries also get the pair.",
+    "files": [
+      "frontend/src/pages/skills/libraryDepartments.ts"
+    ],
+    "session": "golden-0db95929-43bb-49a4-8f8a-19f915087147",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "058db66933ae",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Pasting `_DEGREE_LEVEL_METHOD_NOTE` into `degree_distribution` emits a note referencing five fields that don't exist in the response. | Do not reuse `_DEGREE_LEVEL_METHOD_NOTE` verbatim in `degree_distribution` because it references program-grain fields (`program_alumni`, `program_alumni_unscoped`, `alumni_credential_reachable`, `alumni_unclassified_degree_level`, `alumni_by_degree_level`) that are absent from the institution-grain payload.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "0641621c2cc7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use `institute_id` for the program-scoped filter in `career_progression` instead of `institute_name`. \u2014 The index `idx_mv_ie_institute_cip4` leads with `institute_id`, so filtering by `institute_name` discards the index and leaves `cip4_code` as a residual filter over the whole institution.",
+    "reason": "The index `idx_mv_ie_institute_cip4` leads with `institute_id`, so filtering by `institute_name` discards the index and leaves `cip4_code` as a residual filter over the whole institution.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "064192f99f86",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "S3 deletion is permanent if versioning is disabled. | Check S3 bucket versioning status before performing destructive deletions, as the `gradgraph-production-skillsbucketbucket` has versioning disabled.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "06a8369d7354",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to project out the `_shadow` key at export time in GRA-448 rather than in consumers. \u2014 This ensures 'One place' handling and prevents GRA-449 from having to know about it.",
+    "reason": "This ensures 'One place' handling and prevents GRA-449 from having to know about it.",
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "06fa8f96c626",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to reframe the 'Career Exploration Report Sales Video' skill's name, summary, blurb, tags, and triggers to be customer-facing. \u2014 The `SkillCard` renders the first four tags and summary; the original tags (`sales, internal, video, prospect`) and blurb were too internal, so a full reframe was needed to avoid leaking internal framing onto the card.",
+    "reason": "The `SkillCard` renders the first four tags and summary; the original tags (`sales, internal, video, prospect`) and blurb were too internal, so a full reframe was needed to avoid leaking internal framing onto the card.",
+    "files": [
+      "frontend/src/pages/skills/libraryDepartments.ts"
+    ],
+    "session": "golden-0db95929-43bb-49a4-8f8a-19f915087147",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "07198adb61d2",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Adopted a May 31 convention for the graduation anchor in GRA-609, treating year Y as ending on May 31 of that year. \u2014 The ticket requires a convention because `graduation_year` lacks a month; May 31 provides a clear cutoff that separates spring semester student work (Jan\u2013Apr) from real hiring, and the data shows May is the largest ambiguous bucket (9,312 records) which is genuinely split by the convention.",
+    "reason": "The ticket requires a convention because `graduation_year` lacks a month; May 31 provides a clear cutoff that separates spring semester student work (Jan\u2013Apr) from real hiring, and the data shows May is the largest ambiguous bucket (9,312 records) which is genuinely split by the convention.",
+    "files": [
+      "docs/plans/2026-08-09-gra609-grad-anchor-email.md",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "078e8c844dad",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "subprocess.check_output for the AWS Secrets Manager fetch hangs indefinitely. | Add a timeout (e.g., 20s) to the AWS CLI `check_output` call in `tests/mcp/conftest.py` to prevent blocking `credential_process` or SSO reauth from hanging the pytest session.",
+    "reason": null,
+    "files": [
+      "tests/mcp/conftest.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "096ed2bbef76",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to run the year-guarded sole-pair CIP4 recovery for 3.64M labels rather than sending all 4.25M to the matcher. \u2014 89% of the loss class (3.64M of 4.09M) was cleanly recoverable as sole-pairs with year agreement, providing provenance-safe recovery of unambiguous credentials.",
+    "reason": "89% of the loss class (3.64M of 4.09M) was cleanly recoverable as sole-pairs with year agreement, providing provenance-safe recovery of unambiguous credentials.",
+    "files": [
+      "scripts/v2_ops/gra594/postpass3_saferecovery.sql",
+      "tests/test_gra594_postpass.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "0a10b2649483",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "mcp_server tests hard-fail when db_pool skips due to a foreign Postgres on 5432. | Gate the `mcp_server` fixture on the same connect+schema probe as `db_pool` (using `_local_pg_skip_reason`) instead of a TCP-only probe, so it skips when the schema is unloaded.",
+    "reason": null,
+    "files": [
+      "tests/conftest.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0abf0bb2a1d3",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use TCP connections (127.0.0.1) instead of Unix sockets for the dev.sh schema probe, to avoid the first-boot init race. \u2014 The postgres image's temporary first-boot init server is socket-only; probing over TCP ensures the wait loop blocks until the main server is ready, preventing false staleness errors.",
+    "reason": "The postgres image's temporary first-boot init server is socket-only; probing over TCP ensures the wait loop blocks until the main server is ready, preventing false staleness errors.",
+    "files": [
+      "scripts/dev.sh"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0b443d331322",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "GLOBAL scope matched : False | Use the `key` field (not `org_id`) to match entries in `manifest.scopes[]` when the scope is global.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0ba75e71449d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Integration tests pass but exercise the wrong database (auth instead of tool). | Ensure `scripts/test_mcp_tools_integration.py` sets `_tool_pool` (not just `_pool` and `_readonly_pool`) so that tool calls use the correct pool built by `build_tool_pool_kwargs()`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0bfcda41b5d2",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The `tool_db_target` dimension value moved from `blue` to `green` in production, invalidating alarms that were fixed to watch only `blue`. | Use a drift-resistant dimension set (e.g., `[]`) for alarms that depend on dynamic environment variable values.",
+    "reason": null,
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "0d0de67c03c4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Exit code 1: no pg_hba.conf entry for host \"127.0.0.1\", user \"gradgraph_app\", database \"gradgraph\", no encryption | When port-forwarding to the production database via SSM, set `SSL` (or `sslmode`) in the connection string to match the server's `TOOL_DB_SSL=relaxed` posture, or the connection will be rejected by `pg_hba.conf`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0d24e177b277",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to re-key migration 070's probe from '%start_year >= graduation_year%' to '%graduation_year IS NULL%'. \u2014 The old probe returns FALSE against the new definition (causing a silent re-run and revert), while the new probe returns TRUE and is stable across both forms.",
+    "reason": "The old probe returns FALSE against the new definition (causing a silent re-run and revert), while the new probe returns TRUE and is stable across both forms.",
+    "files": [
+      "db/migrations/076_gra609_graduation_month_anchor.sql",
+      "slow_flow/migrations.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0d555a67191f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to apply migration 034 to database-1 rather than blue because blue's tool_call_logs is a dead, unpartitioned vestige with no recent writes. \u2014 Blue's table has only 23 rows with the last write in May, while database-1 is the live host for ToolLoggingMiddleware and has 18,916 rows.",
+    "reason": "Blue's table has only 23 rows with the last write in May, while database-1 is the live host for ToolLoggingMiddleware and has 18,916 rows.",
+    "files": [
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "0dbb3d3bdb55",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "cloudwatch_total returns 0 when CloudWatch has no datapoints, causing undercount_suspected to be false. | Handle empty CloudWatch Datapoints lists by returning None for cloudwatch_total, which degrades the undercount check to 'unknown' instead of 'false'.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0e2b5235f1bb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to run the integration test against live blue via SSM port-forward rather than the stale V1 Aurora target. \u2014 The script `scripts/test_mcp_tools_integration.py` was pointing at V1 Aurora `database-1`, which is now the auth database, not the tool database; production serves from blue.",
+    "reason": "The script `scripts/test_mcp_tools_integration.py` was pointing at V1 Aurora `database-1`, which is now the auth database, not the tool database; production serves from blue.",
+    "files": [
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0ee097e3e033",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: dormant members must appear, not be dropped | The roster export must use a LEFT JOIN to include dormant members, not an INNER JOIN.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/sql/export_roster.sql",
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "0f0ef4472a95",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose the intent signature (conjunctive set of tags) as the unit of a gap rather than individual tags because per-tag coverage lies when a tool covers each tag separately but no single tool answers the combined question. \u2014 Per-tag coverage lies \u2014 'median pay by years after graduation' tags salary + temporal_trend, a tool covers each one, and no tool answers the question; coverage is conjunctive: one tool must cover every tag on the shape.",
+    "reason": "Per-tag coverage lies \u2014 'median pay by years after graduation' tags salary + temporal_trend, a tool covers each one, and no tool answers the question; coverage is conjunctive: one tool must cover every tag on the shape.",
+    "files": [
+      "scripts/usage_harness/gaps.py",
+      "scripts/usage_harness/intent_coverage.json"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "100aa033a55f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use `git commit -F .commitmsg.tmp` instead of a complex heredoc command to create the commit message. \u2014 The complex heredoc command was refused because it was too complex to verify staying inside the worktree; the simpler command with a temporary file was accepted.",
+    "reason": "The complex heredoc command was refused because it was too complex to verify staying inside the worktree; the simpler command with a temporary file was accepted.",
+    "files": [
+      ".commitmsg.tmp"
+    ],
+    "session": "golden-f466b73c-76bb-4cc3-aa97-ee5f115e76e5",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "11e32e3ac18d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "SyntaxError: iterable unpacking cannot be used in comprehension | Do not use iterable unpacking (e.g., *list) inside a list comprehension in Python 3.14, as it causes a SyntaxError during AST parsing.",
+    "reason": null,
+    "files": [
+      "tests/test_partition_rotation.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "122dc9e1b2b0",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "NOTICE: GRA-592 rollup: 97176449 -> 97102775 rows (0.07581466575301593908.2f% removed) | Use round() in SQL for numeric formatting in PL/pgSQL RAISE NOTICE statements instead of relying on printf-style format specifiers like %.2f.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "135cb56eb643",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to decline the offered denominator re-run. \u2014 The 670-record gap moves the headline by only 0.001pp, which is negligible within the sensitivity band of \u22121.54% to \u22121.75%.",
+    "reason": "The 670-record gap moves the headline by only 0.001pp, which is negligible within the sensitivity band of \u22121.54% to \u22121.75%.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "14238ec658fb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to re-attach the corrected vulture gate artifact at head 7933432. \u2014 The original artifact's annotation was vacuous because vulture scanned zero files due to the .claude exclude bug, so the corrected evidence was needed to prove the gate was live.",
+    "reason": "The original artifact's annotation was vacuous because vulture scanned zero files due to the .claude exclude bug, so the corrected evidence was needed to prove the gate was live.",
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "scripts/usage_harness/analyze_sql.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "142ce280b33e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to drop `.claude` from vulture's exclude list in `pyproject.toml` rather than using a more specific pattern like `*/.claude/*`. \u2014 Vulture wraps wildcard-free patterns as `*<pattern>*` and matches against the resolved absolute path; since worktrees live under `<repo>/.claude/worktrees/`, the bare `.claude` entry swallows every file in every worktree, and `*/.claude/*` would re-break them for the same reason.",
+    "reason": "Vulture wraps wildcard-free patterns as `*<pattern>*` and matches against the resolved absolute path; since worktrees live under `<repo>/.claude/worktrees/`, the bare `.claude` entry swallows every file in every worktree, and `*/.claude/*` would re-break them for the same reason.",
+    "files": [
+      "pyproject.toml"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "143016a277fe",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to remove V2 test plumbing (db-target option and V2 target) from tests/mcp/conftest.py because the V2 cluster was decommissioned. \u2014 The V2 cluster was decommissioned (GRA-196), so keeping V2-specific code was stale; removing it simplified the test configuration to rely on V1_DB_* env vars.",
+    "reason": "The V2 cluster was decommissioned (GRA-196), so keeping V2-specific code was stale; removing it simplified the test configuration to rely on V1_DB_* env vars.",
+    "files": [
+      "tests/mcp/conftest.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "146913ffc506",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The `Shell fixture tests` step in `code-quality.yml` has never run on a real GitHub runner after PR 212 merged. | Verify the new shell tests in a Linux container with `jq` to ensure they pass in the same environment class as GitHub's `ubuntu-latest` runners, as the local macOS environment may differ.",
+    "reason": null,
+    "files": [
+      ".github/workflows/code-quality.yml",
+      "tests/test_ci_runner_never_acquired.sh"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "1475e11f2262",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use the `rds!cluster-*` master secret for database authentication instead of the `rds-db-credentials/cluster-HS3...` secret. \u2014 The `rds-db-credentials` secret's postgres password failed authentication, while the master secret provided the correct credentials for the `gradgraph` user.",
+    "reason": "The `rds-db-credentials` secret's postgres password failed authentication, while the master secret provided the correct credentials for the `gradgraph` user.",
+    "files": [
+      "functions/admin/db.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "155c639f6021",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to add lock_timeout=3s to the migration command to prevent queueing if the ALTER waits on a long transaction. \u2014 The default lock_timeout of 0 allows inserts to pile up behind the ACCESS EXCLUSIVE lock for far longer than the 86 ms of actual index build work.",
+    "reason": "The default lock_timeout of 0 allows inserts to pile up behind the ACCESS EXCLUSIVE lock for far longer than the 86 ms of actual index build work.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "187d231eab8c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Changed the hardcoded IP in test_mcp_tools_integration.py from blue's IP to green's IP. \u2014 The port-forward recipe hardcodes blue's IP (10.20.10.10), causing operators to forward to the non-serving host after the cutover, even though the script prints a green label.",
+    "reason": "The port-forward recipe hardcodes blue's IP (10.20.10.10), causing operators to forward to the non-serving host after the cutover, even though the script prints a green label.",
+    "files": [
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "18dcadc48cf6",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Postgres fails to start with 'could not map anonymous shared memory' after an EC2 instance type downsize. | When downsizing a Postgres primary, set shared_buffers to a value appropriate for the target instance size before the instance type change, because shared_buffers has postmaster context and cannot be changed by reload.",
+    "reason": null,
+    "files": [
+      "db/migrations/073_gra594_source_identity.sql"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "1e3701a5561a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to warm the green database's page cache before flipping traffic to it because the `top_employers` tool was timing out due to cold cache, not replication conflicts. \u2014 The tool timeout was caused by 40K disk reads on a cold 12 GB rollup (23,856 ms execution time); warming reduced this to 439 ms. The `confl_*` counters were zero, ruling out freeze conflicts.",
+    "reason": "The tool timeout was caused by 40K disk reads on a cold 12 GB rollup (23,856 ms execution time); warming reduced this to 439 ms. The `confl_*` counters were zero, ruling out freeze conflicts.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "1f487f307206",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AttributeError: 'FastMCP' object has no attribute 'get_tools'. Did you mean: 'get_tool'? | Use `get_tool()` instead of `get_tools()` when inspecting the `FastMCP` registry in this codebase.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "2054b659d777",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "ModuleNotFoundError: No module named 'mcp_server.tool_timing' (and 'mcp_server.telemetry_middleware') when running tests in the worktree after git mv. | Update test imports and internal references from tool_timing/telemetry_middleware to call_telemetry when renaming the module, or the test suite will fail to collect.",
+    "reason": null,
+    "files": [
+      "mcp_server/call_telemetry.py",
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "21067ee663e6",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "vulture hook prints Passed with exit code 0, but Scanning=0 Excluded=171 (inspecting zero files). | When vulture's exclude list contains `.claude`, it excludes every file in agent worktrees because vulture matches the pattern `*.claude*` against the resolved absolute path of the worktree directory.",
+    "reason": null,
+    "files": [
+      "pyproject.toml"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "23af1d62ddd9",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "INSERT fails silently against the old column set, dropping rows with only a first-failure WARNING. | Apply migration 034 before shipping the image, because logging is fire-and-forget and an INSERT against the old column set fails silently.",
+    "reason": null,
+    "files": [
+      "CLAUDE.md",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "23c6bfbdd8c0",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to commit the two fixes (harness assertion and vulture config) as separate additive commits. \u2014 The user explicitly stated they were committing \"as instructed\" and described the process as \"additive commits\".",
+    "reason": "The user explicitly stated they were committing \"as instructed\" and described the process as \"additive commits\".",
+    "files": [
+      "pyproject.toml",
+      "tests/mcp/test_baseline_diff.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "24175870180d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "DQ check name_match_dupes_vs_step8b FAIL (ERROR) metric=100.00 threshold=0.00 | Exclude the name_match_dupes_vs_step8b DQ check because it asserts the year-key identity migration 075 deliberately retired, making the check obsolete for the GRA-594 source-identity era.",
+    "reason": null,
+    "files": [
+      "db/migrations/075_gra594_retire_year_key_unique.sql",
+      "tests/test_gra594_refresh_educations.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "2462f3623ddf",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Nine blob hashes report as MOVED with empty values during a post-rebase check. | In zsh, use a loop variable name other than `path` (e.g., `f`) when reading into it, because `path` is a special variable bound to `$PATH` and overwriting it causes subsequent `git` commands to fail with 'command not found'.",
+    "reason": null,
+    "files": [
+      "tests/mcp/baselines/README.md"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "248cb1c116f4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to drop the GRA-565 Prefect server issue from further work. \u2014 The Prefect server is healthy (1/1 running), and the peer confirmed they had already deprioritized it with a specific reason.",
+    "reason": "The Prefect server is healthy (1/1 running), and the peer confirmed they had already deprioritized it with a specific reason.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "264d5c5a2278",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to force TLS when connecting to live blue via SSM port-forward. \u2014 The server's `TOOL_DB_SSL=relaxed` posture requires SSL, and `pg_hba.conf` rejects unencrypted connections from the localhost loopback address used by the initial port-forward.",
+    "reason": "The server's `TOOL_DB_SSL=relaxed` posture requires SSL, and `pg_hba.conf` rejects unencrypted connections from the localhost loopback address used by the initial port-forward.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "28ce70aa3847",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "UndefinedColumnError: column mie.start_date does not exist | Ensure `start_date` is in scope at all 13 interpolation sites in `mcp_server/server.py` because they sit directly in a `WHERE` over `mv_institution_experience` (or its `mie` alias) and do not require CTE plumbing.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "2a129e254a04",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "DEFAULT_DB_TARGET = \"blue\" is stale while production runs \"green\". | Read the TOOL_DB_TARGET environment variable with a fallback to \"blue\" to avoid comparing against an empty metric series.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "2b1481c9a857",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to exclude co-op via the existing `placement_type` column instead of adding a new `%co-op%` substring pattern. \u2014 The existing `placement_type='co_op'` branch already solved false positives (like 'Ice Cream Scooper') and caught more true positives (388 rows) than the proposed substring pattern (386 rows).",
+    "reason": "The existing `placement_type='co_op'` branch already solved false positives (like 'Ice Cream Scooper') and caught more true positives (388 rows) than the proposed substring pattern (386 rows).",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_placement_tools_sql.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "2b55cd01eee5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to adopt PR #229's split of ToolCallErrors (transport) and ToolCallToolErrors (MCP-level) rather than folding them together. \u2014 GRA-624 established the only alarm on ToolCallErrors is dead (watches tool_db_target=v2, production emits blue), so nothing currently pages on either meaning; keeping the split preserves the calibrated threshold for the future alarm.",
+    "reason": "GRA-624 established the only alarm on ToolCallErrors is dead (watches tool_db_target=v2, production emits blue), so nothing currently pages on either meaning; keeping the split preserves the calibrated threshold for the future alarm.",
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "2cccf27eb2f5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: McpToolCallErrorsV2Alarm watches tool_db_target=v2 while production emits blue. | When flipping `TOOL_DB_TARGET` to `green`, verify that the telemetry metric dimension and alarms are updated, or they will go blind.",
+    "reason": null,
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "302db980929f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: first-login auto-provision INSERT violates idx_user_profiles_email_unique with 23505 | Normalize tokenEmail with trim().toLowerCase() in functions/admin/db.ts before the INSERT to match the normalization applied at every other write boundary.",
+    "reason": null,
+    "files": [
+      "functions/admin/db.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "304ca1bdf615",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Anchoring with `*/.claude/*` fails to separate worktree files from main files because the absolute path denotes both. | Using `*/.claude/*` as the exclude pattern to specifically target the `.claude` directory while preserving other files. \u2014 failed: The pattern is still matched against the resolved absolute path, so it re-breaks every worktree for the same reason the bare `.claude` entry did; removal is safer because `paths` already scopes the scan.",
+    "reason": null,
+    "files": [
+      "pyproject.toml"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "306e83c7f067",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "IndexError list index out of range in _entry() when an accumulator built solely from the org-cut loop has no shapes. | Handle the case where _accumulate_month builds an accumulator from the org-cut loop for a signature the corpus cut did not carry by folding the org shape in as corpus evidence so the accumulator has a top shape.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/gaps.py"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "3099340cad37",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Permission for this action was denied by the Claude Code auto mode classifier | When running complex Bash commands in a worktree-isolated session, break them into plain, separate commands to avoid worktree drift errors.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "30b1caa8c242",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "SSM start-session fails with 'EOF' or 'syntax error' when running psql commands directly in the parameter string. | Use a bounded attempt or fix quoting when using `aws ssm start-session` to run psql on blue, as direct parameter strings can cause syntax errors.",
+    "reason": null,
+    "files": [
+      "CLAUDE.md"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.7,
+    "embedded": true
+  },
+  {
+    "id": "30ef4d7be649",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "redact_dsn returns the DSN verbatim when urlsplit yields no hostname (socket DSNs), logging the password the function exists to strip. | Fall back to '<unparseable dsn>' when the string could carry credentials but urlsplit yields no hostname.",
+    "reason": null,
+    "files": [
+      "scripts/serve_local_mcp.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "314c1e5d6f13",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Integration tests pass on first run, but the compose Postgres has been up for 2 days independently of the agent session. | Do not assume a fresh database lease just because tests pass; the compose Postgres may have been running since before the session started.",
+    "reason": null,
+    "files": [
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "33224afb4512",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use ports 15433 and 15434 for the throwaway compose projects instead of the default 5432/5433. \u2014 Port 5433 was occupied by the GRA-506 stack, and the lead's evidence policy noted that nobody runs compose lifecycle commands against the human's dev stack on 5432; using 15433/15434 ensured the run wouldn't contend with GRA-506's teardown.",
+    "reason": "Port 5433 was occupied by the GRA-506 stack, and the lead's evidence policy noted that nobody runs compose lifecycle commands against the human's dev stack on 5432; using 15433/15434 ensured the run wouldn't contend with GRA-506's teardown.",
+    "files": [
+      "docker-compose.yml"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "35097abc1c97",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to drop `placement_type='intern'` from the exclusion filter. \u2014 The `'%intern%'` substring pattern is strictly broader than the classifier's intern branch, making the intern exclusion a measured no-op.",
+    "reason": "The `'%intern%'` substring pattern is strictly broader than the classifier's intern branch, making the intern exclusion a measured no-op.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "353a5c99d174",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Metro's exclusion is baked at build time, not applied at read time. | Document that metro's pre-graduation exclusion is baked at rollup build time, not applied per query, so the data is only as fresh as the last rebuild and will silently drift if a future monthly rebuild runs without re-running `build.sql` and `swap.sql`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-9ba584a3-4edb-4cd8-8aff-1703f236faa7",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "36e7e5d02a3d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Zero rows in tool_call_logs for 48 minutes after migration, suggesting a write failure. | Do not assume zero rows indicates breakage; check the gap distribution, as gaps over 48 minutes are normal for this table.",
+    "reason": null,
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "379681d399be",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Exit code 1: db/migrations/013_mv_usage_stats.sql is neither mounted in docker-compose.yml nor excluded \u2014 local dev Postgres will silently miss it (the GRA-597 gap). | Run `python3 scripts/check_compose_mounts.py` to validate that every file in `db/migrations/*.sql` is either mounted in `docker-compose.yml` or listed in `EXCLUDED_MIGRATIONS` with a reason.",
+    "reason": null,
+    "files": [
+      "docker-compose.yml",
+      "scripts/check_compose_mounts.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "38fd24d6ac36",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to deploy #229 immediately rather than waiting for the GRA-624 observation window. \u2014 The user confirmed 'Ok deploy 229', and the deploy unblocks the observation window for ToolCallToolErrors.",
+    "reason": "The user confirmed 'Ok deploy 229', and the deploy unblocks the observation window for ToolCallToolErrors.",
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/call_telemetry.py",
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "39225e422983",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose raw job titles over SOC-coded occupations for GRA-610. \u2014 Raw titles are free (already in the view) and preserve the seniority signal (e.g., distinguishing 'Senior Software Engineer II' from 'Sr. Software Engineer'), whereas SOC-coded occupations lose that seniority signal which is the core value of a progression tool.",
+    "reason": "Raw titles are free (already in the view) and preserve the seniority signal (e.g., distinguishing 'Senior Software Engineer II' from 'Sr. Software Engineer'), whereas SOC-coded occupations lose that seniority signal which is the core value of a progression tool.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_career_progression_sql.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "3d078cdb8d8e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Pre-swap rebuild of rollups creates a state where rollup paths are stricter than live paths. | Coordinate the GRA-609 deploy with the rollup rebuild swap; do not rebuild rollups month-grain before the swap unless the deploy is simultaneous.",
+    "reason": null,
+    "files": [
+      "db/roi_materialized_views.sql",
+      "scripts/v2_ops/metro_employer_rollup/build.sql",
+      "slow_flow/mv_rebuild.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "3d7e83f0a6bb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: assert 'ORDER BY COUNT(DISTINCT person_id) DESC' in sql | Ensure the SQL query explicitly includes 'COUNT(DISTINCT person_id)' in the ORDER BY clause when ranking employers, not just in the SELECT list.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_career_progression_sql.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "3de02835aaa0",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "McpToolCallErrorsV2Alarm is OK because it watches tool_db_target=v2, but production emits tool_db_target=blue. | Verify the dimension value emitted by the running container matches the alarm's dimension filter; a mismatch causes silent alarm failure.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "3e81382477f5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to reject malformed `cip4_code` values (e.g., bare digits '1409') with an error rather than auto-normalizing them to the dotted form. \u2014 Silently accepting both spellings leaves the caller's wrong mental model intact.",
+    "reason": "Silently accepting both spellings leaves the caller's wrong mental model intact.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "431d54b9851d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use the SQL function ensure_tool_call_log_partition in the Python script rather than duplicating the DDL. \u2014 The script calls the SQL function directly, avoiding a second copy of the DDL logic and ensuring consistency between the migration and the runtime script.",
+    "reason": "The script calls the SQL function directly, avoiding a second copy of the DDL logic and ensuring consistency between the migration and the runtime script.",
+    "files": [
+      "scripts/rotate_tool_call_log_partitions.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "46a0e611c7a8",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Tests pass with synthetic `SimpleNamespace(task='task-123')` contexts, but production `CallToolRequestParams` lacks the `task` field. | Verify the `is_task` guard against the installed fastmcp source (`server.py:1251`) rather than relying on test coverage, as the field exists but is not populated at runtime.",
+    "reason": null,
+    "files": [
+      "mcp_server/tool_timing.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "4daffc108458",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: test_export_scopes_rows_to_the_org_and_the_window fails when end bound is exclusive | The export window bounds are [start, end); ensure the SQL uses <= for the end bound to include the boundary row.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/sql/export_calls.sql",
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "52a0e52a82cc",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: unknown export schema_version 99 (this analyzer understands [1]) | Pass `known_versions` to `load_envelope` in `resolve_window_month` to prevent silent fallback to `KNOWN_EXPORT_SCHEMA_VERSIONS` when `--expect-schema-version` is used without a `manifest.json`.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "52f64038f591",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to remove the stale `db/migrations/013_mv_usage_stats.sql` mount from `docker-compose.yml` rather than fixing the file or the migration logic. \u2014 The file was deleted from the repo (commit 241c138); Docker bind-mounts the missing file as an empty directory, which aborts Postgres first-boot init under ON_ERROR_STOP, breaking the fresh-clone recipe.",
+    "reason": "The file was deleted from the repo (commit 241c138); Docker bind-mounts the missing file as an empty directory, which aborts Postgres first-boot init under ON_ERROR_STOP, breaking the fresh-clone recipe.",
+    "files": [
+      "docker-compose.yml"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "53984dfbbc67",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to bump work_mem to 1.5GB and maintenance_work_mem to 4GB for migration 072. \u2014 The full query plans a Sort that spills ~11GB at the default 512MB work_mem, and the unique index build is 9.6GB; the bump prevents hard spills.",
+    "reason": "The full query plans a Sort that spills ~11GB at the default 512MB work_mem, and the unique index build is 9.6GB; the bump prevents hard spills.",
+    "files": [
+      "tests/test_gra582_diagnostics_denominator.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "53cb8e863869",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: Failed to load url react/jsx-dev-runtime ... in BrandLogo.test.tsx | When running `npx vitest` in a worktree, `BrandLogo.test.tsx` may fail to collect due to module resolution artifacts, even if the test passes in the main checkout.",
+    "reason": null,
+    "files": [
+      "frontend/src/pages/skills/libraryDepartments.ts"
+    ],
+    "session": "golden-0db95929-43bb-49a4-8f8a-19f915087147",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "53f1375384bf",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Corrected the claim about dashboards and alarms going blind by specifying that only the McpToolCallErrorsV2Alarm is keyed on the existing dimension. \u2014 The only in-repo consumer of tool_db_target is the V2 alarm filtering \"v2\"; nothing is keyed on \"blue\", so the previous claim that \"blue\" consumers go blind was wrong.",
+    "reason": "The only in-repo consumer of tool_db_target is the V2 alarm filtering \"v2\"; nothing is keyed on \"blue\", so the previous claim that \"blue\" consumers go blind was wrong.",
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "55c3f00dbf8f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to revert finding 4 (splitting `friction.empty_arg_calls` and adding `unreadable_arg_calls`) because it changes the schema contract and is currently unreachable against the exporter. \u2014 The review split `friction.empty_arg_calls` and added a new `unreadable_arg_calls` key, which both adds a key to `summary.json` and changes an existing key's meaning; the lead froze v1 with GRA-449 already being briefed off it, and the imprecision is now documented in place.",
+    "reason": "The review split `friction.empty_arg_calls` and added a new `unreadable_arg_calls` key, which both adds a key to `summary.json` and changes an existing key's meaning; the lead froze v1 with GRA-449 already being briefed off it, and the imprecision is now documented in place.",
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "scripts/usage_harness/summary_schema.md"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "573ec02b19f7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "check_compose_mounts.py reports success for quoted or commented mount entries that should be checked. | Strip trailing comments, quotes, and flags (e.g., :ro,z) from docker-compose.yml mount entries in check_compose_mounts.py to prevent false positives.",
+    "reason": null,
+    "files": [
+      "scripts/check_compose_mounts.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "574b2fdb8868",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to deliver the rotation suite at zero skips under `GRADGRAPH_REQUIRE_LOCAL_ENV=1` against the throwaway stack, while running the full suite unflagged. \u2014 The rest of the suite's DB tests point at 5432 by construction, and the flag converts their skips into failures; producing a full-suite run under the flag would require the shared stack, which wasn't available.",
+    "reason": "The rest of the suite's DB tests point at 5432 by construction, and the flag converts their skips into failures; producing a full-suite run under the flag would require the shared stack, which wasn't available.",
+    "files": [
+      "docker-compose.yml"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "5854cc0cef60",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Upload fails with HTTP 400 error when uploading a `.skill` file. | Ensure the uploaded file ends in `.zip` because the Dales skill reader endpoint checks the filename extension, even if the content is a valid zip.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "5975d10648e7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to git mv tool_timing.py to call_telemetry.py and drop telemetry_middleware.py, keeping one ContextVar holder. \u2014 tool_timing.py is live with a 529-line test file; the merged module carries PII redaction of error text which the name call_telemetry suggests, whereas tool_timing does not.",
+    "reason": "tool_timing.py is live with a 529-line test file; the merged module carries PII redaction of error text which the name call_telemetry suggests, whereas tool_timing does not.",
+    "files": [
+      "mcp_server/call_telemetry.py",
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "5ae37b9ebb61",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "DQ error breach in phase 'post-pipeline': ipeds_match_quality metric=8.37 lte threshold=1.0 (failed) | The `ipeds_match_quality` check fails if name similarity is < 0.3 for more than 1% of IPEDS-linked institutes, a pre-existing condition that was hidden behind the first DQ gate failure.",
+    "reason": null,
+    "files": [
+      "db/migrations/073_gra594_source_identity.sql",
+      "db/migrations/074_gra594_base_mvs_read_active.sql",
+      "db/migrations/075_gra594_retire_year_key_unique.sql",
+      "mcp_server/server.py",
+      "scripts/v2_ops/gra594/postpass0_name_maps.sql",
+      "scripts/v2_ops/gra594/postpass1_namematch.sql",
+      "scripts/v2_ops/gra594/postpass2_carryforward.sql",
+      "scripts/v2_ops/gra594/postpass3_saferecovery.sql",
+      "slow_flow/mv_rebuild.py",
+      "slow_flow/validate.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "5b542d363f56",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to register migration 033 in scripts/migrate.sh instead of relying on manual psql execution. \u2014 The code-review pass confirmed that migration 033 was never registered in the MIGRATIONS array, so it would not have run on deploy; registering it ensures the cleanup, indexes, and unique constraint apply automatically.",
+    "reason": "The code-review pass confirmed that migration 033 was never registered in the MIGRATIONS array, so it would not have run on deploy; registering it ensures the cleanup, indexes, and unique constraint apply automatically.",
+    "files": [
+      "db/migrations/033_email_case_normalization.sql",
+      "functions/admin/db.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "5d10ec5e36b8",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The job was not acquired by Runner of type hosted even after multiple attempts | Distinguish a runner-acquisition flake from a real code failure by checking for `steps: 0` and an empty `runner_name` in the job details; a 15-minute timeout with these values means the job never started.",
+    "reason": null,
+    "files": [
+      ".github/workflows/ci-infra-retry.yml",
+      ".github/workflows/code-quality.yml"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "5d985e80b0e4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: SQL changed for 8 case(s) \u2014 served values may move: ['board[degree_level=None,earnings_benchmark=61854.0,include_affiliates=False,placement_type=None]', ...] | When deriving `_MIE_GRAD_ANCHOR_FILTER` from the constant, ensure the indentation matches the board's expected 17-space continuation indent; otherwise, `test_gra582_diagnostics_denominator.py::test_generated_sql_is_byte_identical` will fail on all 8 `placement_type=None` board cases.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "5ee55765bf40",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Rotation stalls indefinitely or fails with 'updated partition constraint for default partition would be violated by some row' during concurrent inserts. | Place `LOCK TABLE public.tool_call_logs IN ACCESS EXCLUSIVE MODE` after the idempotent early-return and before the evacuation in `db/migrations/035_tool_call_logs_partition_rotation.sql` to prevent a race between `DELETE` and `CREATE TABLE ... PARTITION OF`.",
+    "reason": null,
+    "files": [
+      "db/migrations/035_tool_call_logs_partition_rotation.sql"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "60179473375c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: psql stops with DROP committed but CREATE INDEX pending, leaving user_profiles without email uniqueness | Wrap the migration file in BEGIN/COMMIT and remove IF NOT EXISTS from the CREATE INDEX statements to ensure atomic index swapping.",
+    "reason": null,
+    "files": [
+      "db/migrations/033_email_case_normalization.sql"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "64c075e77370",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "`ToolCallDuration` in CloudWatch logs reports 2-5ms for all tool calls, regardless of query complexity. | Do not use `ToolCallDuration` to measure tool execution time; it measures dispatch overhead, not tool execution.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "6570221c11b3",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "test_cip4_provenance_bumps_tool_schema_version fails when server.py version is bumped. | Only bump the version in mcp_server/server.py when tool docstrings, parameters, or behavior change; the test enforces a tool-schema provenance ledger.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "659bc333d133",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use a surgical delta for the metro rollup instead of a full rebuild. \u2014 The delta was measured at 12-25 minutes versus the 3-hour full rebuild, and it avoided the operational risks of swapping (no `ACCESS EXCLUSIVE` lock, no green freeze).",
+    "reason": "The delta was measured at 12-25 minutes versus the 3-hour full rebuild, and it avoided the operational risks of swapping (no `ACCESS EXCLUSIVE` lock, no green freeze).",
+    "files": [
+      "tests/test_gra582_diagnostics_denominator.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "6ab16872bd6b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "gh pr view 142 reports state: MERGED, but main does not have the changes | Verify that a PR's base branch is main (or the target branch) before assuming its content is on main, as stacked PRs can merge into dead-end branches.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "6b4a4f3eed3a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Rebase fails with 'CONFLICT (content): Merge conflict in tests/test_career_progression_sql.py' when stacking 610 on 615. | When rebasing branches that both append blocks to the same file, reconstruct the tail from both commits verbatim rather than hand-merging to avoid losing content.",
+    "reason": null,
+    "files": [
+      "tests/test_career_progression_sql.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "6bdcb7292f6c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "No existing ticket found for the outcomes skill update. | Filing a new ticket for the outcomes skill update. \u2014 failed: The work was already tracked in an untracked file (`docs/plans/2026-08-09-outcomes-skill-handoff.md`) and the tool-side tickets were already Done, so filing a new ticket was redundant.",
+    "reason": null,
+    "files": [
+      "docs/plans/2026-08-09-outcomes-skill-handoff.md"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "6ddcfb64d1fc",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to swap the metro tool's hardcoded caveat text to the shared `_PREGRAD_EXCLUSION_NOTE` constant rather than rewriting the logic or creating a new constant. \u2014 The shared note already had the correct wording and the LENIENT limit; the other seven tools already used it, so this achieved uniformity with minimal change (text only, no SQL, no new tests).",
+    "reason": "The shared note already had the correct wording and the LENIENT limit; the other seven tools already used it, so this achieved uniformity with minimal change (text only, no SQL, no new tests).",
+    "files": [
+      "frontend/src/pages/DocsPage.tsx",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-9ba584a3-4edb-4cd8-8aff-1703f236faa7",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "6de9f3b9a61a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use the Dales skill reader MCP for uploads instead of driving the browser file picker. \u2014 The Chrome extension was not connected, and the uploader page is a plain POST form with a `skill_zip` field that can be accessed via HTTP, allowing the agent to post ZIPs directly without a browser.",
+    "reason": "The Chrome extension was not connected, and the uploader page is a plain POST form with a `skill_zip` field that can be accessed via HTTP, allowing the agent to post ZIPs directly without a browser.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "6e109f4ed4cd",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "KeyError: 'B64_BUILD' in bash command | When using environment variables in bash commands, ensure they are exported or passed correctly, as missing variables cause KeyError.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "6ef101abef97",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: assert 'ToolTimingMiddleware' in [type(m).__name__ for m in srv.mcp.middleware] | Register the timing middleware before `CacheMiddleware` in `mcp_server/server.py` because FastMCP builds the middleware chain in reverse order (first-added is outermost).",
+    "reason": null,
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "73036d3d6aed",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to commit the `outcomes-skill-handoff.md` file and file it as GRA-628 because it represents real, unfinished work that was only living as an untracked file. \u2014 The tool-side tickets (GRA-615, GRA-610, GRA-608) are Done, but the skill file still has the old omission rule and no `job_titles` mention.",
+    "reason": "The tool-side tickets (GRA-615, GRA-610, GRA-608) are Done, but the skill file still has the old omission rule and no `job_titles` mention.",
+    "files": [
+      "docs/plans/2026-08-09-outcomes-skill-handoff.md",
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "733448cef031",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to return the existing computed sum (`alumni_credential_reachable` + `alumni_unclassified_degree_level`) as `program_alumni_unscoped` rather than adding new arithmetic or fetching the unscoped total separately. \u2014 The code already computed this sum as `denom` in `server.py:2403` and the invariant was already test-pinned, so the fix was one dict key returning a number the function already held.",
+    "reason": "The code already computed this sum as `denom` in `server.py:2403` and the invariant was already test-pinned, so the fix was one dict key returning a number the function already held.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "755d397bb784",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: assert '3/31 public tools used' in '' | Do not bind `sys.stdout` at definition time in `print_digest`; it must accept a stream argument so tests can capture the output.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "7728b975e976",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: unrecognized arguments: --metric-total 319 | Quote `$ARGS` or ensure word-splitting in the shell harness when passing multiple arguments to argparse, otherwise zsh treats them as a single token.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "7821c82a793a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "A freshly created partition prints `~-1 rows` in the retention report because `reltuples` is `-1` on a relation never analyzed in PG14+. | Use `GREATEST(c.reltuples, 0)::bigint` in the query in `scripts/rotate_tool_call_log_partitions.py` to display `0` instead of `-1` for unanalyzed relations.",
+    "reason": null,
+    "files": [
+      "scripts/rotate_tool_call_log_partitions.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "78724d4e1930",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "assert 0 == 1 in test_tool_telemetry_middleware.py for ToolCallErrors on error-shaped results. | Ensure the merged _emit_tool_metric correctly increments ToolCallErrors for MCP-level errors (status='error') in addition to transport errors, as the original tool_timing implementation only tracked transport errors.",
+    "reason": null,
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "7c92ef792796",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Exit code 1: local dev Postgres will silently miss mounted migrations if the bind mount points to a deleted file that became an empty directory. | Ensure bind mounts in `docker-compose.yml` point to existing files or directories in the host checkout, not to deleted files that have become empty directories (e.g., `db/migrations/013_mv_usage_stats.sql` becoming a directory).",
+    "reason": null,
+    "files": [
+      "docker-compose.yml"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "7d0cd8fd7c83",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to delete `uv.lock` and add it to `.gitignore` because it locks zero packages and has no consumers. \u2014 `pyproject.toml` has no `[project]` table (tool config only), so `uv` has no dependencies to resolve; the file is a vestigial 3-line header that re-dirties on stray `uv` runs.",
+    "reason": "`pyproject.toml` has no `[project]` table (tool config only), so `uv` has no dependencies to resolve; the file is a vestigial 3-line header that re-dirties on stray `uv` runs.",
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "7e06d95b5449",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Grep matches the full predicate string but misses the column name due to table alias (e.g., `mie.start_year` hiding `start_year`). | Grep column names alone when auditing shared SQL fragments, as table aliases can make matches invisible in full predicate strings.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "7e69642d10e7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use FastMCP's `on_call_tool` hook in `CacheMiddleware` (or a sibling `ToolTimingMiddleware`) rather than the HTTP-layer `ToolLoggingMiddleware` for the primary measurement. \u2014 The HTTP-layer middleware is structurally unable to see the tool coroutine because `call_next` returns before the handler runs under SSE; the FastMCP middleware's `call_next` is the awaited tool coroutine itself.",
+    "reason": "The HTTP-layer middleware is structurally unable to see the tool coroutine because `call_next` returns before the handler runs under SSE; the FastMCP middleware's `call_next` is the awaited tool coroutine itself.",
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "7f16e448f5a8",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "With removed=[a.x, a.y] and added=[a.z], the alphabetically-first removal arbitrarily claims the addition and is reported as a rename. | Require exactly one added sibling AND exactly one removed sibling under the parent when pairing renames in _pair_renames.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "7fe10ba61e84",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to merge PR #214 and deploy MCP and frontend to production rather than waiting for the full test suite to be green locally. \u2014 The 116 failures and 15 errors were identified as environmental (missing local DB and .env.local) and the failure sets were verified to be byte-identical with and without the branch's edits.",
+    "reason": "The 116 failures and 15 errors were identified as environmental (missing local DB and .env.local) and the failure sets were verified to be byte-identical with and without the branch's edits.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py",
+      "tests/test_pregrad_employment_filters_sql.py"
+    ],
+    "session": "golden-146b8da8-7f59-4374-a85b-20ac97aa622d",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "8071a361fa63",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to delay setting a threshold for the `ToolCallErrors` alarm in GRA-624. \u2014 The observation window had only been open for ~2.5 hours, and setting a number now would repeat the original sin of using a threshold calibrated for zero values.",
+    "reason": "The observation window had only been open for ~2.5 hours, and setting a number now would repeat the original sin of using a threshold calibrated for zero values.",
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "80b75872c862",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: tool_call_logs is not partitioned -- migration 015b must run first | Ensure the function ensure_tool_call_log_partition checks for partitioning via pg_partitioned_table before proceeding, or it will fail on a fresh database that hasn't run 015b.",
+    "reason": null,
+    "files": [
+      "db/migrations/035_tool_call_logs_partition_rotation.sql"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "8114a62597d5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to have the monitor measure its own rate between consecutive emissions rather than trusting a hardcoded constant. \u2014 The measured replay rate halved from 15.3 GiB/hr to 8.0 GiB/hr, and blue's WAL was frozen, confirming the slowdown was genuine and not due to blue generating new WAL.",
+    "reason": "The measured replay rate halved from 15.3 GiB/hr to 8.0 GiB/hr, and blue's WAL was frozen, confirming the slowdown was genuine and not due to blue generating new WAL.",
+    "files": [
+      "scripts/v2_ops/gra594/run_refresh.sh"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "82c0e8f4386f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Blue's tool_call_logs table looks fully up-to-date after migration, misleading observers into thinking the migration was applied there. | Verify the target host (database-1) is the live one, not blue, because blue has a vestigial, unpartitioned tool_call_logs table that is not the primary target.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "8347f31e55d2",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Reversed the `experience_ordinal` ordering in `career_progression` from ASC to DESC. \u2014 Validation against real data showed the existing ASC ordering was backwards: stage 1 contained current jobs (avg start year 2019.5) rather than first post-graduation jobs (avg start year 2006.5), causing titles like 'Partner' and 'Retired' to appear incorrectly in stage 1.",
+    "reason": "Validation against real data showed the existing ASC ordering was backwards: stage 1 contained current jobs (avg start year 2019.5) rather than first post-graduation jobs (avg start year 2006.5), causing titles like 'Partner' and 'Retired' to appear incorrectly in stage 1.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_career_progression_sql.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "839d0f0820e2",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "RuntimeError: Required env var COGNITO_USER_POOL_ID not set. Source .env.local | Ensure .env.local is present in the worktree when running tests, as the worktree may not have it by default, causing 15 errors in enforcement tests.",
+    "reason": null,
+    "files": [
+      "tests/test_cip4_tools_sql.py",
+      "tests/test_pregrad_employment_filters_sql.py"
+    ],
+    "session": "golden-146b8da8-7f59-4374-a85b-20ac97aa622d",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "83f81c5aea84",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "asyncpg.exceptions.UndefinedTableError: relation \"mv_institution_alumni\" does not exist | Ensure the local Postgres database has the required materialized views (like mv_institution_alumni) before running the full test suite, as 116 failures are due to missing DB tables.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-146b8da8-7f59-4374-a85b-20ac97aa622d",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "854d8b4830e4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: AdminCreateUser throws UsernameExistsException and deletes the live Cognito user on re-invite | Defang the UsernameExistsException handler in functions/admin/userCreation.ts to adopt the existing Cognito user via AdminGetUser instead of deleting and recreating, and add an Enabled === false guard to prevent silent adoption of disabled accounts.",
+    "reason": null,
+    "files": [
+      "functions/admin/userCreation.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "88ce572d0b13",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Error: calls_22222222-2222-4222-8222-222222222222.json has no matching roster_22222222-2222-4222-8222-222222222222.json. Membership totals (dormancy, attribution gaps) cannot be computed from calls alone, so this is a broken export, not an empty roster. | Treating a missing roster file as an empty roster (zero members) instead of a broken export. \u2014 failed: The export is broken because the roster is missing, not because there are zero members; membership totals like dormancy and attribution gaps cannot be computed from calls alone.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "88e73e057433",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: `tests/mcp/test_baseline_diff.py:333: unused variable 'raise_on_error' (100% confidence)` with exit code 1. | Ensure the harness asserts `raise_on_error` is recorded so that a tool error actually raises instead of being swallowed, proving the gate is active and not just passing inertly.",
+    "reason": null,
+    "files": [
+      "tests/mcp/test_baseline_diff.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "8d952705b282",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "MCP transport timeout at 180s reported as 'cold start' in daily health check. | Treating the 180s hangs as a cold-start/scale-to-zero issue requiring a warmup contract. \u2014 failed: The service runs with `MinCapacity: 2` and cannot scale to zero; tasks were up for ~19 hours and ALB target response times never exceeded 53ms, proving the server was warm and the hangs were client-side.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "8dc029f6dbd5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to measure MV build status using `pg_class` deltas rather than parsing `psql` error lines. \u2014 The initial `grep '^ERROR'` approach missed the `psql:<stdin>:NN:` prefix, causing a false '0 errors' count for the MV files.",
+    "reason": "The initial `grep '^ERROR'` approach missed the `psql:<stdin>:NN:` prefix, causing a false '0 errors' count for the MV files.",
+    "files": [
+      "scripts/mcp_baseline.py",
+      "tests/mcp/baselines/README.md"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "8f20d959306e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Key disappearance is reported as a removed_key and does fail \u2014 key paths and envelope values are extracted from the same tree. | When a transport exception hits run 2+, _run_case clears payload to None; keep the already-captured payload so the next diff does not emit error_appeared plus a removed_key for every key.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "906d728a5168",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to bump the server version to 1.17.0 in PR #219 before deploying the new MCP image to avoid shipping code labeled 1.16.0 that behaves differently from the existing 1.16.0 instance. \u2014 Every ticket in the series bumps the version; without the bump, ChatGPT connectors and other clients cannot distinguish the new behavior from the old one based on the `initialize` response.",
+    "reason": "Every ticket in the series bumps the version; without the bump, ChatGPT connectors and other clients cannot distinguish the new behavior from the old one based on the `initialize` response.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9167a905ff27",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to add the 4th CloudWatch dimension set [tool_db_target, cache_hit] alongside the existing three. \u2014 CloudWatch cannot aggregate across a dimension, so the fleet-wide hit-rate/latency split is not derivable from the per-tool set; the cost of the extra set is acceptable.",
+    "reason": "CloudWatch cannot aggregate across a dimension, so the fleet-wide hit-rate/latency split is not derivable from the per-tool set; the cost of the extra set is acceptable.",
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "92aa60e7aa49",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Global cut reports available=False and agrees=True silently because the guard is switched off. | Match the global cut on scopes[].key instead of scopes[].org_scope because the producer never writes org_scope, so None == 'global' is always false.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "scripts/usage_harness/analyze_sql.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "92cd9ee9b0af",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "ERROR: invalid value \"temb\" for \"YYYY\" DETAIL: Value must be an integer. | Use a spelling-agnostic parse for `start_date` because `to_date(..., 'Mon YYYY')` throws a hard error on full-name month formats (e.g., 'September 2024'), which constitute 4.3% of rows.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "92ef7e858566",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: ModuleNotFoundError: No module named 'scripts.usage_harness' | Ensure scripts/usage_harness/__init__.py exists before running tests or importing from scripts.usage_harness.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/__init__.py",
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "937c0fb79445",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use `deploy_mcp.sh` for the deployment instead of `sst deploy` because the changes are Python-only and `sst deploy` risks a half-deploy if the frontend build environment lacks `tsc`. \u2014 The script clones the current PRIMARY task definition and only bumps the image tag, avoiding the frontend rebuild step entirely.",
+    "reason": "The script clones the current PRIMARY task definition and only bumps the image tag, avoiding the frontend rebuild step entirely.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9437d31fdefc",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "FAIL: TOOL_DB_TARGET is unset \u2014 refusing to run. It names the database being exercised (production sets 'blue'). | Set the `TOOL_DB_TARGET` environment variable before running `scripts/test_mcp_tools_integration.py`, or the script will refuse to run because it cannot confirm which database is being exercised.",
+    "reason": null,
+    "files": [
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "95248bcfacc5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: public tools missing from the router map: ['alumni_count', 'alumni_directory', ...] | Ensure the router map covers every public tool from the live catalog; only the declared internal tool may be absent.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "958b01b18079",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "ToolCallErrors remains 0 for tools that return `{\"error\": ...}` instead of raising, because the HTTP status code is 200. | Check for error shapes (`{\"error\": ...}`) in addition to HTTP status codes when determining the metric status, as 40 sites in `mcp_server/server.py` return error dicts with HTTP 200.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "95bd0691c305",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to keep GRA-614's tool-layer duration measurement over #229's body-completion wall-clock measurement. \u2014 The tool-layer measurement excludes SSE streaming time, which is considered more accurate for the metric.",
+    "reason": "The tool-layer measurement excludes SSE streaming time, which is considered more accurate for the metric.",
+    "files": [
+      "mcp_server/call_telemetry.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "97f69a41b6e6",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "The `ci-infra-retry` workflow only covers runs that are created but fail to acquire a runner; it does not cover runs that are never created at all during an Actions outage. | Using the `workflow_run` event in `ci-infra-retry.yml` to auto-retry failed code-quality runs. \u2014 failed: The `workflow_run` event requires a run to exist; if GitHub Actions fails to create the run entirely (as seen in PR 212's second occurrence), there is nothing for the retry logic to hook.",
+    "reason": null,
+    "files": [
+      ".github/workflows/ci-infra-retry.yml"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "98f6f722c44b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to add the cip4_code docstring fix to this PR and ensure all tools disclose the empty-result trap. \u2014 The user requested it, and the agent verified that all 11 tools needed the 'empty' disclosure text to pass the test suite.",
+    "reason": "The user requested it, and the agent verified that all 11 tools needed the 'empty' disclosure text to pass the test suite.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9912467dd697",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: '>= mie.graduation_year' not in predicate string | Check that the board default predicate carries the anchor clause `>= mie.graduation_year` because the board tool uses a different predicate structure than the top employers tool.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_graduation_anchor_gra540.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "9ad6525985b7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Query timed out (30s limit) | When querying production data, filter on the indexed `institute_id` column instead of scanning `institute_name` to avoid 30-second timeouts.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "9b429dba16e8",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "psql:anchor.sql:27: ERROR: cannot execute CREATE VIEW in a read-only transaction | Switch to CTEs or temp tables when querying the green standby database because it is a read-only pre-GRA-594 standby and does not support `CREATE VIEW`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "9bb62e525512",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: pyproject.toml has no [project.dependencies] | When modifying `sst.config.ts` to swap the DSN, ensure the change is committed to git; otherwise, a subsequent `sst deploy` will silently revert the ECS task definition because `sst.config.ts` hardcodes `TOOL_DB_TARGET: \"blue\"`.",
+    "reason": null,
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9c3eb4cf043b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "TypeError: _resolve_metric_total() got an unexpected keyword argument 'db_target'. Did you mean 'db_targets'? | Use `db_targets` (plural) when calling `_resolve_metric_total`, not `db_target`.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/export.py",
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9cf15f523b0c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to mount the missing migration under docker-entrypoint-initdb.d (next number) rather than adding it to EXCLUDED_MIGRATIONS. \u2014 The script flagged that `db/migrations/013_mv_usage_stats.sql` was neither mounted nor excluded; mounting it under the entrypoint directory ensures it is picked up by the postgres init process, whereas exclusion would hide it.",
+    "reason": "The script flagged that `db/migrations/013_mv_usage_stats.sql` was neither mounted nor excluded; mounting it under the entrypoint directory ensures it is picked up by the postgres init process, whereas exclusion would hide it.",
+    "files": [
+      "docker-compose.yml",
+      "scripts/check_compose_mounts.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "9dfc73ee0c25",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: assert 'placement' not in sql | Do not use a blanket `\"placement\" not in sql` check to verify the default path; the new co-op exclusion adds `placement_type` to the SQL, so use the specific `_PLACEMENT_MARKER` instead.",
+    "reason": null,
+    "files": [
+      "tests/test_placement_tools_sql.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9ec58078781f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to factor a grain-agnostic `_DEGREE_LEVEL_OVERLAP_CORE` for GRA-580 rather than reusing `_DEGREE_LEVEL_METHOD_NOTE` verbatim. \u2014 The constant `_DEGREE_LEVEL_METHOD_NOTE` now references five fields (`program_alumni`, `program_alumni_unscoped`, etc.) that do not exist in `degree_distribution`'s institution-grain payload, so pasting it verbatim would emit a note with absent fields.",
+    "reason": "The constant `_DEGREE_LEVEL_METHOD_NOTE` now references five fields (`program_alumni`, `program_alumni_unscoped`, etc.) that do not exist in `degree_distribution`'s institution-grain payload, so pasting it verbatim would emit a note with absent fields.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "9ec7dbf5e4b6",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to rewrite the name-match post-pass from a windowed approach to a single-shot materialize + hash-join UPDATE. \u2014 The windowed approach caused each of the 10 shards to re-plan a join against the whole 127M-row table, burning 20 minutes producing nothing; the single-shot approach avoids this redundant planning.",
+    "reason": "The windowed approach caused each of the 10 shards to re-plan a join against the whole 127M-row table, burning 20 minutes producing nothing; the single-shot approach avoids this redundant planning.",
+    "files": [
+      "scripts/v2_ops/gra594/postpass1_namematch.sql",
+      "scripts/v2_ops/gra594/run_refresh.sh"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "a06aa8352bfe",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "namematch progress: nm_windows=0 nm_complete=0/10 errors=0 procs=20 (shards alive but no completions for ~20 minutes) | Ensure the window predicate bounds the dominant scan; otherwise, windowed shards re-plan joins against the entire table and burn time producing nothing.",
+    "reason": null,
+    "files": [
+      "scripts/v2_ops/gra594/postpass1_namematch.sql",
+      "scripts/v2_ops/gra594/run_refresh.sh"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "a0c72184730d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "TypeError: career_progression() got an unexpected keyword argument 'cip4_code' | Pass cip4_code as a positional argument in the SQL query because the function signature uses *args or positional binding, not as a keyword argument in the fetch call.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "a37dc8b618be",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: `information_schema.role_table_grants` returned 0 rows for ACLs, suggesting lost grants. | Do not rely on `information_schema.role_table_grants` to verify ACLs on materialized views; it does not cover them. Use `relacl` or `has_table_privilege` instead.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "a4a55f0aab04",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Unauthenticated 500 errors when `params` is a list or `arguments` is null. | Harden `_parse_tool_call` to handle non-dict `params` and non-string `name`, as `ToolLoggingMiddleware` sits outside auth in the chain.",
+    "reason": null,
+    "files": [
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "a5e683093776",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to update the tool description (docstring) and `data_caveat` payload simultaneously. \u2014 The payload corrects immediately for all clients, but the tool description is frozen in connector snapshots; updating both ensures that even if a connector hasn't refreshed, the payload is correct, and once it refreshes, the description will also be correct.",
+    "reason": "The payload corrects immediately for all clients, but the tool description is frozen in connector snapshots; updating both ensures that even if a connector hasn't refreshed, the payload is correct, and once it refreshes, the description will also be correct.",
+    "files": [
+      "frontend/src/pages/DocsPage.tsx",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-9ba584a3-4edb-4cd8-8aff-1703f236faa7",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "a64c9ba73dbf",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to block same-email/different-sub first logins with a clear 409 error instead of adopting the sub. \u2014 The user explicitly stated 'block that' when presented with the adopt-vs-block options for the GRA-595 follow-up.",
+    "reason": "The user explicitly stated 'block that' when presented with the adopt-vs-block options for the GRA-595 follow-up.",
+    "files": [
+      "functions/admin/db.ts",
+      "tests/emailConflictFirstLogin.test.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "a713a1646f94",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to leave MCP tools pointed at green after the swap instead of swapping back to blue. \u2014 The user explicitly stated 'don't swap tools back' and confirmed that after the smoke test, they should leave them pointed at green.",
+    "reason": "The user explicitly stated 'don't swap tools back' and confirmed that after the smoke test, they should leave them pointed at green.",
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "a92302a3f4fa",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Migration 034 is not applied on either database-1 or blue, despite being claimed as applied. | Verify migration 034 is applied on the specific host the writer targets (database-1/auth pool), not just any host, because the writer targets the auth pool which points to database-1.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "a93774c1216c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to scope the fixture directory cleanup to export_* subdirectories rather than using shutil.rmtree on the entire tests/fixtures/usage_harness/ directory. \u2014 To prevent future regenerations from silently deleting sibling subdirectories that might exist in other worktrees or sessions.",
+    "reason": "To prevent future regenerations from silently deleting sibling subdirectories that might exist in other worktrees or sessions.",
+    "files": [
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "a939831dc240",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: preAuthentication blocks login for users with retired duplicate rows (status='deleted') sharing lower(email) | Update the deleted-user check in functions/auth/preAuthentication.ts to require NOT EXISTS a live profile with the same lower(email), so retired duplicates do not lock out the real user.",
+    "reason": null,
+    "files": [
+      "functions/auth/preAuthentication.ts"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "ab07940fff41",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: assert 'ORDER BY experience_ordinal DESC' in 'ROW_NUMBER() OVER ( PARTITION BY person_id ORDER BY experience_ordinal ) ' | PostgreSQL's `ORDER BY ... DESC` defaults to `NULLS FIRST`, so nullable `experience_ordinal` values are sorted to the top and incorrectly become `career_stage = 1`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "ac021b6ff5a7",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to verify the served version by inspecting the running image contents rather than relying on the `/health` endpoint or the `serverInfo` JSON. \u2014 The MCP endpoint is auth-gated (returns 401 unauthenticated), making it impossible to read `serverInfo` directly without a token.",
+    "reason": "The MCP endpoint is auth-gated (returns 401 unauthenticated), making it impossible to read `serverInfo` directly without a token.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "adfe20f619cf",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Migration 070 re-runs on a fresh host, rebuilding mv_top_employers_rollup with the old year-grain anchor and 7-pattern title filter, silently reverting GRA-592 and GRA-609. | Re-key migration 070's applied-probe in slow_flow/migrations.py to use '%graduation_year IS NULL%' instead of '%start_year >= graduation_year%' to prevent silent re-runs on fresh hosts.",
+    "reason": null,
+    "files": [
+      "db/migrations/076_gra609_graduation_month_anchor.sql",
+      "slow_flow/migrations.py"
+    ],
+    "session": "golden-eed4a6eb-f66b-4245-b7d1-346402cd8673",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "ae6a0b1572fa",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to revert the version bump in mcp_server/server.py (keeping 1.20.0) instead of bumping to 1.21.0. \u2014 The test test_cip4_provenance_bumps_tool_schema_version failed because #229 changed no tool schemas, so bumping would have asserted a schema change that didn't happen.",
+    "reason": "The test test_cip4_provenance_bumps_tool_schema_version failed because #229 changed no tool schemas, so bumping would have asserted a schema change that didn't happen.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "aee945aa436d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "diff --baseline blue.json --tools top_employers reports every one of the other ~50 cases as a missing_case hard FAIL and exits 1. | Narrow the baseline to the same tool selection when capturing live, so diff compares like with like.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "af4d03d82994",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "no such file or directory: .venv/bin/python | Use the full path to the Python interpreter (e.g., `V=/path/to/.venv/bin/python; $V -m ruff ...`) when running commands in a worktree to avoid 'no such file or directory' errors.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_gra582_diagnostics_denominator.py"
+    ],
+    "session": "golden-f466b73c-76bb-4cc3-aa97-ee5f115e76e5",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "b012afb55b40",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to fold the deduplication of (person, experience) rows into GRA-608 rather than treating it as a separate fix. \u2014 Deduping fixes the stage numbering double-counting and makes COUNT(DISTINCT person_id) identical to COUNT(*), whereas adding distinct counting without deduping would leave corrupted stage numbers.",
+    "reason": "Deduping fixes the stage numbering double-counting and makes COUNT(DISTINCT person_id) identical to COUNT(*), whereas adding distinct counting without deduping would leave corrupted stage numbers.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_career_progression_sql.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "b013eb7e0db5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "If the separate --readonly-dsn pool fails to create, the already-open primary pool is never closed. | Wrap the readonly pool creation in a try/except that closes the primary pool on failure before re-raising.",
+    "reason": null,
+    "files": [
+      "scripts/serve_local_mcp.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "b05a8c32bc9b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "A real tool breakage buries its one meaningful finding (error_appeared) under a wall of removed_keys, and the error payload's own fields get reported as added_key. | Run _diff_shape, _diff_envelope, and _diff_latency only when both base and candidate are ok; if one side errored, skip these comparisons.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "b088066e336a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to keep the timezone fixture declaration (`America/New_York`) ahead of the exporter's hardcoded `UTC` rather than aligning them. \u2014 Against a UTC envelope, an analyzer that ignores `window.timezone` is indistinguishable from one that reads it, so the divergence is the test itself.",
+    "reason": "Against a UTC envelope, an analyzer that ignores `window.timezone` is indistinguishable from one that reads it, so the divergence is the test itself.",
+    "files": [
+      "scripts/usage_harness/summary_schema.md",
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "b5b155211235",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "KeyError: 'undercount_suspected' in test_cloudwatch_block_is_passed_through_with_its_nulls_intact. | Assert that undercount_suspected is absent (not just null) in summary.cloudwatch because the producer passes it through as provenance-only, meaning the key may be missing entirely.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/summary_schema.md",
+      "tests/test_usage_analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "b5e186b2394a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Exit code 2 and nothing written when summary_schema_version is outside the accepted set (e.g., 99). | Ensure the gap detector validates summary_schema_version against the accepted set before writing output; an unknown version causes exit 2 and no output directory creation.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/gaps.py",
+      "scripts/usage_harness/gaps_schema.md"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "b798d43543fa",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose TRUNCATE + REFRESH over DROP TABLE for blue's tool_call_logs to preserve the mv_usage_stats matview. \u2014 DROP TABLE would fail without CASCADE, which would drop mv_usage_stats; TRUNCATE leaves the table and matview intact, and REFRESH empties the matview.",
+    "reason": "DROP TABLE would fail without CASCADE, which would drop mv_usage_stats; TRUNCATE leaves the table and matview intact, and REFRESH empties the matview.",
+    "files": [
+      "docs/runbooks/apply-migration-034-tool-call-logs-telemetry.md"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "b8e9f1aa8eb5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: Function 'current_setting' is not allowed. Only SELECT queries are permitted. | Use `SELECT` queries only when calling `run_read_query` via the MCP tool; `current_setting` and other functions are not allowed.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "bc0165968331",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Rows silently fall back into `tool_call_logs_default` after the pre-created next month passes, because nothing schedules the rotation. | Applying the rotation capability in migration 035 and the script `scripts/rotate_tool_call_log_partitions.py`. \u2014 failed: Migration 035 pre-creates only the current and next month, `migrate.sh` records it applied and never re-runs it, and no cron/ECS/CI step calls the script; the scheduling infrastructure (GRA-451) is outside the diff scope.",
+    "reason": null,
+    "files": [
+      "db/migrations/035_tool_call_logs_partition_rotation.sql",
+      "scripts/migrate.sh",
+      "scripts/rotate_tool_call_log_partitions.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "bd9e38376b2b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "pg_depend reports zero dependents on tool_call_logs, but scanning pg_matviews.definition shows mv_usage_stats references it. | Do not rely on pg_depend alone to determine if tool_call_logs can be dropped; scan pg_matviews.definition to catch matview dependencies.",
+    "reason": null,
+    "files": [
+      "docs/runbooks/apply-migration-034-tool-call-logs-telemetry.md"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "c029bcc84a4d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The tool returns corrected numbers (e.g., Boston Children's 217) but the `data_caveat` and docstring still say 'COUNTS INCLUDE PRE-GRADUATION WORK' and name Knack and Boston Children's as broken. | Do not assume the tool description (docstring) updates when the payload updates; the description is a static string in the code that only refreshes when the connector refreshes, so clients may see stale 'KNOWN DEFECT' text even after the numbers are fixed.",
+    "reason": null,
+    "files": [
+      "frontend/src/pages/DocsPage.tsx",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-9ba584a3-4edb-4cd8-8aff-1703f236faa7",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "c18552149b98",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to write the CI runner acquisition classifier as a standalone `.jq` file and shell test rather than modifying the workflow YAML directly, to keep the logic testable and separate. \u2014 The classifier needed to be validated against real API responses, and a separate test file allowed verifying the logic offline before wiring it into the workflow.",
+    "reason": "The classifier needed to be validated against real API responses, and a separate test file allowed verifying the logic offline before wiring it into the workflow.",
+    "files": [
+      ".github/workflows/ci-infra-retry.yml",
+      "scripts/lib/ci_runner_never_acquired.jq",
+      "tests/test_ci_runner_never_acquired.sh"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "c2bafc73581d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose repeatable `--db-target` arguments over a single value to sum CloudWatch data across multiple dimension labels. \u2014 Production flipped `TOOL_DB_TARGET` from blue to green while data existed under both labels; CloudWatch cannot aggregate across a dimension, so querying only the live label would understate the total significantly.",
+    "reason": "Production flipped `TOOL_DB_TARGET` from blue to green while data existed under both labels; CloudWatch cannot aggregate across a dimension, so querying only the live label would understate the total significantly.",
+    "files": [
+      "scripts/usage_harness/README.md",
+      "scripts/usage_harness/export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "c2f408761e68",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use the existing compose Postgres for integration tests rather than starting a fresh one. \u2014 The compose Postgres was already up and healthy, and the tests executed correctly against it, proving the 'verify lease' premise was not actually gating the tests.",
+    "reason": "The compose Postgres was already up and healthy, and the tests executed correctly against it, proving the 'verify lease' premise was not actually gating the tests.",
+    "files": [
+      "tests/test_usage_export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "c457ba0b3f38",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to make the roster `org_memberships`-driven rather than treating callers as a subset of the roster, allowing `total_members - active_users` to go negative. \u2014 GRA-448's reply corrected a latent bug: the roster is `org_memberships`-driven, so callers are *not* a subset of it and `total_members \u2212 active_users` can go negative.",
+    "reason": "GRA-448's reply corrected a latent bug: the roster is `org_memberships`-driven, so callers are *not* a subset of it and `total_members \u2212 active_users` can go negative.",
+    "files": [
+      "scripts/usage_harness/analyze.py",
+      "scripts/usage_harness/summary_schema.md"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "c4b70739a06d",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The natural --tools \"a, b\" silently drops b with no error, yielding a baseline quietly covering fewer tools than asked for. | Strip whitespace from the --tools argument list (e.g., via a selected_tools helper) so comma-separated entries are parsed correctly.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "c6218734d673",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to place the timing middleware outside the cache (before it in the registration chain) rather than inside it. \u2014 Placing it outside ensures cache hits are measured alongside misses, making the metric self-verifying (cold vs warm table becomes proof) and allows a `cache_hit` dimension for separate trending.",
+    "reason": "Placing it outside ensures cache hits are measured alongside misses, making the metric self-verifying (cold vs warm table becomes proof) and allows a `cache_hit` dimension for separate trending.",
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/server.py",
+      "mcp_server/tool_timing.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "c6447f0aa1ef",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use `scripts.lib.tool_catalog` at runtime for the public tool list instead of the frozen `ALL_TOOLS` constant because the frozen list had 26 names against a live registry of 32, causing wrong denominators in usage figures. \u2014 The frozen `ALL_TOOLS` held 26 names against a live registry of 32, so every 'N of M tools used' figure it printed had a wrong denominator.",
+    "reason": "The frozen `ALL_TOOLS` held 26 names against a live registry of 32, so every 'N of M tools used' figure it printed had a wrong denominator.",
+    "files": [
+      "scripts/usage_harness/README.md",
+      "scripts/usage_harness/analyze.py"
+    ],
+    "session": "golden-88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "c7e8507b8beb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Background task invocations publish enqueue latency as tool latency because `context.message.task` is always `None` in production. | Use `context.fastmcp_context.request_context.experimental.is_task` to detect task-mode invocations, not `context.message.task`, because fastmcp threads task metadata out of band.",
+    "reason": null,
+    "files": [
+      "mcp_server/cache_middleware.py",
+      "mcp_server/tool_timing.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "cf119dab522b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to add the shapes_recovered_from_org_cuts key to the output rather than burying the fix in documentation because the schema rules permit additive keys and the lead ruled to add it. \u2014 The schema's own rules permit additive keys; the lead ruled to add it, so the agent added the key and produced evidence that it was a documentation accuracy correction rather than a contract surface change.",
+    "reason": "The schema's own rules permit additive keys; the lead ruled to add it, so the agent added the key and produced evidence that it was a documentation accuracy correction rather than a contract surface change.",
+    "files": [
+      "scripts/usage_harness/gaps.py",
+      "scripts/usage_harness/gaps_schema.md"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "cf80468a2a5b",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "FAILED tests/test_gra594_postpass.py::test_postpasses_idempotent - assert 3 == 2 | Running the post-passes with the initial SQL implementation which did not correctly handle idempotency for the carry-forward step. \u2014 failed: The initial implementation of postpass2_carryforward.sql did not account for rows that were already processed, causing the idempotency test to fail because it expected 2 updates but got 3.",
+    "reason": null,
+    "files": [
+      "scripts/v2_ops/gra594/postpass2_carryforward.sql",
+      "tests/test_gra594_postpass.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d005e64e44a1",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "FileNotFoundError is raised after the entire multi-minute capture has run when --save-capture writes to a not-yet-existing directory. | Create parent directories (mkdir parents=True) before writing the capture file, matching the behavior of cmd_capture.",
+    "reason": null,
+    "files": [
+      "scripts/mcp_baseline.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "d0ca75ec0c80",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to use the MCP connector for live verification of findings instead of running larger queries directly against the database. \u2014 The user updated the MCP connection and explicitly instructed to use the MCP connector where possible, reserving the AWS CLI for larger queries.",
+    "reason": "The user updated the MCP connection and explicitly instructed to use the MCP connector where possible, reserving the AWS CLI for larger queries.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d2229c5e6636",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to deploy code before migration because the Lambda fix closes the destructive Cognito-delete path immediately, and the new code works correctly against pre-migration data via case-insensitive comparisons. \u2014 The Cognito delete fires before the insert; deploying code first prevents the identity-severing incident while the migration runs, and the only cost is temporary seq-scans on user_profiles which is small.",
+    "reason": "The Cognito delete fires before the insert; deploying code first prevents the identity-severing incident while the migration runs, and the only cost is temporary seq-scans on user_profiles which is small.",
+    "files": [
+      "db/migrations/033_email_case_normalization.sql",
+      "functions/admin/db.ts",
+      "functions/admin/members.ts",
+      "functions/admin/userCreation.ts",
+      "functions/admin/users.ts",
+      "functions/auth/preAuthentication.ts",
+      "mcp_server/auth_server.py"
+    ],
+    "session": "golden-ab91821b-72e2-44c3-86bc-ba504fc7ecdb",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d30d1013f320",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "FATAL: could not map anonymous shared memory: Cannot allocate memory | When resizing blue from r7g.4xlarge to r7g.xlarge, ensure `postgresql.auto.conf` is updated to remove the oversized `shared_buffers` (which was 32GB) so it fits within the 30 GiB RAM of the smaller instance.",
+    "reason": null,
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "d38da9107092",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to update PR #229 in place (fast-forward) rather than opening a new PR. \u2014 The user explicitly confirmed 'Yes update 229 in place' when presented with the option.",
+    "reason": "The user explicitly confirmed 'Yes update 229 in place' when presented with the option.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "d3d8d81fa382",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to delete the three orphan IPEDS institutes rather than adjusting the threshold. \u2014 The three rows are provably safe to delete: they are slug-less, zero-education duplicates with zero references in all four FK tables (educations, org_institution_access, child institutes, slug aliases), so deleting them moves nothing else.",
+    "reason": "The three rows are provably safe to delete: they are slug-less, zero-education duplicates with zero references in all four FK tables (educations, org_institution_access, child institutes, slug aliases), so deleting them moves nothing else.",
+    "files": [
+      "db/migrations/073_gra594_source_identity.sql",
+      "db/migrations/074_gra594_base_mvs_read_active.sql",
+      "db/migrations/075_gra594_retire_year_key_unique.sql",
+      "mcp_server/server.py",
+      "scripts/v2_ops/gra594/postpass0_name_maps.sql",
+      "scripts/v2_ops/gra594/postpass1_namematch.sql",
+      "scripts/v2_ops/gra594/postpass2_carryforward.sql",
+      "scripts/v2_ops/gra594/postpass3_saferecovery.sql",
+      "slow_flow/mv_rebuild.py",
+      "slow_flow/validate.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "d4c984be0a1e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "PR 212 shows no checks at all, even though the branch was pushed and the workflow is active. | When GitHub Actions is in a major outage, it may fail to create a run entirely (not just fail to acquire a runner), resulting in no checks appearing for a PR; this is different from a run that exists but fails.",
+    "reason": null,
+    "files": [
+      ".github/workflows/ci-infra-retry.yml"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d55badba5eec",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Key collision risk: `program_alumni` value overwritten by unscoped total in scoped responses. | Ensure the new `program_alumni_unscoped` key is placed in the diagnostics dict such that it does not collide with the existing `program_alumni` key, which is spread immediately after it in `server.py`.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "d667d6631ba1",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to retire the two near-identical outcomes skills (`gradgraph-outcomes-chatgpt` and `grad-graph-outcomes-report-skill`) rather than updating one and leaving the other stale. \u2014 The skill reader cannot distinguish them by name, creating ambiguity; updating one leaves the other stale, so retiring both in favor of the new `graduate-outcomes-report` provides a single clean entry.",
+    "reason": "The skill reader cannot distinguish them by name, creating ambiguity; updating one leaves the other stale, so retiring both in favor of the new `graduate-outcomes-report` provides a single clean entry.",
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fb510c0d-635f-49ec-8081-0043a6490c46",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d77d2352c665",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to serve the local MCP socket with the ToolLoggingMiddleware omitted. \u2014 The serve_local_mcp script is loopback-bound and read-only twice over (readonly role plus default_transaction_read_only=on), making the middleware unnecessary for the smoke test.",
+    "reason": "The serve_local_mcp script is loopback-bound and read-only twice over (readonly role plus default_transaction_read_only=on), making the middleware unnecessary for the smoke test.",
+    "files": [
+      "scripts/serve_local_mcp.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "d91a8577b0d3",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Error: canceling statement due to statement timeout (reproducible on `top_employers`). | Declaring serving healthy based on connection counts and replication status while the `top_employers` tool was actually timing out. \u2014 failed: Connection counts showed traffic was on green, but the cold cache caused the `top_employers` query to exceed the 30s tool timeout. The outage was real, not just a config mismatch.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "d9a792a8114c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to derive `_MIE_GRAD_ANCHOR_FILTER` from the constant instead of restating it because a per-line strip-and-reindent derivation is byte-identical to the literal and keeps the golden SQL hashes in `test_gra582_diagnostics_denominator.py` intact. \u2014 The review's restatement was correct but avoidable; the hash movement was caused by whitespace (17-space vs 14-space indent), not semantics. Deriving it ensures future clauses propagate to the board by construction.",
+    "reason": "The review's restatement was correct but avoidable; the hash movement was caused by whitespace (17-space vs 14-space indent), not semantics. Deriving it ensures future clauses propagate to the board by construction.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_pregrad_employment_filters_sql.py"
+    ],
+    "session": "golden-1ec4540f-4a00-40ba-892f-41f475cbae08",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "db799138747a",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to fold the `ToolCallErrors` under-counting fix into this task rather than filing a twin ticket. \u2014 The same mechanism (SSE returning HTTP 200 with `{\"error\": ...}`) that causes the duration defect also causes the error count defect, and the fix is available at the same layer.",
+    "reason": "The same mechanism (SSE returning HTTP 200 with `{\"error\": ...}`) that causes the duration defect also causes the error count defect, and the fix is available at the same layer.",
+    "files": [
+      "mcp_server/server.py",
+      "mcp_server/tool_logging_middleware.py"
+    ],
+    "session": "golden-4e7a2213-d8ac-4eee-8711-f61f7f22863f",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "dc2875e03e64",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Merge conflict in mcp_server/cache_middleware.py between tool_timing.record_cache_hit() and call_telemetry.record_cache_hit(). | Resolve cache_middleware.py conflicts by keeping the call_telemetry.record_cache_hit() call for the GRA-445 path and removing the tool_timing.record_cache_hit() call from the GRA-614 path, or consolidating them into one call.",
+    "reason": null,
+    "files": [
+      "mcp_server/cache_middleware.py"
+    ],
+    "session": "golden-5c1e4da4-9454-4285-9e16-46e8e0c17bbe",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "dc99d920f4fb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "ERROR: could not access file \"$libdir/vector\": No such file or directory | Check for `vector.so` on disk separately from `pg_extension` catalog entries, as the binary can be missing on a replica even if the extension is registered.",
+    "reason": null,
+    "files": [
+      "sst.config.ts"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "de1e4542bddd",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "ClientConfigurationError escapes the except tuple in `create_pool`, causing ~120 tests to ERROR instead of skip. | Include `ValueError` in the `create_pool` except tuple in `tests/mcp/conftest.py` because asyncpg's `ClientConfigurationError` (invalid DSN) subclasses `ValueError`, not `PostgresError`.",
+    "reason": null,
+    "files": [
+      "tests/mcp/conftest.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "de287c8743b3",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Exit code 1: no pg_hba.conf entry for host \"127.0.0.1\", user \"gradgraph_app\", database \"gradgraph\", SSL encryption | When port-forwarding to the production database via SSM, ensure the connection originates from a permitted VPC subnet IP rather than `127.0.0.1`, or `pg_hba.conf` will reject the connection even with correct SSL settings.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "de91c324a8a4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to report the docker-compose materialized view gap as a GOTCHA and work around it in the runbook rather than editing docker-compose.yml. \u2014 docker-compose.yml is owned by another agent, and the local DB has no tool MVs, causing data tools to error rather than return empty results.",
+    "reason": "docker-compose.yml is owned by another agent, and the local DB has no tool MVs, causing data tools to error rather than return empty results.",
+    "files": [
+      "docs/runbooks/mcp-baseline-harness.md"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "e1f56eb87f69",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "test_gap_detection_reads_no_membership_or_roster_key fails if a code comment contains the word 'membership'. | Remember that test_gap_detection_reads_no_membership_or_roster_key greps the module source for forbidden words, so adding comments containing 'membership', 'roster', 'dormant', 'attribution_gap', 'per_user', or 'total_members' will break it.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/gaps.py",
+      "tests/test_usage_gaps.py"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "e4260078f60f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "pytest produces ~20+ fixture ERRORs (ConnectionRefusedError) on a fresh clone without Docker. | Gate video test fixtures (test_video_jobs.py, test_video_reconciler.py, test_video_tools_integration.py) to use the session-gated db_pool fixture to avoid ConnectionRefusedError when Docker is down.",
+    "reason": null,
+    "files": [
+      "tests/conftest.py"
+    ],
+    "session": "golden-6c722559-be72-4f2b-9c91-2fce986ac213",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "e453306bb68e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "surviving is_current \u2014 458,337 probes for University of Phoenix, ~96% of them discarded. Cost scales with institution size, so roughly the 130 largest institutions breach: exactly the schools this tool is asked about. Three shapes were tried and all breach: the plain nested loop, a forced hash join | Bash: git -C /Users/muddybootscode/Projects/gradgraph-auth-platform log --format='%h %s%n%b---' origin/main..origin/claude/student-employment-verification-82b3ua | sed -n '100,220p' \u2014 failed: surviving is_current \u2014 458,337 probes for University of Phoenix, ~96% of them discarded. Cost scales with institution size, so roughly the 130 largest institutions breach: exactly the schools this tool is asked about. Three shapes were tried and all breach: the plain nested loop, a forced hash join",
+    "reason": null,
+    "files": [],
+    "session": "golden-359f2f62-b32b-40ef-9f61-61ece0017f7d",
+    "confidence": 0.5,
+    "embedded": true
+  },
+  {
+    "id": "e64c5b3a10d9",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to keep the month-aware anchor in the top-employers rollup despite the +12% latency cost on the dco path. \u2014 The month-aware anchor is actually faster on the employer-degree-mix corpus scan, and the 104-second cold pass is due to cold cache, not the predicate.",
+    "reason": "The month-aware anchor is actually faster on the employer-degree-mix corpus scan, and the 104-second cold pass is due to cold cache, not the predicate.",
+    "files": [
+      "slow_flow/mv_rebuild.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "e64d5ff23e3e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "This session is isolated in the worktree ... but this command is too complex to verify that it stays inside the worktree; break it into plain, separate commands. Refusing to run it | When running in a worktree-isolated session, use plain, separate commands for complex operations (like creating commit messages) to avoid refusal due to verification issues.",
+    "reason": null,
+    "files": [
+      ".commitmsg.tmp"
+    ],
+    "session": "golden-f466b73c-76bb-4cc3-aa97-ee5f115e76e5",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "e906a585cdfe",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "AssertionError: SQL changed for 8 case(s) | When updating `_INTERN_TITLE_FILTER`, expect the `test_generated_sql_is_byte_identical` test to fail for exactly the 8 `placement_type=None` cases; this is the intended semantic change, not a defect.",
+    "reason": null,
+    "files": [
+      "tests/test_gra582_diagnostics_denominator.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "ea7651f43b9f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to scope GRA-592 to Tier 1 patterns only, dropping the campus student-job expansion. \u2014 The campus patterns (e.g., %tutor%, %ambassador%) matched real post-graduation jobs, and the false-positive rate was too high to justify the scope.",
+    "reason": "The campus patterns (e.g., %tutor%, %ambassador%) matched real post-graduation jobs, and the false-positive rate was too high to justify the scope.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_pregrad_employment_filters_sql.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "ecf5ae236b4e",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "InputValidationError: Read was called with input that could not be parsed as JSON | When reading files with the Read tool, ensure file paths use forward slashes and do not contain unescaped backslashes or control characters.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "ee14de2a26fa",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to keep the LIMIT 50 clause in the note but clarify that it does not currently truncate any data. \u2014 Empirical check showed the global maximum of by_type rows is 41 across 667,520 institutions, so the cap is not binding; dropping it would be misleading, but stating it as a non-binding cap is accurate.",
+    "reason": "Empirical check showed the global maximum of by_type rows is 41 across 667,520 institutions, so the cap is not binding; dropping it would be misleading, but stating it as a non-binding cap is accurate.",
+    "files": [
+      "mcp_server/server.py",
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-dde85813-30bc-4826-9b10-9d9dfc0c6eae",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "eff55242f079",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Vulture reports 'unused variable' in CI but passes locally, even with the same Python version and arguments. | When running vulture inside a `.claude/worktrees/` directory, the `.claude` path in `pyproject.toml`'s `exclude` list causes vulture to exclude the entire working tree, scanning 0 files.",
+    "reason": null,
+    "files": [
+      "pyproject.toml",
+      "tests/mcp/test_baseline_diff.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "f20bf4c5105c",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Following the port-forward recipe verbatim forwards to the non-serving host (blue) while printing a green label. | Ensure the port-forward command in test_mcp_tools_integration.py uses the correct IP for the current active host, not the hardcoded blue IP.",
+    "reason": null,
+    "files": [
+      "scripts/test_mcp_tools_integration.py"
+    ],
+    "session": "golden-4f7d9b30-eb93-4a78-ae10-07b6ee80d090",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "f6e1fb63f751",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "DQ error breach in phase 'post-pipeline': institutes_orphan_ipeds_dups metric=3.0 lte threshold=0.0 (failed) | The post-pipeline DQ gate fails if `institutes_orphan_ipeds_dups` exceeds 0, which occurs when slug-less, zero-education institutes share an ipeds_id with a canonical row.",
+    "reason": null,
+    "files": [
+      "db/migrations/073_gra594_source_identity.sql",
+      "db/migrations/074_gra594_base_mvs_read_active.sql",
+      "db/migrations/075_gra594_retire_year_key_unique.sql",
+      "mcp_server/server.py",
+      "scripts/v2_ops/gra594/postpass0_name_maps.sql",
+      "scripts/v2_ops/gra594/postpass1_namematch.sql",
+      "scripts/v2_ops/gra594/postpass2_carryforward.sql",
+      "scripts/v2_ops/gra594/postpass3_saferecovery.sql",
+      "slow_flow/mv_rebuild.py",
+      "slow_flow/validate.py"
+    ],
+    "session": "golden-1ddc1340-aac6-4bd6-b929-0814c8713a57",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "f72d32566b45",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose option (a) \u2014 scheduled in-VPC job writing month JSONs to a private S3 prefix \u2014 over other transport options for the monthly export. \u2014 It uses an ECS one-off on the existing MCP task definition, leveraging the existing image, security group, DSN secret, and asyncpg+boto3 dependencies, avoiding Lambda bundle constraints and the 15-minute ceiling.",
+    "reason": "It uses an ECS one-off on the existing MCP task definition, leveraging the existing image, security group, DSN secret, and asyncpg+boto3 dependencies, avoiding Lambda bundle constraints and the 15-minute ceiling.",
+    "files": [
+      "scripts/usage_harness/README.md",
+      "scripts/usage_harness/export.py"
+    ],
+    "session": "golden-8c4b4d9d-ad25-4f50-ad96-7ba53e2a66bc",
+    "confidence": 1.0,
+    "embedded": true
+  },
+  {
+    "id": "f7524f1331fc",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Diff run reports control probe `program_earnings_vs_benchmark` as FAIL because it gains `program_alumni_unscoped`. | Asserting that every probe must gain `program_alumni_unscoped`. \u2014 failed: The control probe `program_earnings_vs_benchmark` is untouched and correctly gains nothing; the assertion was too strict for the control.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-fc687b07-143f-4cf6-ab8f-5d8740463d58",
+    "confidence": 0.85,
+    "embedded": true
+  },
+  {
+    "id": "f97c516caf17",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Direct PR from a feature branch to main deletes ~2,000 lines of unrelated work | Cut a fresh branch from current main and cherry-pick commits when retargeting a PR to avoid deleting unrelated files that exist on the feature branch.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "fa1eeffddce4",
+    "repo": "gradgraph-auth-platform",
+    "kind": "DeadEnd",
+    "text": "Error: intent_coverage.json: tool 'top_employers' names param(s) ['field_of_study'] that the live catalog does not have \u2014 renamed or removed. | Using the intent_coverage.json map to validate tool parameters against the live catalog. \u2014 failed: The map cited 'field_of_study' for 'top_employers', but the live catalog had renamed or removed that parameter, causing a hard gate failure (exit 2) and nothing written.",
+    "reason": null,
+    "files": [
+      "scripts/usage_harness/intent_coverage.json"
+    ],
+    "session": "golden-81965bec-0a4e-4344-bbff-be8f476ff792",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "fbddaed105d8",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Error: pyproject.toml has no [project.dependencies] (or similar tool config error) when adding deps there; or ruff-format reformats a file during commit, causing the commit to abort. | Run ruff-format before committing, or re-add and re-commit after the hook reformats the file.",
+    "reason": null,
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_placement_tools_sql.py"
+    ],
+    "session": "golden-045c2c45-76ce-4cfe-b744-1936c3fd7b59",
+    "confidence": 0.8,
+    "embedded": true
+  },
+  {
+    "id": "fc45ef76c1af",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "Empty data list returned for cip4_code='1409' (undotted) while cip4_code='14.09' (dotted) returns results. | Use the dotted format (e.g., '14.09') for cip4_code values in docstrings and examples, as the stored column data is dotted and undotted values match no rows silently.",
+    "reason": null,
+    "files": [
+      "frontend/src/pages/DocsPage.tsx",
+      "mcp_server/server.py"
+    ],
+    "session": "golden-8fb5f1d5-e78d-4a40-ab0f-2f15c23124ff",
+    "confidence": 0.95,
+    "embedded": true
+  },
+  {
+    "id": "fcf2256267e5",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to apply the two docstring patches in a new worktree rather than the shared checkout because writes to the shared checkout were blocked. \u2014 The parent background session had not isolated, so writes to the shared checkout were blocked; the worktree provided an isolated environment for the edits.",
+    "reason": "The parent background session had not isolated, so writes to the shared checkout were blocked; the worktree provided an isolated environment for the edits.",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_gra582_diagnostics_denominator.py"
+    ],
+    "session": "golden-f466b73c-76bb-4cc3-aa97-ee5f115e76e5",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "fdec1fc56edb",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Decision",
+    "text": "Chose to record `institute_slug_map` as an expected local failure (ETL-owned) rather than a repo defect. \u2014 The table is read by `server.py` but never created in any repo SQL file, so its absence locally is correct.",
+    "reason": "The table is read by `server.py` but never created in any repo SQL file, so its absence locally is correct.",
+    "files": [
+      "scripts/serve_local_mcp.py"
+    ],
+    "session": "golden-1fe95337-ab0a-4f7c-a589-4b3ed147c1ba",
+    "confidence": 0.9,
+    "embedded": true
+  },
+  {
+    "id": "ff3cbba3846f",
+    "repo": "gradgraph-auth-platform",
+    "kind": "Gotcha",
+    "text": "The rotation script's unattended path stalls because `lock_timeout` is not set, contradicting the migration's rationale. | Set `lock_timeout = '5s'` in the `_connect` function of `scripts/rotate_tool_call_log_partitions.py` to ensure the session respects the timeout set by the migration.",
+    "reason": null,
+    "files": [
+      "scripts/rotate_tool_call_log_partitions.py"
+    ],
+    "session": "golden-784cd796-9a2c-4bc9-838e-ed47dc9b2ea4",
+    "confidence": 1.0,
+    "embedded": true
+  }
+]

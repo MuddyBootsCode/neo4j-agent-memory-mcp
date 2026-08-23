@@ -30,6 +30,12 @@ from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json
 from mem import open_client
 
 CAP = 5
+# Query expansion (MUD-406): prepend the previous N human prompts and the
+# last assistant text from the same session, so a short follow-up like
+# "Keep the lineage doc" carries the conversation it belongs to. 0 = the
+# prompt alone (what the hook sends today).
+QUERY_CONTEXT = int(os.environ.get("GOLDEN_QUERY_CONTEXT", "0"))
+QUERY_CONTEXT_CHARS = int(os.environ.get("GOLDEN_QUERY_CONTEXT_CHARS", "800"))
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -69,6 +75,38 @@ async def _retrieve(client, q: dict, *, config: str, limit: int, embedding=None)
     return items, timing, embedding
 
 
+def _expand_queries(queries: list[dict], split: dict | None) -> None:
+    """Rewrite q["prompt"] in place with preceding session turns."""
+    if not QUERY_CONTEXT or not split:
+        return
+    from lib import iter_transcript_lines, real_user_prompt
+
+    paths = {s["session"]: s["path"] for s in split.get("query_sessions", [])}
+    for q in queries:
+        path = paths.get(q["session"])
+        if not path:
+            continue
+        prior_users: list[str] = []
+        last_assistant = ""
+        for idx, record in iter_transcript_lines(path):
+            if idx >= q["line"]:
+                break
+            text = real_user_prompt(record)
+            if text:
+                prior_users.append(text)
+            elif record.get("type") == "assistant":
+                content = (record.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                    if any(parts):
+                        last_assistant = " ".join(parts)
+        context = " ".join(prior_users[-QUERY_CONTEXT:])
+        if last_assistant:
+            context = f"{context} {last_assistant[-QUERY_CONTEXT_CHARS // 2:]}"
+        q["original_prompt"] = q["prompt"]
+        q["prompt"] = f"{context[-QUERY_CONTEXT_CHARS:]} {q['prompt']}".strip()
+
+
 async def main() -> None:
     from agent_memory_mcp.mcp._coding_tools import ANCHOR_BOOST, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories  # noqa: F401
 
@@ -77,6 +115,7 @@ async def main() -> None:
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
+    _expand_queries(queries, load_json("session_split.json"))
     pool_by_repo: dict[str, set[str]] = {}
     for it in pool:
         pool_by_repo.setdefault(it["repo"], set()).add(it["id"])
@@ -140,7 +179,7 @@ async def main() -> None:
                "relevant_per_query": relevant_total / n, "configs": table, "latency": latency,
                "gate_depth": GATE_DEPTH, "threshold": HYBRID_THRESHOLD, "anchor_boost": ANCHOR_BOOST,
                "embedding_model": os.environ.get("NAM_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
-               "code": os.environ.get("GOLDEN_CODE_REF")}
+               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")

@@ -1,0 +1,10 @@
+{
+  "materialized_from": "/Users/muddybootscode/Projects/neo4j-agent-memory-mcp/experiments/golden/results/p1-capture/pool.json",
+  "lessons": 225,
+  "embedding": {
+    "provider": "sentence_transformers",
+    "model": "BAAI/bge-base-en-v1.5",
+    "dimensions": 768
+  },
+  "text_mismatches": 1
+}
