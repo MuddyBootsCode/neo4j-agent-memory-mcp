@@ -293,6 +293,9 @@ class TestCodingRecall:
         # no files and no task there is no anchor leg either.
         assert graph.reads == []
         result = json.loads(result_str)
+        # Only the embed stage ran (and found no embedder); no vector, gate
+        # or overlap stage was timed.
+        assert set(result.pop("timing_ms")) == {"embed"}
         assert result == {
             "memories": [],
             "fallback": True,
