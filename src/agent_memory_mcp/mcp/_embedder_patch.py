@@ -36,9 +36,20 @@ def _create_embedder_extended(self):
             batch_size=config.batch_size,
         )
     elif config.provider == EmbeddingProvider.SENTENCE_TRANSFORMERS:
+        from neo4j_agent_memory.embeddings import sentence_transformers as _st
         from neo4j_agent_memory.embeddings.sentence_transformers import (
             SentenceTransformerEmbedder,
         )
+
+        # Upstream reports 384 for any model not in its table until the
+        # model has loaded, and ensure_coding_memory_index reads that number
+        # to size the vector index. Register the models this repo selects
+        # (MUD-406: bge-base) and honour an explicit dimension from config.
+        _st.MODEL_DIMENSIONS.setdefault("BAAI/bge-base-en-v1.5", 768)
+        _st.MODEL_DIMENSIONS.setdefault("BAAI/bge-small-en-v1.5", 384)
+        _st.MODEL_DIMENSIONS.setdefault("BAAI/bge-large-en-v1.5", 1024)
+        if config.model not in _st.MODEL_DIMENSIONS and config.dimensions:
+            _st.MODEL_DIMENSIONS[config.model] = config.dimensions
 
         return SentenceTransformerEmbedder(
             model_name=config.model,

@@ -30,6 +30,12 @@ from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json
 from mem import open_client
 
 CAP = 5
+# Query expansion (MUD-406): prepend the previous N human prompts and the
+# last assistant text from the same session, so a short follow-up like
+# "Keep the lineage doc" carries the conversation it belongs to. 0 = the
+# prompt alone (what the hook sends today).
+QUERY_CONTEXT = int(os.environ.get("GOLDEN_QUERY_CONTEXT", "0"))
+QUERY_CONTEXT_CHARS = int(os.environ.get("GOLDEN_QUERY_CONTEXT_CHARS", "800"))
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -39,24 +45,26 @@ def _pct(xs: list[float], p: float) -> float | None:
     return xs[min(len(xs) - 1, int(round(p * (len(xs) - 1))))]
 
 
-async def _retrieve(client, q: dict, *, threshold: float, boost: float, limit: int) -> tuple[list[dict], dict]:
-    from agent_memory_mcp.mcp._coding_tools import (
-        CODING_MEMORY_INDEX, HYBRID_CANDIDATES, _HYBRID_QUERY, _embed, _render_memory,
-    )
+async def _retrieve(client, q: dict, *, config: str, limit: int, embedding=None) -> tuple[list[dict], dict]:
+    """Rows for one config, ids attached, with per-stage timing.
+
+    cosine20: the vector leg alone, no threshold.  D: production
+    retrieve_candidates (vector + BM25 fused with RRF) at GATE_DEPTH.
+    """
+    from agent_memory_mcp.mcp._coding_tools import _embed, _render_memory, retrieve_candidates, vector_leg
 
     timing = {}
-    t0 = time.perf_counter()
-    embedding = await _embed(client, q["prompt"])
-    timing["embed_ms"] = (time.perf_counter() - t0) * 1000
     if embedding is None:
-        return [], timing
+        t0 = time.perf_counter()
+        embedding = await _embed(client, q["prompt"])
+        timing["embed_ms"] = (time.perf_counter() - t0) * 1000
     t0 = time.perf_counter()
-    rows = await client.graph.execute_read(_HYBRID_QUERY, {
-        "index": CODING_MEMORY_INDEX, "embedding": embedding,
-        "candidates": max(HYBRID_CANDIDATES, limit), "threshold": threshold,
-        "anchor_boost": boost, "limit": limit, "repo": q["repo"],
-        "files": q["files"], "task_key": None,
-    })
+    if config == "cosine20":
+        rows = await vector_leg(client, embedding, repo=q["repo"], files=q["files"], task_key=None,
+                                limit=limit, threshold=0.0) if embedding is not None else []
+    else:
+        rows, _strategy = await retrieve_candidates(client, prompt=q["prompt"], repo=q["repo"], files=q["files"],
+                                                    task_key=None, limit=limit, embedding=embedding)
     timing["vector_ms"] = (time.perf_counter() - t0) * 1000
     items = []
     for row in rows:
@@ -64,17 +72,50 @@ async def _retrieve(client, q: dict, *, threshold: float, boost: float, limit: i
         props = {k: v for k, v in (row.get("props") or {}).items() if k != "embedding"}
         m["id"] = lesson_id(q["repo"], m["kind"], lesson_text(m["kind"], props))
         items.append(m)
-    return items, timing
+    return items, timing, embedding
+
+
+def _expand_queries(queries: list[dict], split: dict | None) -> None:
+    """Rewrite q["prompt"] in place with preceding session turns."""
+    if not QUERY_CONTEXT or not split:
+        return
+    from lib import iter_transcript_lines, real_user_prompt
+
+    paths = {s["session"]: s["path"] for s in split.get("query_sessions", [])}
+    for q in queries:
+        path = paths.get(q["session"])
+        if not path:
+            continue
+        prior_users: list[str] = []
+        last_assistant = ""
+        for idx, record in iter_transcript_lines(path):
+            if idx >= q["line"]:
+                break
+            text = real_user_prompt(record)
+            if text:
+                prior_users.append(text)
+            elif record.get("type") == "assistant":
+                content = (record.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                    if any(parts):
+                        last_assistant = " ".join(parts)
+        context = " ".join(prior_users[-QUERY_CONTEXT:])
+        if last_assistant:
+            context = f"{context} {last_assistant[-QUERY_CONTEXT_CHARS // 2:]}"
+        q["original_prompt"] = q["prompt"]
+        q["prompt"] = f"{context[-QUERY_CONTEXT_CHARS:]} {q['prompt']}".strip()
 
 
 async def main() -> None:
-    from agent_memory_mcp.mcp._coding_tools import ANCHOR_BOOST, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories
+    from agent_memory_mcp.mcp._coding_tools import ANCHOR_BOOST, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories  # noqa: F401
 
     queries = load_json("queries.json")
     pool = load_json("pool.json")
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
+    _expand_queries(queries, load_json("session_split.json"))
     pool_by_repo: dict[str, set[str]] = {}
     for it in pool:
         pool_by_repo.setdefault(it["repo"], set()).add(it["id"])
@@ -91,15 +132,15 @@ async def main() -> None:
 
     async with open_client(db) as client:
         # Warm the lazy embedder so the first query's embed time is not the model load.
-        await _retrieve(client, {**queries[0], "files": []}, threshold=0.0, boost=0.0, limit=1)
+        await _retrieve(client, {**queries[0], "files": []}, config="cosine20", limit=1)
         for q in queries:
             qid = q["query_id"]
             relevant_ids = {lid for lid in pool_by_repo.get(q["repo"], set()) if rel(qid, lid)}
             relevant_total += len(relevant_ids)
 
-            cos, t1 = await _retrieve(client, q, threshold=0.0, boost=0.0, limit=20)
-            d, t2 = await _retrieve(client, q, threshold=HYBRID_THRESHOLD, boost=ANCHOR_BOOST, limit=GATE_DEPTH)
-            timings["embed_ms"].append(t2["embed_ms"])
+            cos, t1, emb = await _retrieve(client, q, config="cosine20", limit=20)
+            d, t2, _ = await _retrieve(client, q, config="D", limit=GATE_DEPTH, embedding=emb)
+            timings["embed_ms"].append(t1["embed_ms"])
             timings["vector_ms"].append(t2.get("vector_ms", 0.0))
             t0 = time.perf_counter()
             e = await screen_memories(q["prompt"], list(d)) if d else []
@@ -137,7 +178,8 @@ async def main() -> None:
     summary = {"queries": n, "pool": len(pool), "relevant_pairs": relevant_total,
                "relevant_per_query": relevant_total / n, "configs": table, "latency": latency,
                "gate_depth": GATE_DEPTH, "threshold": HYBRID_THRESHOLD, "anchor_boost": ANCHOR_BOOST,
-               "embedding_model": os.environ.get("NAM_EMBEDDING_MODEL", "all-MiniLM-L6-v2")}
+               "embedding_model": os.environ.get("NAM_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")

@@ -21,6 +21,7 @@ ever interpolated into query text.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -98,6 +99,11 @@ GATE_DEPTH = int(os.environ.get("NAM_RECALL_GATE_DEPTH", "10"))
 # Set NAM_RECALL_GATE=0 to skip the gate and return the top _RECALL_LIMIT by
 # score -- the MUD-401 behaviour, ~33% precision instead of ~69%.
 GATE_ENABLED = os.environ.get("NAM_RECALL_GATE", "1") != "0"
+# Wall-clock cap on one gate call. BAML's own request timeout is 900 s; a
+# hung local model would otherwise hold the hook until Claude Code kills
+# it, which reads as an empty recall rather than a slow one (seen in the
+# MUD-403/404 golden runs: one query per run stalled for the full 900 s).
+GATE_TIMEOUT_S = float(os.environ.get("NAM_RECALL_GATE_TIMEOUT", "6"))
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
 # constant, never user input — so this is not an injection surface. It keeps
@@ -136,7 +142,7 @@ _MEMORIES_QUERY = """
            toString(m.created_at) AS at
 """.replace("__KIND_DISJUNCTION__", _KIND_DISJUNCTION)
 
-# --- Hybrid recall (MUD-401) ------------------------------------------
+# --- Fused recall (MUD-401, MUD-406) --------------------------------------
 #
 # The anchor-first query above is what MUD-395 shipped and MUD-401 measured:
 # on a corpus with real file continuity it scored 12% precision against 52%
@@ -144,51 +150,54 @@ _MEMORIES_QUERY = """
 # the two are NEAR each other, not that the old lesson answers the new
 # question. The prompt is the signal, and v1 threw it away.
 #
-# So: retrieve by prompt similarity, and use the anchor as a boost rather
-# than the gate. A lesson anchored to a file the caller is editing outranks
-# an equally-similar one that is not, but an unanchored lesson can still be
-# returned, and an anchored-but-irrelevant one no longer crowds the list.
+# MUD-401 ranked by cosine with an anchor boost. The golden set (MUD-403)
+# measured that boost at zero effect on P@5 and cosine alone leaving 56-61%
+# of relevant lessons outside the top 20. MUD-406 adds a second leg: BM25
+# over the lesson text (symptom, text, reason, attempt, why_failed), which
+# matches the file paths, env vars and error strings a prompt carries
+# verbatim and an embedding blurs. The two legs are fused with reciprocal
+# rank fusion; the anchor is reported, not scored.
 CODING_MEMORY_INDEX = "coding_memory_embedding_idx"
+CODING_MEMORY_TEXT_INDEX = "coding_memory_text_idx"
 
-# Added to cosine similarity when a candidate is anchored to one of the
-# caller's files or their task. Cosine over MiniLM lands most real
-# neighbours in 0.3-0.7, so 0.15 reorders within a band without letting a
-# weak anchored match jump a strong unanchored one.
+# Kept for the anchored flag and for experiments that still read it; no
+# longer added to any score.
 ANCHOR_BOOST = 0.15
 # Floor for the vector leg. Deliberately below the server's 0.7 default:
 # prompts are questions and lessons are statements, so honest matches score
 # lower than statement-to-statement pairs would.
 HYBRID_THRESHOLD = 0.45
-# Vector candidates fetched before boosting and trimming to the caller's
-# limit. Oversampling is what gives the boost something to reorder.
-HYBRID_CANDIDATES = 40
+# Candidates fetched per leg. The vector index spans every repo, so the
+# repo filter runs after the index read and the fetch must oversample or a
+# busy store starves a quiet repo of candidates.
+HYBRID_CANDIDATES = 100
+LEG_LIMIT = 40
+# RRF constant. 60 is the value from the original paper and what Graphiti
+# uses; it keeps a rank-1 hit on one leg from dominating rank-3 on both.
+RRF_K = 60
 
-_HYBRID_QUERY = """
-    CALL db.index.vector.queryNodes($index, $candidates, $embedding)
-    YIELD node AS m, score
-    WHERE score >= $threshold
+_LEG_TAIL = """
     MATCH (m)-[:MADE_IN]->(s:CodingSession {repo: $repo})
     WITH DISTINCT m, score
-    WITH m, score,
-         CASE WHEN EXISTS {
-                  MATCH (m)-[:ABOUT]->(f:CodeFile)
-                  WHERE f.repo = $repo AND f.path IN $files
-              }
-              OR EXISTS {
-                  MATCH (m)-[:CONCERNS]->(t:WorkTask)
-                  WHERE t.key = $task_key
-              }
-         THEN $anchor_boost ELSE 0.0 END AS boost
-    WITH m, score, score + boost AS ranked, boost > 0 AS anchored
-    ORDER BY ranked DESC
+    ORDER BY score DESC
     LIMIT $limit
+    WITH m, score,
+         EXISTS {
+             MATCH (m)-[:ABOUT]->(f:CodeFile)
+             WHERE f.repo = $repo AND f.path IN $files
+         }
+         OR EXISTS {
+             MATCH (m)-[:CONCERNS]->(t:WorkTask)
+             WHERE t.key = $task_key
+         } AS anchored
     OPTIONAL MATCH (m)-[:ABOUT]->(af:CodeFile)
     OPTIONAL MATCH (m)-[:CONCERNS]->(wt:WorkTask)
-    WITH m, score, ranked, anchored,
+    WITH m, score, anchored,
          [p IN collect(DISTINCT af.path) WHERE p IS NOT NULL] AS files,
          [k IN collect(DISTINCT wt.key) WHERE k IS NOT NULL] AS tasks
-    ORDER BY ranked DESC
-    RETURN labels(m) AS labels,
+    ORDER BY score DESC
+    RETURN elementId(m) AS eid,
+           labels(m) AS labels,
            properties(m) AS props,
            files,
            head(tasks) AS task,
@@ -197,12 +206,60 @@ _HYBRID_QUERY = """
            anchored
 """
 
+_VECTOR_LEG_QUERY = """
+    CALL db.index.vector.queryNodes($index, $candidates, $embedding)
+    YIELD node AS m, score
+    WHERE score >= $threshold
+""" + _LEG_TAIL
+
+_FULLTEXT_LEG_QUERY = """
+    CALL db.index.fulltext.queryNodes($index, $query, {limit: $candidates})
+    YIELD node AS m, score
+""" + _LEG_TAIL
+
+# Kept under its old name for the recall sweep and probe, which import it:
+# the vector leg alone, ranked by cosine.
+_HYBRID_QUERY = _VECTOR_LEG_QUERY
+
 _CREATE_INDEX = (
     f"CREATE VECTOR INDEX {CODING_MEMORY_INDEX} IF NOT EXISTS "
     f"FOR (m:{SHARED_RECALL_LABEL}) ON (m.embedding) "
     "OPTIONS {indexConfig: {`vector.dimensions`: $dims, "
     "`vector.similarity_function`: 'cosine'}}"
 )
+_CREATE_TEXT_INDEX = (
+    f"CREATE FULLTEXT INDEX {CODING_MEMORY_TEXT_INDEX} IF NOT EXISTS "
+    f"FOR (m:{SHARED_RECALL_LABEL}) "
+    "ON EACH [m.symptom, m.text, m.reason, m.attempt, m.why_failed]"
+)
+
+# Lucene query construction for the BM25 leg. Prompts are free text; every
+# token becomes an OR term so a path, an env var, or an error fragment in
+# the prompt can match on its own. Characters with Lucene meaning are
+# dropped rather than escaped -- a prompt is never a query language.
+_LUCENE_TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
+_LUCENE_STOP = frozenset(
+    "a an and are as at be by can do for from how i if in is it its me my of on or "
+    "so that the this to we what when where which why will with you your".split()
+)
+MAX_LUCENE_TERMS = 64
+
+
+def lucene_query(prompt: str) -> str:
+    """OR-query of the prompt's tokens, safe to hand to queryNodes."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for tok in _LUCENE_TOKEN_RE.findall(prompt or ""):
+        tok = tok.strip("./-")
+        low = tok.lower()
+        if len(tok) < 2 or low in _LUCENE_STOP or low in seen:
+            continue
+        seen.add(low)
+        # Quote anything with punctuation so "/", "." and "-" stay literal.
+        terms.append(f'"{tok}"' if re.search(r"[./-]", tok) else tok)
+        if len(terms) >= MAX_LUCENE_TERMS:
+            break
+    return " ".join(terms)
 
 
 def memory_embedding_text(kind: str, props: dict[str, Any]) -> str:
@@ -271,10 +328,98 @@ async def ensure_coding_memory_index(client: Any) -> bool:
         await client.graph.execute_write(
             _CREATE_INDEX.replace("$dims", str(dims)), {}
         )
-        return True
     except Exception as e:  # pragma: no cover - DDL permissions vary
         logger.warning(f"could not ensure {CODING_MEMORY_INDEX}: {e}")
         return False
+    try:
+        await client.graph.execute_write(_CREATE_TEXT_INDEX, {})
+    except Exception as e:  # pragma: no cover - DDL permissions vary
+        # The BM25 leg is optional: recall degrades to the vector leg.
+        logger.warning(f"could not ensure {CODING_MEMORY_TEXT_INDEX}: {e}")
+    return True
+
+
+async def vector_leg(
+    client: Any, embedding: list[float], *, repo: str, files: list[str],
+    task_key: str | None, limit: int = LEG_LIMIT, threshold: float = HYBRID_THRESHOLD,
+) -> list[dict[str, Any]]:
+    """Top ``limit`` lessons in ``repo`` by cosine to ``embedding``."""
+    return await client.graph.execute_read(
+        _VECTOR_LEG_QUERY,
+        {"index": CODING_MEMORY_INDEX, "candidates": max(HYBRID_CANDIDATES, limit),
+         "embedding": embedding, "threshold": threshold, "limit": limit,
+         "repo": repo, "files": files, "task_key": task_key},
+    )
+
+
+async def fulltext_leg(
+    client: Any, prompt: str, *, repo: str, files: list[str],
+    task_key: str | None, limit: int = LEG_LIMIT,
+) -> list[dict[str, Any]]:
+    """Top ``limit`` lessons in ``repo`` by BM25 over the lesson text, or []
+    when the prompt has no usable terms or the index is missing."""
+    query = lucene_query(prompt)
+    if not query:
+        return []
+    try:
+        return await client.graph.execute_read(
+            _FULLTEXT_LEG_QUERY,
+            {"index": CODING_MEMORY_TEXT_INDEX, "query": query,
+             "candidates": max(HYBRID_CANDIDATES, limit), "limit": limit,
+             "repo": repo, "files": files, "task_key": task_key},
+        )
+    except Exception as e:
+        logger.warning(f"fulltext leg unavailable: {e}")
+        return []
+
+
+def rrf_fuse(legs: list[list[dict[str, Any]]], k: int = RRF_K) -> list[dict[str, Any]]:
+    """Reciprocal rank fusion over leg result lists keyed by ``eid``.
+
+    Each row's ``score`` becomes the fused score; the per-leg ranks are kept
+    under ``ranks`` for diagnostics. Rows missing an ``eid`` (older fakes)
+    fall back to their rendered text as the key.
+    """
+    fused: dict[str, dict[str, Any]] = {}
+    for li, leg in enumerate(legs):
+        for rank, row in enumerate(leg):
+            key = row.get("eid") or json.dumps(row.get("props"), sort_keys=True, default=str)
+            entry = fused.get(key)
+            if entry is None:
+                entry = dict(row)
+                entry["leg_scores"] = {}
+                entry["ranks"] = {}
+                entry["score"] = 0.0
+                fused[key] = entry
+            entry["score"] += 1.0 / (k + rank + 1)
+            entry["ranks"][li] = rank
+            entry["leg_scores"][li] = row.get("score")
+    return sorted(fused.values(), key=lambda r: r["score"], reverse=True)
+
+
+async def retrieve_candidates(
+    client: Any, *, prompt: str, repo: str, files: list[str],
+    task_key: str | None, limit: int, embedding: list[float] | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Fused candidate rows for ``prompt`` and the strategy that produced
+    them: "fused" when both legs ran, "vector" / "fulltext" when only one
+    could, None when neither (no embedder and no usable terms)."""
+    if embedding is None:
+        embedding = await _embed(client, (prompt or "").strip())
+    legs: list[list[dict[str, Any]]] = []
+    names: list[str] = []
+    if embedding is not None:
+        legs.append(await vector_leg(client, embedding, repo=repo, files=files, task_key=task_key))
+        names.append("vector")
+    text_rows = await fulltext_leg(client, prompt, repo=repo, files=files, task_key=task_key)
+    if text_rows or not legs:
+        if text_rows:
+            legs.append(text_rows)
+            names.append("fulltext")
+    if not legs:
+        return [], None
+    fused = rrf_fuse(legs)[:limit]
+    return fused, ("fused" if len(names) == 2 else names[0])
 
 
 def _candidate_block(memories: list[dict[str, Any]]) -> str:
@@ -306,16 +451,22 @@ async def screen_memories(
     from agent_memory_mcp.providers import default_baml_options
 
     try:
-        screen = await b.ScreenRecalledMemories(
-            query=prompt,
-            candidates=_candidate_block(memories),
-            baml_options=default_baml_options(),
+        screen = await asyncio.wait_for(
+            b.ScreenRecalledMemories(
+                query=prompt,
+                candidates=_candidate_block(memories),
+                baml_options=default_baml_options(),
+            ),
+            timeout=GATE_TIMEOUT_S,
         )
         verdicts = {
             v.id: bool(v.keep)
             for v in screen.verdicts
             if 0 <= v.id < len(memories)
         }
+    except asyncio.TimeoutError:
+        logger.warning(f"recall gate exceeded {GATE_TIMEOUT_S}s; returning ungated")
+        return memories
     except Exception:
         logger.warning("recall gate failed; returning ungated", exc_info=True)
         return memories
@@ -381,10 +532,12 @@ def _render_memory(row: dict[str, Any]) -> dict[str, Any]:
         "task": row.get("task"),
         "at": row.get("at"),
     }
-    # Only the hybrid query returns these; the anchor-first one has no score.
+    # Only the ranked queries return these; the anchor-first one has no score.
     if row.get("score") is not None:
         rendered["score"] = round(float(row["score"]), 4)
         rendered["anchored"] = bool(row.get("anchored"))
+    if row.get("ranks"):
+        rendered["ranks"] = {str(k): v for k, v in row["ranks"].items()}
     return rendered
 
 
@@ -820,41 +973,28 @@ def register_coding_tools(mcp: FastMCP) -> None:
             t0 = time.perf_counter()
             embedding = await _embed(client, (prompt or "").strip())
             _lap("embed", t0)
-            if embedding is not None:
-                try:
-                    t0 = time.perf_counter()
-                    rows = await client.graph.execute_read(
-                        _HYBRID_QUERY,
-                        {
-                            "index": CODING_MEMORY_INDEX,
-                            "embedding": embedding,
-                            "candidates": HYBRID_CANDIDATES,
-                            "threshold": HYBRID_THRESHOLD,
-                            "anchor_boost": ANCHOR_BOOST,
-                            "limit": (
-                                max(GATE_DEPTH, _RECALL_LIMIT)
-                                if GATE_ENABLED
-                                else _RECALL_LIMIT
-                            ),
-                            "repo": repo,
-                            "files": file_list,
-                            "task_key": task_key,
-                        },
-                    )
-                    _lap("vector", t0)
+            try:
+                t0 = time.perf_counter()
+                rows, strategy = await retrieve_candidates(
+                    client, prompt=prompt, repo=repo, files=file_list,
+                    task_key=task_key, embedding=embedding,
+                    limit=max(GATE_DEPTH, _RECALL_LIMIT) if GATE_ENABLED else _RECALL_LIMIT,
+                )
+                _lap("vector", t0)
+                if strategy is not None:
                     memories = [_render_memory(row) for row in rows]
-                    strategy = "hybrid"
                     if GATE_ENABLED:
                         t0 = time.perf_counter()
                         memories = await screen_memories(prompt, memories)
                         _lap("gate", t0)
-                        strategy = "hybrid+gate"
+                        strategy = f"{strategy}+gate"
                     memories = memories[:_RECALL_LIMIT]
-                except Exception as e:
-                    # Most likely the index does not exist yet (nothing has
-                    # been captured since the upgrade). Anchor-first still
-                    # works on un-embedded nodes, so use it.
-                    logger.warning(f"hybrid recall unavailable: {e}")
+            except Exception as e:
+                # Most likely the index does not exist yet (nothing has
+                # been captured since the upgrade). Anchor-first still
+                # works on un-embedded nodes, so use it.
+                logger.warning(f"ranked recall unavailable: {e}")
+                strategy = None
 
             if strategy is None and has_anchor:
                 rows = await client.graph.execute_read(

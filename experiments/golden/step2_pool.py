@@ -41,6 +41,9 @@ async def main() -> None:
             "reason": props.get("reason"), "files": sorted(row["files"]),
             "session": row["session"], "confidence": props.get("confidence"),
             "embedded": bool(row["embedded"]),
+            # Verbatim node props so step1b can rematerialize the pool
+            # without parsing the embedding text back apart.
+            "props": {k: v for k, v in props.items() if k != "created_at"},
         }
     ordered = [pool[k] for k in sorted(pool)]
     save_json("pool.json", ordered)
