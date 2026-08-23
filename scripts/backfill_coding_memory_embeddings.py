@@ -12,6 +12,8 @@ already have an embedding are skipped unless --force is given.
 
     uv run python scripts/backfill_coding_memory_embeddings.py --dry-run
     uv run python scripts/backfill_coding_memory_embeddings.py
+    # after changing the embedding model (the index is dimension-typed):
+    uv run python scripts/backfill_coding_memory_embeddings.py --recreate-index
 
 Reads NEO4J_* and the embedding provider vars from the environment, exactly
 as the server does, so it embeds with whatever the server would use. Point it
@@ -78,7 +80,15 @@ async def main() -> int:
         action="store_true",
         help="re-embed nodes that already have an embedding",
     )
+    parser.add_argument(
+        "--recreate-index",
+        action="store_true",
+        help="drop the vector index first (required when the embedder's "
+             "dimension changed, e.g. MiniLM 384 -> bge-base 768); implies --force",
+    )
     args = parser.parse_args()
+    if args.recreate_index:
+        args.force = True
 
     bootstrap_upstream_patches()
 
@@ -120,6 +130,17 @@ async def main() -> int:
                 print(f"  ... and {len(rows) - 10} more")
             print("dry run — nothing written")
             return 0
+
+        if args.recreate_index:
+            from agent_memory_mcp.mcp._coding_tools import CODING_MEMORY_INDEX
+
+            await client.graph.execute_write(
+                f"DROP INDEX {CODING_MEMORY_INDEX} IF EXISTS", {}
+            )
+            # The embedder is lazy; embed once so it reports its real
+            # dimension before the index is sized from it.
+            await _embed(client, "warm-up")
+            print(f"dropped {CODING_MEMORY_INDEX}; recreating at the embedder's dimension")
 
         if not await ensure_coding_memory_index(client):
             print(
