@@ -33,6 +33,10 @@ from typing import TYPE_CHECKING, Any
 from fastmcp import Context
 
 from agent_memory_mcp.capture.cypher import (
+    expire_write,
+    reassert_write,
+    resolve_write,
+    served_write,
     RECALL_KINDS,
     SHARED_RECALL_LABEL,
     anchored_memory_write,
@@ -45,6 +49,7 @@ from agent_memory_mcp.extraction.coding import (
     curate_coding_memory,
     extract_coding_memory,
 )
+from agent_memory_mcp.extraction.unified import persist_preferences
 from agent_memory_mcp.mcp._common import get_client
 from agent_memory_mcp.mcp._logging import log_tool_call
 
@@ -178,6 +183,7 @@ RRF_K = 60
 
 _LEG_TAIL = """
     MATCH (m)-[:MADE_IN]->(s:CodingSession {repo: $repo})
+    WHERE m.expired_at IS NULL
     WITH DISTINCT m, score
     ORDER BY score DESC
     LIMIT $limit
@@ -538,6 +544,11 @@ def _render_memory(row: dict[str, Any]) -> dict[str, Any]:
         rendered["anchored"] = bool(row.get("anchored"))
     if row.get("ranks"):
         rendered["ranks"] = {str(k): v for k, v in row["ranks"].items()}
+    if row.get("eid"):
+        rendered["eid"] = row["eid"]
+    for key in ("evidence_count", "served_count", "helpful", "harmful"):
+        if props.get(key) is not None:
+            rendered[key] = props[key]
     return rendered
 
 
@@ -595,16 +606,17 @@ def error_step_candidates(steps: list[dict], task_key: str | None) -> list[dict[
 _NEIGHBORS_QUERY = """
     CALL db.index.vector.queryNodes($index, $limit, $embedding)
     YIELD node AS m, score
-    WHERE score >= $threshold
+    WHERE score >= $threshold AND m.expired_at IS NULL
     MATCH (m)-[:MADE_IN]->(:CodingSession {repo: $repo})
-    RETURN labels(m) AS labels, properties(m) AS props, score
+    RETURN elementId(m) AS eid, labels(m) AS labels, properties(m) AS props, score
     ORDER BY score DESC
 """
 
 
-async def _neighbors(client: Any, repo: str, embedding: list[float] | None) -> list[str]:
-    """Rendered lines of the nearest stored lessons, or [] when the index is
-    missing or the lookup fails (a fresh store has no index yet)."""
+async def _neighbors(client: Any, repo: str, embedding: list[float] | None) -> list[tuple[str, str]]:
+    """``(elementId, rendered line)`` of the nearest live stored lessons, or
+    [] when the index is missing or the lookup fails (a fresh store has no
+    index yet)."""
     if embedding is None:
         return []
     try:
@@ -616,13 +628,13 @@ async def _neighbors(client: Any, repo: str, embedding: list[float] | None) -> l
     except Exception as e:
         logger.debug(f"neighbor lookup skipped: {e}")
         return []
-    lines = []
+    out = []
     for row in rows:
         kind = next((label for label in (row.get("labels") or []) if label in _RECALL_KINDS), None)
         props = {k: v for k, v in (row.get("props") or {}).items() if k != "embedding"}
-        if kind:
-            lines.append(candidate_line({"kind": kind, **props}))
-    return lines
+        if kind and row.get("eid"):
+            out.append((row["eid"], candidate_line({"kind": kind, **props})))
+    return out
 
 
 def _candidates_from(extracted: dict[str, Any]) -> list[dict[str, Any]]:
@@ -683,7 +695,8 @@ async def capture_transcript(
     result.update({
         "stored": 0, "by_kind": by_kind, "dropped_unanchored": 0,
         "anchor_rate": None, "embedded": 0, "windows": 0,
-        "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
+        "curated": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
+        "reasserted": 0, "superseded": 0, "preferences": 0,
     })
     if not transcript or not transcript.strip():
         return result
@@ -708,29 +721,57 @@ async def capture_transcript(
             continue
 
         # Embed before curating: the embedding finds the dedup context and,
-        # for survivors, is what gets stored.
+        # for survivors, is what gets stored. ``existing`` is numbered by
+        # position so the curator's known_as maps back to an elementId.
         embeddings: list[list[float] | None] = []
-        existing: dict[str, None] = {}
+        existing_lines: list[str] = []
+        existing_eids: list[str] = []
+        seen_eids: set[str] = set()
         for c in candidates:
             vector = None
             if c["kind"] in RECALL_KINDS:
                 vector = await _embed(client, memory_embedding_text(c["kind"], _node_props(c)))
-                for line in await _neighbors(client, repo, vector):
-                    existing.setdefault(line, None)
+                for eid, line in await _neighbors(client, repo, vector):
+                    if eid not in seen_eids:
+                        seen_eids.add(eid)
+                        existing_eids.append(eid)
+                        existing_lines.append(line)
             embeddings.append(vector)
 
-        curated = await curate_coding_memory(candidates, window, list(existing))
+        curated = await curate_coding_memory(candidates, window, existing_lines)
         for key, n in curated["counts"].items():
             result["curated"][key] = result["curated"].get(key, 0) + n
-        kept_ids = {id(c) for c in curated["kept"]}
+        kept_by_id = {id(c): c for c in curated["kept"]}
+        vectors_by_id = {id(c): v for c, v in zip(candidates, embeddings)}
 
-        for c, vector in zip(candidates, embeddings):
-            if id(c) not in kept_ids:
-                continue
+        async def _ensure_session() -> None:
+            nonlocal session_written
             if not session_written:
                 q, p = session_upsert(agent_id, session_id, repo, branch, task_key, ts)
                 await client.graph.execute_write(q, p)
                 session_written = True
+
+        # ALREADY_KNOWN: the stored lesson gains evidence instead of a twin.
+        for _c, known in curated["known"]:
+            if known is None or known >= len(existing_eids):
+                continue
+            await _ensure_session()
+            q, p = reassert_write(existing_eids[known], session_id, ts)
+            await client.graph.execute_write(q, p)
+            result["reasserted"] += 1
+
+        for c in candidates:
+            kept = kept_by_id.get(id(c))
+            if kept is None:
+                continue
+            if c["kind"] == "CodingPreference":
+                # Preferences go through the upstream store (embedded,
+                # served by memory_search); CodingPreference nodes were
+                # write-only (MUD-405).
+                result["preferences"] += await persist_preferences(client, [c])
+                continue
+            vector = vectors_by_id.get(id(c))
+            await _ensure_session()
             if vector is not None and not index_ensured:
                 await ensure_coding_memory_index(client)
                 index_ensured = True
@@ -742,9 +783,15 @@ async def capture_transcript(
                 task_key if c.get("concerns_task") else None,
                 ts, embedding=vector,
             )
-            await client.graph.execute_write(q, p)
+            rows = await client.graph.execute_write(q, p)
             by_kind[c["kind"]] += 1
             result["stored"] += 1
+            new_eid = rows[0].get("eid") if rows and isinstance(rows[0], dict) else None
+            old = kept.get("supersedes")
+            if old is not None and old < len(existing_eids):
+                q, p = expire_write(existing_eids[old], new_eid, ts)
+                await client.graph.execute_write(q, p)
+                result["superseded"] += 1
 
     result["stored"] = sum(by_kind.values())
     result["anchor_rate"] = (sum(anchor_rates) / len(anchor_rates)) if anchor_rates else None
@@ -826,12 +873,21 @@ def register_coding_tools(mcp: FastMCP) -> None:
                 await client.graph.execute_write(query, params)
                 commits_written += 1
 
+            resolved = 0
+            if commits_written:
+                # A lesson served to this session whose file a later commit
+                # touched is, as far as the graph can tell, acted on.
+                rows = await client.graph.execute_write(*resolve_write(session_id))
+                if rows and isinstance(rows[0], dict):
+                    resolved = int(rows[0].get("resolved") or 0)
+
             return json.dumps(
                 {
                     "session": session_id,
                     "edited_files": files_written,
                     "commits": commits_written,
                     "skipped_commits": commits_skipped,
+                    "resolved": resolved,
                 }
             )
 
@@ -916,6 +972,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
         files: list[str] | None = None,
         task_key: str | None = None,
         overlap_window_hours: float = 24.0,
+        session_id: str | None = None,
     ) -> str:
         """Recall coding memories relevant to the prompt, plus overlaps.
 
@@ -989,6 +1046,15 @@ def register_coding_tools(mcp: FastMCP) -> None:
                         _lap("gate", t0)
                         strategy = f"{strategy}+gate"
                     memories = memories[:_RECALL_LIMIT]
+                    # What was injected, so a later commit on the lesson's
+                    # file can close the loop (MUD-405). Best-effort.
+                    served = [m.pop("eid") for m in memories if m.get("eid")]
+                    built = served_write(served, session_id or agent_id, datetime.now(timezone.utc).isoformat())
+                    if built is not None:
+                        try:
+                            await client.graph.execute_write(*built)
+                        except Exception as e:
+                            logger.warning(f"served write failed: {e}")
             except Exception as e:
                 # Most likely the index does not exist yet (nothing has
                 # been captured since the upgrade). Anchor-first still

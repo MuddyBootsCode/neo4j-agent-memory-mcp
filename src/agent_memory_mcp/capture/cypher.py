@@ -189,10 +189,16 @@ def anchored_memory_write(
     if kind in RECALL_KINDS:
         labels = f"{kind}:{SHARED_RECALL_LABEL}"
 
+    # Lifecycle defaults (MUD-405): a lesson is valid from the session that
+    # produced it until something expires it; evidence_count counts the
+    # sessions that asserted it, served/helpful/harmful are read-side
+    # counters for ranking.
     query = f"""
         MATCH (s:CodingSession {{id: $session_id}})
         CREATE (m:{labels})
-        SET m = $props, m.created_at = datetime($ts)
+        SET m = $props, m.created_at = datetime($ts),
+            m.valid_from = datetime($ts), m.evidence_count = 1,
+            m.served_count = 0, m.helpful = 0, m.harmful = 0
         MERGE (m)-[:MADE_IN]->(s)
     """
     params: dict[str, Any] = {
@@ -218,5 +224,77 @@ def anchored_memory_write(
         UNWIND $anchor_paths AS path
         MERGE (f:CodeFile {repo: $repo, path: path})
         MERGE (m)-[:ABOUT]->(f)
+        RETURN DISTINCT elementId(m) AS eid
     """
     return query, params
+
+
+# --- Lesson lifecycle (MUD-405) ---------------------------------------------
+#
+# Lessons accumulate instead of duplicating. The curator's ALREADY_KNOWN
+# verdict names an existing node, which gains evidence and a REASSERTED_IN
+# edge; SUPERSEDES writes the new lesson and expires the old one, keeping it
+# reachable for "why did we stop doing X" but out of recall. Recall records
+# what it served (SERVED_TO), and a later commit in that session touching
+# the lesson's file closes the loop with RESOLVED_BY.
+
+
+def reassert_write(eid: str, session_id: str, ts: str) -> tuple[str, dict[str, Any]]:
+    """An existing lesson was stated again by another session."""
+    query = """
+        MATCH (m) WHERE elementId(m) = $eid
+        MATCH (s:CodingSession {id: $session_id})
+        SET m.evidence_count = coalesce(m.evidence_count, 1) + 1,
+            m.last_asserted_at = datetime($ts)
+        MERGE (m)-[r:REASSERTED_IN]->(s)
+        SET r.at = datetime($ts)
+    """
+    return query, {"eid": eid, "session_id": session_id, "ts": ts}
+
+
+def expire_write(eid: str, superseded_by: str | None, ts: str) -> tuple[str, dict[str, Any]]:
+    """Retire a lesson. ``superseded_by`` is the elementId of its successor,
+    or None when it simply stopped being true. Never deletes."""
+    query = """
+        MATCH (m) WHERE elementId(m) = $eid
+        SET m.expired_at = datetime($ts), m.superseded_by = $superseded_by
+    """
+    if superseded_by is not None:
+        query += """
+        WITH m
+        MATCH (n) WHERE elementId(n) = $superseded_by
+        MERGE (n)-[:SUPERSEDES]->(m)
+        """
+    return query, {"eid": eid, "superseded_by": superseded_by, "ts": ts}
+
+
+def served_write(eids: list[str], session_id: str, ts: str) -> tuple[str, dict[str, Any]] | None:
+    """Recall injected these lessons into a session. None when nothing was."""
+    if not eids:
+        return None
+    query = """
+        MATCH (s:CodingSession {id: $session_id})
+        UNWIND $eids AS eid
+        MATCH (m) WHERE elementId(m) = eid
+        SET m.served_count = coalesce(m.served_count, 0) + 1,
+            m.last_served_at = datetime($ts)
+        MERGE (m)-[r:SERVED_TO]->(s)
+        ON CREATE SET r.at = datetime($ts), r.count = 1
+        ON MATCH SET r.at = datetime($ts), r.count = coalesce(r.count, 0) + 1
+    """
+    return query, {"eids": eids, "session_id": session_id, "ts": ts}
+
+
+def resolve_write(session_id: str) -> tuple[str, dict[str, Any]]:
+    """Link lessons served to a session to the session's later commits that
+    touched one of the lesson's files. Idempotent; returns the number of
+    new RESOLVED_BY edges as ``resolved``."""
+    query = """
+        MATCH (m)-[sv:SERVED_TO]->(s:CodingSession {id: $session_id})
+        MATCH (s)-[:PERFORMED]->(c:Change)-[:TOUCHED]->(f:CodeFile)<-[:ABOUT]-(m)
+        WHERE (m:Gotcha OR m:DeadEnd) AND c.at >= sv.at
+          AND NOT EXISTS { MATCH (m)-[:RESOLVED_BY]->(c) }
+        MERGE (m)-[:RESOLVED_BY]->(c)
+        RETURN count(*) AS resolved
+    """
+    return query, {"session_id": session_id}

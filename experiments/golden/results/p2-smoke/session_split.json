@@ -1,0 +1,300 @@
+{
+  "corpus_sessions": [
+    {
+      "session": "88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-447/88aee72d-2b29-40ed-af6d-a3b5dc633a47.jsonl",
+      "mtime": 1786545617.4272325,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "81965bec-0a4e-4344-bbff-be8f476ff792",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-449/81965bec-0a4e-4344-bbff-be8f476ff792.jsonl",
+      "mtime": 1786545617.6942227,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "c1af0ca6-5fbe-41dc-9199-37b539f44a9d",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-450/c1af0ca6-5fbe-41dc-9199-37b539f44a9d.jsonl",
+      "mtime": 1786545617.9765856,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "588cb78f-e821-482c-a2a8-31733f16b711",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-451/588cb78f-e821-482c-a2a8-31733f16b711.jsonl",
+      "mtime": 1786545618.2643666,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/01dd33b2-8e25-49e3-9059-8a3eea4ea8de.jsonl",
+      "mtime": 1786547483.3915348,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "470f3a61-720b-4d1f-b011-e4e0cceab6e3",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/470f3a61-720b-4d1f-b011-e4e0cceab6e3.jsonl",
+      "mtime": 1786549426.3990715,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    }
+  ],
+  "query_sessions": [
+    {
+      "session": "a4650052-f32b-460f-9ee0-4003ae0a3b27",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/a4650052-f32b-460f-9ee0-4003ae0a3b27.jsonl",
+      "mtime": 1786551315.0091941,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/b06e5342-6adb-47e9-821e-2236bdf1c69a.jsonl",
+      "mtime": 1786569339.803,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "1e077755-626f-4240-a1b3-4bfe4ed4ebd1",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/1e077755-626f-4240-a1b3-4bfe4ed4ebd1.jsonl",
+      "mtime": 1786575657.8957534,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "1e150b97-ab82-47c4-9210-83cb9ae2cd07",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/1e150b97-ab82-47c4-9210-83cb9ae2cd07.jsonl",
+      "mtime": 1786650889.8698924,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "47357376-9a0e-4f48-8f84-26fb5f8a4148",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/47357376-9a0e-4f48-8f84-26fb5f8a4148.jsonl",
+      "mtime": 1786656721.3165998,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-reverent-mirzakhani-c4cf2f/9cc57b61-d917-48b6-a769-9b5d1efb017b.jsonl",
+      "mtime": 1786668386.848,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-reverent-mirzakhani-c4cf2f/736c4ce0-d642-48a3-8c36-aad7414ca387.jsonl",
+      "mtime": 1786668386.848,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "1284711c-e50a-477a-ac50-e93a710536b2",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/1284711c-e50a-477a-ac50-e93a710536b2.jsonl",
+      "mtime": 1786719516.077017,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "bc5b9fad-dc04-4581-9084-5c6103537514",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/bc5b9fad-dc04-4581-9084-5c6103537514.jsonl",
+      "mtime": 1786993033.1007226,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "a7080636-33db-4594-8cc5-72c1f07dfebf",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/a7080636-33db-4594-8cc5-72c1f07dfebf.jsonl",
+      "mtime": 1787074892.571,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "2ba6f060-3ec9-41d0-a175-1f64145f507a",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/2ba6f060-3ec9-41d0-a175-1f64145f507a.jsonl",
+      "mtime": 1787087087.3977983,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "ac4ac67b-01d9-43b3-9781-5e0c3b356f14",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/ac4ac67b-01d9-43b3-9781-5e0c3b356f14.jsonl",
+      "mtime": 1787164033.2874143,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "8da472c9-d3a6-4ac7-8b6b-12e099ebe87e",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-665/8da472c9-d3a6-4ac7-8b6b-12e099ebe87e.jsonl",
+      "mtime": 1787173722.4716408,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "35ead25a-98f2-49bd-8013-4e5314280371",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-666/35ead25a-98f2-49bd-8013-4e5314280371.jsonl",
+      "mtime": 1787173722.5112364,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "74fb9aad-3953-4f12-a1ca-18e6b6cbdcbf",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-669/74fb9aad-3953-4f12-a1ca-18e6b6cbdcbf.jsonl",
+      "mtime": 1787173722.5618193,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "2f3bc212-a092-4ee2-8d9c-494090fdc6ae",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-668/2f3bc212-a092-4ee2-8d9c-494090fdc6ae.jsonl",
+      "mtime": 1787173722.609406,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "121af4c4-be57-4ef1-9ec9-e522f8ef25d0",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-680/121af4c4-be57-4ef1-9ec9-e522f8ef25d0.jsonl",
+      "mtime": 1787173736.5944312,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "53859128-f679-476e-b147-9e4c49973095",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-667/53859128-f679-476e-b147-9e4c49973095.jsonl",
+      "mtime": 1787173736.7903008,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "7ce19c6f-8810-4d23-81cc-abc8d33f4957",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-689/7ce19c6f-8810-4d23-81cc-abc8d33f4957.jsonl",
+      "mtime": 1787181321.9628766,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/92406106-f77c-41a0-835b-39c5ede5f6c8.jsonl",
+      "mtime": 1787223303.9850042,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/340968ea-9a45-4f9a-84a7-6ee617922784.jsonl",
+      "mtime": 1787229207.983,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "77658783-f772-4b98-a9e5-276e9fbaf055",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/77658783-f772-4b98-a9e5-276e9fbaf055.jsonl",
+      "mtime": 1787237834.2921844,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "bea3b8ea-e2e9-4a5d-b2ae-825be1dc5f5f",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-wt-sw-3/bea3b8ea-e2e9-4a5d-b2ae-825be1dc5f5f.jsonl",
+      "mtime": 1787242620.1303601,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "f0178869-5b94-44c1-b3c9-3e80db2d3ddf",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-wt-sw-2/f0178869-5b94-44c1-b3c9-3e80db2d3ddf.jsonl",
+      "mtime": 1787242620.1495826,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "ab5808e3-0c07-436e-86e4-b6e1ff866f97",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-wt-sw-1/ab5808e3-0c07-436e-86e4-b6e1ff866f97.jsonl",
+      "mtime": 1787242620.1961303,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "90c86e31-16ce-4493-ba85-01c5550e9373",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-617/90c86e31-16ce-4493-ba85-01c5550e9373.jsonl",
+      "mtime": 1787245564.4763863,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "d54d378d-e38c-4d05-a562-b58584ff7816",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-572/d54d378d-e38c-4d05-a562-b58584ff7816.jsonl",
+      "mtime": 1787245564.8092322,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "1dfa8214-fb89-4a63-9d8a-7d471c438141",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/1dfa8214-fb89-4a63-9d8a-7d471c438141.jsonl",
+      "mtime": 1787253539.5116823,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "a9da8ee1-8c4c-4adc-b3ac-c2a50526e04c",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-707/a9da8ee1-8c4c-4adc-b3ac-c2a50526e04c.jsonl",
+      "mtime": 1787255128.4233654,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "6a0a17c0-854d-4e30-810e-e148930d64aa",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-GRA-708/6a0a17c0-854d-4e30-810e-e148930d64aa.jsonl",
+      "mtime": 1787255128.6557326,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8.jsonl",
+      "mtime": 1787257154.9381478,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "3b50673f-b6b2-4e02-82a1-84b6a421f726",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/3b50673f-b6b2-4e02-82a1-84b6a421f726.jsonl",
+      "mtime": 1787339191.5167842,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "35a41c28-ef56-449f-98da-2fafa65eb07f",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/35a41c28-ef56-449f-98da-2fafa65eb07f.jsonl",
+      "mtime": 1787343344.4085443,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "8efb633e-47ca-4e47-82a4-93a9cf6d38f1",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-ses-send-failures-alarm-c69534/8efb633e-47ca-4e47-82a4-93a9cf6d38f1.jsonl",
+      "mtime": 1787346033.6,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "eae864ce-c6ee-4802-94e5-20af9e51eb92",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform--claude-worktrees-heuristic-thompson-7b9544/eae864ce-c6ee-4802-94e5-20af9e51eb92.jsonl",
+      "mtime": 1787346033.61,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    },
+    {
+      "session": "c8c5ae64-f9e8-427b-a984-4d33ff23f1e5",
+      "path": "/Users/muddybootscode/.claude/projects/-Users-muddybootscode-Projects-gradgraph-auth-platform/c8c5ae64-f9e8-427b-a984-4d33ff23f1e5.jsonl",
+      "mtime": 1787404484.7027838,
+      "repo": "gradgraph-auth-platform",
+      "repo_root": "/Users/muddybootscode/Projects/gradgraph-auth-platform"
+    }
+  ]
+}

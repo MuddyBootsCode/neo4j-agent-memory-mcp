@@ -1,0 +1,160 @@
+{
+  "sessions_processed": 5,
+  "sessions_failed": 1,
+  "by_kind": {
+    "Decision": 17,
+    "Gotcha": 27,
+    "DeadEnd": 5,
+    "CodingPreference": 0
+  },
+  "dropped_unanchored": 9,
+  "curated": {
+    "write": 53,
+    "already_known": 23,
+    "supersedes": 2,
+    "not_durable": 96,
+    "unsupported": 61
+  },
+  "anchor_rates": [
+    0.8571428571428571,
+    1.0,
+    0.9583333333333334,
+    0.9333333333333332,
+    0.0
+  ],
+  "windows": 13,
+  "per_session": [
+    {
+      "session": "88aee72d-2b29-40ed-af6d-a3b5dc633a47",
+      "repo": "gradgraph-auth-platform",
+      "transcript_chars": 149435,
+      "touched_files": 8,
+      "error_steps": 35,
+      "windows": 3,
+      "stored": 15,
+      "by_kind": {
+        "Decision": 5,
+        "Gotcha": 8,
+        "DeadEnd": 2,
+        "CodingPreference": 0
+      },
+      "curated": {
+        "write": 15,
+        "already_known": 1,
+        "supersedes": 1,
+        "not_durable": 5,
+        "unsupported": 35
+      },
+      "anchor_rate": 0.8571428571428571,
+      "dropped": 3,
+      "elapsed_s": 180.3
+    },
+    {
+      "session": "81965bec-0a4e-4344-bbff-be8f476ff792",
+      "repo": "gradgraph-auth-platform",
+      "transcript_chars": 95754,
+      "touched_files": 10,
+      "error_steps": 25,
+      "windows": 2,
+      "stored": 6,
+      "by_kind": {
+        "Decision": 2,
+        "Gotcha": 3,
+        "DeadEnd": 1,
+        "CodingPreference": 0
+      },
+      "curated": {
+        "write": 6,
+        "already_known": 7,
+        "supersedes": 0,
+        "not_durable": 2,
+        "unsupported": 25
+      },
+      "anchor_rate": 1.0,
+      "dropped": 0,
+      "elapsed_s": 116.0
+    },
+    {
+      "session": "c1af0ca6-5fbe-41dc-9199-37b539f44a9d",
+      "repo": "gradgraph-auth-platform",
+      "transcript_chars": 198585,
+      "touched_files": 8,
+      "error_steps": 40,
+      "windows": 4,
+      "stored": 14,
+      "by_kind": {
+        "Decision": 5,
+        "Gotcha": 8,
+        "DeadEnd": 1,
+        "CodingPreference": 0
+      },
+      "curated": {
+        "write": 14,
+        "already_known": 10,
+        "supersedes": 1,
+        "not_durable": 45,
+        "unsupported": 0
+      },
+      "anchor_rate": 0.9583333333333334,
+      "dropped": 1,
+      "elapsed_s": 235.6
+    },
+    {
+      "session": "588cb78f-e821-482c-a2a8-31733f16b711",
+      "repo": "gradgraph-auth-platform",
+      "transcript_chars": 170182,
+      "touched_files": 8,
+      "error_steps": 40,
+      "windows": 3,
+      "stored": 13,
+      "by_kind": {
+        "Decision": 5,
+        "Gotcha": 8,
+        "DeadEnd": 0,
+        "CodingPreference": 0
+      },
+      "curated": {
+        "write": 16,
+        "already_known": 5,
+        "supersedes": 0,
+        "not_durable": 42,
+        "unsupported": 1
+      },
+      "anchor_rate": 0.9333333333333332,
+      "dropped": 1,
+      "elapsed_s": 202.9
+    },
+    {
+      "session": "470f3a61-720b-4d1f-b011-e4e0cceab6e3",
+      "repo": "gradgraph-auth-platform",
+      "transcript_chars": 14560,
+      "touched_files": 0,
+      "error_steps": 3,
+      "windows": 1,
+      "stored": 1,
+      "by_kind": {
+        "Decision": 0,
+        "Gotcha": 0,
+        "DeadEnd": 1,
+        "CodingPreference": 0
+      },
+      "curated": {
+        "write": 2,
+        "already_known": 0,
+        "supersedes": 0,
+        "not_durable": 2,
+        "unsupported": 0
+      },
+      "anchor_rate": 0.0,
+      "dropped": 4,
+      "elapsed_s": 20.6
+    }
+  ],
+  "errors": [
+    {
+      "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+      "error": "BamlTimeoutError(client_name=QwenCoder, message=Request timed out)"
+    }
+  ],
+  "zero_lesson_sessions": 0
+}
