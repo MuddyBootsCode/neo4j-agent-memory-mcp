@@ -48,9 +48,55 @@ class TestExtractTranscriptText:
             ],
         )
         text = extract_transcript_text(path)
-        assert text == "assistant: let me check found it"
+        # Bash has no command here, so no marker; the ok result is a stub line.
+        assert text == "assistant: let me check found it\ntool: [Bash ok] ok"
         assert "tool_use" not in text
-        assert "Bash" not in text
+
+    def test_tool_calls_and_errors_are_rendered(self, tmp_path):
+        trace = "Traceback (most recent call last):\n  File x.py\nValueError: boom"
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([
+                    {"type": "text", "text": "running"},
+                    {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "pytest  -q\n tests/"}},
+                    {"type": "tool_use", "id": "e1", "name": "Edit", "input": {"file_path": "/repo/src/x.py"}},
+                    {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/repo/README.md"}},
+                ]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "content": trace}]),
+                _user([{"type": "tool_result", "tool_use_id": "e1", "content": "The file has been updated."}]),
+                _user([{"type": "tool_result", "tool_use_id": "r1", "content": "x" * 1000}]),
+            ],
+        )
+        lines = extract_transcript_text(path).split("\n")
+        assert lines[0] == "assistant: running [bash: pytest -q tests/] [edit /repo/src/x.py]"
+        assert lines[1].startswith("tool: [error from Bash] Traceback")
+        assert "ValueError: boom" in lines[1]
+        assert lines[2] == "tool: [Edit ok] The file has been updated."
+        # Read calls are not rendered, but their (successful) output is stubbed.
+        assert lines[3] == "tool: [Read ok] " + "x" * 200
+
+    def test_is_error_flag_renders_as_error_even_without_keywords(self, tmp_path):
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "ls"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "content": "nope", "is_error": True}]),
+            ],
+        )
+        assert extract_transcript_text(path) == "assistant: [bash: ls]\ntool: [error from Bash] nope"
+
+    def test_long_error_output_is_truncated_in_the_middle(self, tmp_path):
+        big = "Error: " + "a" * 5000 + " END"
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [_user([{"type": "tool_result", "tool_use_id": "z", "content": big}])],
+        )
+        text = extract_transcript_text(path)
+        assert len(text) < 2200
+        assert text.startswith("tool: [error from tool] Error: ")
+        assert text.endswith(" END")
+        assert " … " in text
 
     def test_malformed_and_irrelevant_lines_skipped(self, tmp_path):
         path = _jsonl(
@@ -105,6 +151,64 @@ class TestExtractTranscriptText:
 
     def test_missing_file_returns_empty(self, tmp_path):
         assert extract_transcript_text(str(tmp_path / "absent.jsonl")) == ""
+
+
+class TestTouchedFilesAndErrorSteps:
+    def test_normalize_repo_path(self):
+        from agent_memory_mcp.hook.capture_hook import normalize_repo_path
+
+        assert normalize_repo_path("/repo/src/x.py", "/repo") == "src/x.py"
+        assert normalize_repo_path("./src/x.py", "/repo") == "src/x.py"
+        assert normalize_repo_path("/repo/.claude/worktrees/GRA-1/src/y.py", "/repo") == "src/y.py"
+        assert normalize_repo_path("/elsewhere/z.py", "/repo") is None
+        assert normalize_repo_path("../z.py", "/repo") is None
+        assert normalize_repo_path("", "/repo") is None
+
+    def test_transcript_touched_files_in_first_touch_order(self, tmp_path):
+        from agent_memory_mcp.hook.capture_hook import transcript_touched_files
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([
+                    {"type": "tool_use", "id": "1", "name": "Edit", "input": {"file_path": "/repo/b.py"}},
+                    {"type": "tool_use", "id": "2", "name": "Read", "input": {"file_path": "/repo/c.py"}},
+                ]),
+                _assistant([
+                    {"type": "tool_use", "id": "3", "name": "Write", "input": {"file_path": "/repo/a.py"}},
+                    {"type": "tool_use", "id": "4", "name": "Edit", "input": {"file_path": "/repo/b.py"}},
+                    {"type": "tool_use", "id": "5", "name": "Edit", "input": {"file_path": "/other/x.py"}},
+                ]),
+            ],
+        )
+        assert transcript_touched_files(path, "/repo") == ["b.py", "a.py"]
+
+    def test_error_steps_pair_results_with_their_calls(self, tmp_path):
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([
+                    {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make test"}},
+                    {"type": "tool_use", "id": "e1", "name": "Edit", "input": {"file_path": "/repo/src/x.py"}},
+                ]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "content": "FAILED tests/test_x.py::t - assert 1 == 2"}]),
+                _user([{"type": "tool_result", "tool_use_id": "e1", "content": "ok"}]),
+                _user([{"type": "tool_result", "tool_use_id": "missing", "content": "boom", "is_error": True}]),
+            ],
+        )
+        steps = error_steps(path, "/repo")
+        assert steps == [
+            {"tool": "Bash", "input": "make test", "file": None,
+             "error": "FAILED tests/test_x.py::t - assert 1 == 2"},
+            {"tool": "tool", "input": "", "file": None, "error": "boom"},
+        ]
+
+    def test_error_steps_missing_file_is_empty(self, tmp_path):
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        assert error_steps(str(tmp_path / "absent.jsonl"), "/repo") == []
 
 
 def _transcript_file(tmp_path):

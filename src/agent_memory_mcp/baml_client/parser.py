@@ -23,6 +23,12 @@ class LlmResponseParser:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def CurateCodingMemory(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.CuratedMemories:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="CurateCodingMemory", llm_response=llm_response, mode="request")
+        return typing.cast(types.CuratedMemories, __result__)
+
     def DetectContradictions(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.ContradictionResult:
@@ -47,12 +53,6 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="request")
         return typing.cast(types.TemporalExtraction, __result__)
 
-    def JudgeExtractedMemory(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> types.MemoryJudgement:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="JudgeExtractedMemory", llm_response=llm_response, mode="request")
-        return typing.cast(types.MemoryJudgement, __result__)
-
     def ScreenRecalledMemories(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.RecallScreen:
@@ -72,6 +72,12 @@ class LlmStreamParser:
 
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
+
+    def CurateCodingMemory(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.CuratedMemories:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="CurateCodingMemory", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.CuratedMemories, __result__)
 
     def DetectContradictions(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -96,12 +102,6 @@ class LlmStreamParser:
     ) -> stream_types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.TemporalExtraction, __result__)
-
-    def JudgeExtractedMemory(
-        self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> stream_types.MemoryJudgement:
-        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="JudgeExtractedMemory", llm_response=llm_response, mode="stream")
-        return typing.cast(stream_types.MemoryJudgement, __result__)
 
     def ScreenRecalledMemories(
         self, llm_response: str, baml_options: BamlCallOptions = {},
