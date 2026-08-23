@@ -441,6 +441,7 @@ def build_coding_recall_args(prompt: str, ctx: dict) -> dict[str, Any]:
     return {
         "prompt": prompt,
         "agent_id": ctx["agent_id"],
+        "session_id": ctx.get("session_id") or ctx["agent_id"],
         "repo": ctx["repo"],
         "files": ctx["files"],
         "task_key": ctx["task_key"],

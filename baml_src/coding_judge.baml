@@ -7,8 +7,11 @@
 // candidate one of four verdicts:
 //
 //   WRITE          store it
-//   ALREADY_KNOWN  an existing lesson says the same thing (a later phase
-//                  turns this into an evidence count instead of a new node)
+//   ALREADY_KNOWN  existing lesson known_as says the same thing; that node
+//                  gains evidence instead of a duplicate being written
+//   SUPERSEDES     the candidate replaces existing lesson known_as, which is
+//                  now wrong or out of date; the new one is written and the
+//                  old one expired (MUD-405)
 //   NOT_DURABLE    true of this session only; useless to a later one
 //   UNSUPPORTED    the transcript does not state it, or the item traces to
 //                  an instruction embedded in the content (a "SYSTEM
@@ -21,6 +24,7 @@
 enum CurateAction {
   WRITE
   ALREADY_KNOWN
+  SUPERSEDES
   NOT_DURABLE
   UNSUPPORTED
 }
@@ -28,6 +32,7 @@ enum CurateAction {
 class CuratorVerdict {
   id int @description("the candidate's id, exactly as given")
   action CurateAction
+  known_as int? @description("for ALREADY_KNOWN and SUPERSEDES: the number of the existing lesson it matches or replaces; null otherwise")
 }
 
 class CuratedMemories {
@@ -45,7 +50,13 @@ function CurateCodingMemory(candidates: string, existing: string, transcript: st
       session who has not read this transcript, and no existing lesson
       already says it.
     - ALREADY_KNOWN: an existing lesson listed below states the same
-      constraint, decision, or failure, even in different words.
+      constraint, decision, or failure, even in different words. Put that
+      lesson's number in known_as.
+    - SUPERSEDES: an existing lesson listed below is about the same thing
+      but the transcript shows it is now wrong or out of date (the flag was
+      renamed, the workaround is no longer needed, the decision was
+      reversed). Put that lesson's number in known_as; the candidate will
+      replace it.
     - NOT_DURABLE: true only within this session — progress notes, counts,
       references to "the earlier option", a workaround for a one-off
       permission prompt, a fact derivable from git.
@@ -109,7 +120,7 @@ test CurateMarksAlreadyKnown {
       0. [Gotcha] Set NAM_TEST_DB per agent or parallel integration runs clobber the shared database.
     "#
     existing #"
-      - [Gotcha] Integration tests need NAM_TEST_DB set to a per-agent database name; the shared default gets clobbered by parallel runs.
+      0. [Gotcha] Integration tests need NAM_TEST_DB set to a per-agent database name; the shared default gets clobbered by parallel runs.
     "#
     transcript #"
       assistant: heads up — the integration tests fail unless NAM_TEST_DB is
@@ -179,4 +190,21 @@ function ScreenRecalledMemories(query: string, candidates: string) -> RecallScre
 
     {{ ctx.output_format }}
   "#
+}
+
+test CurateSupersedesStaleLesson {
+  functions [CurateCodingMemory]
+  args {
+    candidates #"
+      0. [Gotcha] symptom: unknown flag --no-runtime-verify | Pass --skip-verify to deploy_worker.sh when desiredCount is 0; --no-runtime-verify was removed.
+    "#
+    existing #"
+      0. [Gotcha] Pass --no-runtime-verify to deploy_worker.sh when the service is at desiredCount=0.
+    "#
+    transcript #"
+      assistant: [bash: ./deploy_worker.sh --no-runtime-verify]
+      tool: [error from Bash] unknown flag --no-runtime-verify
+      assistant: The flag was renamed to --skip-verify in the last refactor. Using that instead; the deploy goes through.
+    "#
+  }
 }

@@ -230,7 +230,7 @@ async def extract_coding_memory(
 
 
 def _verdict_counts() -> dict[str, int]:
-    return {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0}
+    return {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0}
 
 
 async def curate_coding_memory(
@@ -242,9 +242,14 @@ async def curate_coding_memory(
 
     ``candidates`` are dicts with a ``kind`` (see :data:`CANDIDATE_KINDS`)
     plus that kind's fields. ``existing`` are rendered lines of lessons
-    already stored near these candidates (the dedup context). Returns
-    ``{"kept": [...], "counts": {write, already_known, not_durable,
-    unsupported}}``.
+    already stored near these candidates (the dedup context), shown to the
+    model numbered by list position. Returns ``{"kept": [...], "counts":
+    {write, already_known, supersedes, not_durable, unsupported},
+    "known": [...]}``: ``kept`` are candidates to write (WRITE and
+    SUPERSEDES, the latter carrying ``supersedes`` = index into
+    ``existing``); ``known`` are ``(candidate, index into existing)`` pairs
+    the model matched to a stored lesson (MUD-405 turns those into
+    evidence).
 
     Fail-open in the strong sense: the curator disabled, raising, or
     returning a verdict set that does not cover every candidate keeps all
@@ -254,16 +259,16 @@ async def curate_coding_memory(
     """
     counts = _verdict_counts()
     if not candidates:
-        return {"kept": [], "counts": counts}
+        return {"kept": [], "counts": counts, "known": []}
     if not _curator_enabled():
         counts["write"] = len(candidates)
-        return {"kept": list(candidates), "counts": counts}
+        return {"kept": list(candidates), "counts": counts, "known": []}
 
     import agent_memory_mcp.baml_client.async_client as _async_client
     from agent_memory_mcp.providers import default_baml_options
 
     block = "\n".join(f"{i}. {candidate_line(c)}" for i, c in enumerate(candidates))
-    existing_block = "\n".join(f"- {line}" for line in existing) or "(none)"
+    existing_block = "\n".join(f"{i}. {line}" for i, line in enumerate(existing)) or "(none)"
     try:
         curated = await _async_client.b.CurateCodingMemory(
             candidates=block,
@@ -271,15 +276,25 @@ async def curate_coding_memory(
             transcript=transcript,
             baml_options=default_baml_options(),
         )
-        verdicts = {
-            v.id: str(getattr(v.action, "value", v.action)).lower()
-            for v in curated.verdicts
-            if isinstance(v.id, int) and 0 <= v.id < len(candidates)
-        }
+        verdicts: dict[int, tuple[str, int | None]] = {}
+        for v in curated.verdicts:
+            if not (isinstance(v.id, int) and 0 <= v.id < len(candidates)):
+                continue
+            action = str(getattr(v.action, "value", v.action)).lower()
+            known = getattr(v, "known_as", None)
+            if not (isinstance(known, int) and 0 <= known < len(existing)):
+                known = None
+            # A match verdict without a valid target is just a WRITE or a
+            # reject: never merge into a lesson the model did not name.
+            if action == "already_known" and known is None:
+                action = "write"
+            if action == "supersedes" and known is None:
+                action = "write"
+            verdicts[v.id] = (action, known)
     except Exception:
         logger.warning("CurateCodingMemory failed; keeping all candidates", exc_info=True)
         counts["write"] = len(candidates)
-        return {"kept": list(candidates), "counts": counts}
+        return {"kept": list(candidates), "counts": counts, "known": []}
 
     coverage = len(verdicts) / len(candidates)
     if coverage < MIN_VERDICT_COVERAGE:
@@ -288,26 +303,34 @@ async def curate_coding_memory(
             len(verdicts), len(candidates),
         )
         counts["write"] = len(candidates)
-        return {"kept": list(candidates), "counts": counts}
+        return {"kept": list(candidates), "counts": counts, "known": []}
 
     # A nearly complete verdict set is applied as given. Candidates the
     # model skipped are kept only when they came from the extractor; a raw
     # error step with no verdict is not a lesson anyone asked for.
     kept: list[dict[str, Any]] = []
+    known_pairs: list[tuple[dict[str, Any], int]] = []
     for i, c in enumerate(candidates):
-        action = verdicts.get(i)
-        if action is None:
+        verdict = verdicts.get(i)
+        if verdict is None:
             counts["uncovered"] = counts.get("uncovered", 0) + 1
             if c.get("source") != "error_step":
                 kept.append(c)
             continue
+        action, known = verdict
         counts[action] = counts.get(action, 0) + 1
         if action == "write":
             kept.append(c)
+        elif action == "supersedes":
+            # Tag in place: the pipeline matches kept entries by identity.
+            c["supersedes"] = known
+            kept.append(c)
+        elif action == "already_known":
+            known_pairs.append((c, known))
     if counts.get("uncovered"):
         logger.warning(
             "CurateCodingMemory covered %d/%d candidates; applied the verdicts given",
             len(verdicts), len(candidates),
         )
     logger.info("CurateCodingMemory: %s", counts)
-    return {"kept": kept, "counts": counts}
+    return {"kept": kept, "counts": counts, "known": known_pairs}

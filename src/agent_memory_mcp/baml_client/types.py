@@ -43,6 +43,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 class CurateAction(str, Enum):
     WRITE = "WRITE"
     ALREADY_KNOWN = "ALREADY_KNOWN"
+    SUPERSEDES = "SUPERSEDES"
     NOT_DURABLE = "NOT_DURABLE"
     UNSUPPORTED = "UNSUPPORTED"
 
@@ -79,6 +80,7 @@ class CuratedMemories(BaseModel):
 class CuratorVerdict(BaseModel):
     id: int = Field(description='the candidate\'s id, exactly as given')
     action: CurateAction
+    known_as: typing.Optional[int] = Field(default=None, description='for ALREADY_KNOWN and SUPERSEDES: the number of the existing lesson it matches or replaces; null otherwise')
 
 class ExtractedCodingPreference(BaseModel):
     category: str = Field(description='Preference category: e.g. testing, style, tooling, workflow')

@@ -97,15 +97,17 @@ class TestRecordCodingActivity:
             commits=[{"sha": "abc123", "message": "fix", "files": ["a.py"], "ts": "ignored"}],
         )
 
-        assert len(graph.writes) == 3
+        # session, editing, commit, then the RESOLVED_BY sweep (MUD-405).
+        assert len(graph.writes) == 4
         # Session upsert MUST run first — later builders MATCH the session.
         assert "CodingSession" in graph.writes[0][0]
         assert "CodeAgent" in graph.writes[0][0]
         assert "EDITING" in graph.writes[1][0]
         assert "Change {sha" in graph.writes[2][0]
+        assert "RESOLVED_BY" in graph.writes[3][0]
 
         # One ISO timestamp shared across every write in the call.
-        ts_values = {params["ts"] for _, params in graph.writes}
+        ts_values = {params["ts"] for _, params in graph.writes[:3]}
         assert len(ts_values) == 1
 
         result = json.loads(result_str)
@@ -114,6 +116,7 @@ class TestRecordCodingActivity:
             "edited_files": 2,
             "commits": 1,
             "skipped_commits": 0,
+            "resolved": 0,
         }
 
     async def test_no_files_no_commits_only_session_write(self, monkeypatch, mock_ctx):
@@ -138,6 +141,7 @@ class TestRecordCodingActivity:
             "edited_files": 0,
             "commits": 0,
             "skipped_commits": 0,
+            "resolved": 0,
         }
 
     async def test_commit_without_sha_skipped_and_counted(self, monkeypatch, mock_ctx):
@@ -156,8 +160,8 @@ class TestRecordCodingActivity:
             ],
         )
 
-        # session + one valid commit
-        assert len(graph.writes) == 2
+        # session + one valid commit + the resolve sweep
+        assert len(graph.writes) == 3
         assert graph.writes[1][1]["sha"] == "def456"
 
         result = json.loads(result_str)
@@ -178,8 +182,8 @@ class TestRecordCodingActivity:
             commits=[{"sha": f"sha{i}", "message": "m", "files": []} for i in range(51)],
         )
 
-        # session + editing + 50 commits
-        assert len(graph.writes) == 52
+        # session + editing + 50 commits + resolve sweep
+        assert len(graph.writes) == 53
         assert len(graph.writes[1][1]["paths"]) == 100
 
         result = json.loads(result_str)
@@ -469,8 +473,9 @@ def _stub_curator(monkeypatch, keep=None):
     lookup hits the graph, so the capture tests exercise the write path."""
     async def fake_curate(candidates, transcript, existing):
         kept = [c for c in candidates if keep is None or keep(c)]
-        return {"kept": kept, "counts": {"write": len(kept), "already_known": 0,
-                                         "not_durable": len(candidates) - len(kept), "unsupported": 0}}
+        return {"kept": kept, "counts": {"write": len(kept), "already_known": 0, "supersedes": 0,
+                                         "not_durable": len(candidates) - len(kept), "unsupported": 0},
+                "known": []}
 
     async def no_neighbors(client, repo, embedding):
         return []
@@ -507,8 +512,9 @@ class TestCaptureSessionMemory:
             }
         ]
 
-        # Session upsert first, then one write per kept item.
-        assert len(graph.writes) == 6
+        # Session upsert first, then one write per kept lesson. Preferences
+        # go through the upstream store (MUD-405), not a CodingPreference node.
+        assert len(graph.writes) == 5
         assert "CodingSession" in graph.writes[0][0]
         assert "CodeAgent" in graph.writes[0][0]
 
@@ -543,27 +549,25 @@ class TestCaptureSessionMemory:
         assert set(de_params["props"]) == {"attempt", "why_failed", "confidence"}
         assert de_params["task_key"] == "MUD-395"
 
-        p_query, p_params = graph.writes[5]
-        assert "CREATE (m:CodingPreference)" in p_query
-        assert set(p_params["props"]) == {"category", "preference", "confidence"}
-        # Preferences are session-anchored: no files, no task edge.
-        assert p_params["anchor_paths"] == []
-        assert "task_key" not in p_params
+        assert not any("CodingPreference" in q for q, _ in graph.writes)
 
         result = json.loads(result_str)
         assert result == {
-            "stored": 5,
+            "stored": 4,
             "by_kind": {
                 "Decision": 2,
                 "Gotcha": 1,
                 "DeadEnd": 1,
-                "CodingPreference": 1,
+                "CodingPreference": 0,
             },
             "dropped_unanchored": 1,
             "anchor_rate": 0.8,
             "embedded": 0,
             "windows": 1,
-            "curated": {"write": 5, "already_known": 0, "not_durable": 0, "unsupported": 0},
+            "curated": {"write": 5, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
+            "reasserted": 0,
+            "superseded": 0,
+            "preferences": 0,
         }
 
     async def test_empty_transcript_skips_extraction_and_writes(
@@ -596,7 +600,10 @@ class TestCaptureSessionMemory:
             "anchor_rate": None,
             "embedded": 0,
             "windows": 0,
-            "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
+            "curated": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
+            "reasserted": 0,
+            "superseded": 0,
+            "preferences": 0,
         }
 
     async def test_transcript_tail_and_files_are_capped(self, monkeypatch, mock_ctx):
@@ -689,7 +696,10 @@ class TestCaptureSessionMemory:
             "anchor_rate": None,
             "embedded": 0,
             "windows": 1,
-            "curated": {"write": 0, "already_known": 0, "not_durable": 0, "unsupported": 0},
+            "curated": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
+            "reasserted": 0,
+            "superseded": 0,
+            "preferences": 0,
         }
 
     async def test_write_failure_reports_partial_counts(
