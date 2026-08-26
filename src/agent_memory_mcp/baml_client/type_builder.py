@@ -20,22 +20,26 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","CuratedMemories","CuratorVerdict","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","RecallScreen","RecallVerdict","TemporalExtraction",]
+          ["CandidateFact","CodingMemoryExtraction","CodingSessionContext","ContradictionResult","CuratedMemories","CuratorVerdict","ExtractedCodingPreference","ExtractedDeadEnd","ExtractedDecision","ExtractedGotcha","ExtractedReasoningStep","ReasoningChainInput","ReasoningExtractionOutput","ReasoningStepInput","RecallScreen","RecallVerdict","ServedRatings","ServedVerdict","TemporalExtraction",]
         ), enums=set(
-          ["CurateAction",]
+          ["CurateAction","ServedOutcome",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 1
+    # Generated enums 2
     # #########################################################################
 
     @property
     def CurateAction(self) -> "CurateActionViewer":
         return CurateActionViewer(self)
 
+    @property
+    def ServedOutcome(self) -> "ServedOutcomeViewer":
+        return ServedOutcomeViewer(self)
+
 
     # #########################################################################
-    # Generated classes 17
+    # Generated classes 19
     # #########################################################################
 
     @property
@@ -103,13 +107,21 @@ class TypeBuilder(type_builder.TypeBuilder):
         return RecallVerdictViewer(self)
 
     @property
+    def ServedRatings(self) -> "ServedRatingsViewer":
+        return ServedRatingsViewer(self)
+
+    @property
+    def ServedVerdict(self) -> "ServedVerdictViewer":
+        return ServedVerdictViewer(self)
+
+    @property
     def TemporalExtraction(self) -> "TemporalExtractionViewer":
         return TemporalExtractionViewer(self)
 
 
 
 # #########################################################################
-# Generated enums 1
+# Generated enums 2
 # #########################################################################
 
 class CurateActionAst:
@@ -166,9 +178,55 @@ class CurateActionValues:
     
 
 
+class ServedOutcomeAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("ServedOutcome")
+        self._values: typing.Set[str] = set([  "HELPFUL",  "HARMFUL",  "UNUSED",  ])
+        self._vals = ServedOutcomeValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "ServedOutcomeValues":
+        return self._vals
+
+
+class ServedOutcomeViewer(ServedOutcomeAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class ServedOutcomeValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def HELPFUL(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("HELPFUL"))
+    
+    @property
+    def HARMFUL(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("HARMFUL"))
+    
+    @property
+    def UNUSED(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("UNUSED"))
+    
+    
+
+
 
 # #########################################################################
-# Generated classes 17
+# Generated classes 19
 # #########################################################################
 
 class CandidateFactAst:
@@ -951,6 +1009,88 @@ class RecallVerdictProperties:
     @property
     def keep(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("keep"))
+    
+    
+
+
+class ServedRatingsAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ServedRatings")
+        self._properties: typing.Set[str] = set([  "verdicts",  ])
+        self._props = ServedRatingsProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ServedRatingsProperties":
+        return self._props
+
+
+class ServedRatingsViewer(ServedRatingsAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ServedRatingsProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def verdicts(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("verdicts"))
+    
+    
+
+
+class ServedVerdictAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ServedVerdict")
+        self._properties: typing.Set[str] = set([  "id",  "outcome",  ])
+        self._props = ServedVerdictProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ServedVerdictProperties":
+        return self._props
+
+
+class ServedVerdictViewer(ServedVerdictAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ServedVerdictProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def id(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("id"))
+    
+    @property
+    def outcome(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("outcome"))
     
     
 

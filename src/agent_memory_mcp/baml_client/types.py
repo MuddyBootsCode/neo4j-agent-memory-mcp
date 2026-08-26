@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (1)
+# Generated enums (2)
 # #########################################################################
 
 class CurateAction(str, Enum):
@@ -47,8 +47,13 @@ class CurateAction(str, Enum):
     NOT_DURABLE = "NOT_DURABLE"
     UNSUPPORTED = "UNSUPPORTED"
 
+class ServedOutcome(str, Enum):
+    HELPFUL = "HELPFUL"
+    HARMFUL = "HARMFUL"
+    UNUSED = "UNUSED"
+
 # #########################################################################
-# Generated classes (17)
+# Generated classes (19)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -138,6 +143,13 @@ class RecallScreen(BaseModel):
 class RecallVerdict(BaseModel):
     id: int = Field(description='the candidate\'s id, exactly as given')
     keep: bool = Field(description='true only if this candidate genuinely bears on the query')
+
+class ServedRatings(BaseModel):
+    verdicts: typing.List["ServedVerdict"] = Field(description='exactly one entry per lesson, including the unused ones')
+
+class ServedVerdict(BaseModel):
+    id: int = Field(description='the lesson\'s id, exactly as given')
+    outcome: ServedOutcome
 
 class TemporalExtraction(BaseModel):
     valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')

@@ -334,3 +334,62 @@ async def curate_coding_memory(
         )
     logger.info("CurateCodingMemory: %s", counts)
     return {"kept": kept, "counts": counts, "known": known_pairs}
+
+
+# --- Outcome rating (MUD-407) ------------------------------------------------
+
+_RATER_KILL_SWITCH_ENV = "NAM_OUTCOME_RATER"
+
+
+def _rater_enabled() -> bool:
+    return os.environ.get(_RATER_KILL_SWITCH_ENV, "").strip().lower() != "off"
+
+
+async def rate_served_lessons(
+    lessons: list[str],
+    transcript: str,
+) -> list[bool | None]:
+    """Rate lessons recall served to a finished session, one per input line.
+
+    ``lessons`` are rendered lesson lines shown to the model numbered by
+    list position. Returns a list the same length: True for helpful, False
+    for harmful, None for unused or unrated.
+
+    Fail-open: the rater disabled, raising, or returning nothing leaves
+    every lesson unrated. An unrated lesson keeps the neutral weight it
+    already has, so a broken rater degrades to "no outcome signal", never
+    to a store full of lessons marked harmful.
+    """
+    unrated: list[bool | None] = [None] * len(lessons)
+    if not lessons or not transcript.strip() or not _rater_enabled():
+        return unrated
+
+    import agent_memory_mcp.baml_client.async_client as _async_client
+    from agent_memory_mcp.providers import default_baml_options
+
+    block = "\n".join(f"{i}. {line}" for i, line in enumerate(lessons))
+    try:
+        rated = await _async_client.b.RateServedLessons(
+            lessons=block,
+            transcript=transcript,
+            baml_options=default_baml_options(),
+        )
+    except Exception:
+        logger.warning("RateServedLessons failed; leaving lessons unrated", exc_info=True)
+        return unrated
+
+    out = list(unrated)
+    counts = {"helpful": 0, "harmful": 0, "unused": 0}
+    for v in getattr(rated, "verdicts", []) or []:
+        if not (isinstance(v.id, int) and 0 <= v.id < len(lessons)):
+            continue
+        outcome = str(getattr(v.outcome, "value", v.outcome)).lower()
+        if outcome == "helpful":
+            out[v.id] = True
+        elif outcome == "harmful":
+            out[v.id] = False
+        else:
+            outcome = "unused"
+        counts[outcome] = counts.get(outcome, 0) + 1
+    logger.info("RateServedLessons: %s", counts)
+    return out

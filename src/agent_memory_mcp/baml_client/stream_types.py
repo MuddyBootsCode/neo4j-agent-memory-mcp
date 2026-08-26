@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (17)
+# Generated classes (19)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -113,6 +113,13 @@ class RecallScreen(BaseModel):
 class RecallVerdict(BaseModel):
     id: typing.Optional[int] = Field(default=None, description='the candidate\'s id, exactly as given')
     keep: typing.Optional[bool] = Field(default=None, description='true only if this candidate genuinely bears on the query')
+
+class ServedRatings(BaseModel):
+    verdicts: typing.List["ServedVerdict"] = Field(description='exactly one entry per lesson, including the unused ones')
+
+class ServedVerdict(BaseModel):
+    id: typing.Optional[int] = Field(default=None, description='the lesson\'s id, exactly as given')
+    outcome: typing.Optional[types.ServedOutcome] = None
 
 class TemporalExtraction(BaseModel):
     valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')
