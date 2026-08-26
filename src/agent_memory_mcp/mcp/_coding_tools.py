@@ -34,8 +34,10 @@ from fastmcp import Context
 
 from agent_memory_mcp.capture.cypher import (
     expire_write,
+    outcome_write,
     reassert_write,
     resolve_write,
+    served_lessons_read,
     served_write,
     RECALL_KINDS,
     SHARED_RECALL_LABEL,
@@ -48,6 +50,7 @@ from agent_memory_mcp.extraction.coding import (
     candidate_line,
     curate_coding_memory,
     extract_coding_memory,
+    rate_served_lessons,
 )
 from agent_memory_mcp.extraction.unified import persist_preferences
 from agent_memory_mcp.mcp._common import get_client
@@ -180,6 +183,27 @@ LEG_LIMIT = 40
 # RRF constant. 60 is the value from the original paper and what Graphiti
 # uses; it keeps a rank-1 hit on one leg from dominating rank-3 on both.
 RRF_K = 60
+
+# --- Outcome prior (MUD-407) ------------------------------------------------
+#
+# A lesson several sessions have asserted, and one later sessions acted on,
+# is worth more than a one-off at the same cosine. The fused score is scaled
+# by 1 + OUTCOME_WEIGHT*(w - 0.5)*2 + EVIDENCE_WEIGHT*min(evidence, cap)/cap,
+# where w is the EMA the session-end pass maintains (0.5 when unrated, so an
+# unrated lesson is neither promoted nor buried).
+#
+# Both terms ship non-zero, because the alternative is Cognee's: influence
+# 0.0 that nobody ever turns on. They are not gentle. RRF scores across a
+# 20-candidate pool span about a third (1/61 to 1/81), so the default
+# swing -- 0.8 for a consistently harmful lesson up to 1.3 for a proven,
+# repeatedly asserted one -- can move a lesson roughly ten ranks. That is
+# deliberate while cosine ordering is measured not to discriminate (a
+# relevant lesson is about as likely at rank 19 as rank 1, MUD-403), and
+# it is the first thing to tune on the first golden run whose pool
+# actually carries counters. Set both to 0 to restore pure RRF.
+OUTCOME_WEIGHT = float(os.environ.get("NAM_RECALL_OUTCOME_WEIGHT", "0.2"))
+EVIDENCE_WEIGHT = float(os.environ.get("NAM_RECALL_EVIDENCE_WEIGHT", "0.1"))
+EVIDENCE_CAP = 5
 
 _LEG_TAIL = """
     MATCH (m)-[:MADE_IN]->(s:CodingSession {repo: $repo})
@@ -379,8 +403,31 @@ async def fulltext_leg(
         return []
 
 
+def outcome_prior(props: dict[str, Any] | None) -> float:
+    """Multiplier for a lesson's fused score from its outcome history.
+
+    1.0 for a lesson with no history, so a fresh store ranks exactly as it
+    did before MUD-407. Reads ``outcome_weight`` (the session-end EMA) and
+    ``evidence_count`` (how many sessions asserted it); a malformed value is
+    treated as absent rather than raising inside the ranker.
+    """
+    props = props or {}
+    prior = 1.0
+    try:
+        weight = props.get("outcome_weight")
+        if weight is not None:
+            prior += OUTCOME_WEIGHT * (float(weight) - 0.5) * 2
+        evidence = props.get("evidence_count")
+        if evidence is not None:
+            prior += EVIDENCE_WEIGHT * min(float(evidence), EVIDENCE_CAP) / EVIDENCE_CAP
+    except (TypeError, ValueError):
+        return 1.0
+    return max(prior, 0.0)
+
+
 def rrf_fuse(legs: list[list[dict[str, Any]]], k: int = RRF_K) -> list[dict[str, Any]]:
-    """Reciprocal rank fusion over leg result lists keyed by ``eid``.
+    """Reciprocal rank fusion over leg result lists keyed by ``eid``, scaled
+    by each lesson's outcome prior (MUD-407).
 
     Each row's ``score`` becomes the fused score; the per-leg ranks are kept
     under ``ranks`` for diagnostics. Rows missing an ``eid`` (older fakes)
@@ -400,6 +447,10 @@ def rrf_fuse(legs: list[list[dict[str, Any]]], k: int = RRF_K) -> list[dict[str,
             entry["score"] += 1.0 / (k + rank + 1)
             entry["ranks"][li] = rank
             entry["leg_scores"][li] = row.get("score")
+    for entry in fused.values():
+        prior = outcome_prior(entry.get("props"))
+        entry["prior"] = round(prior, 4)
+        entry["score"] *= prior
     return sorted(fused.values(), key=lambda r: r["score"], reverse=True)
 
 
@@ -697,6 +748,7 @@ async def capture_transcript(
         "anchor_rate": None, "embedded": 0, "windows": 0,
         "curated": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
         "reasserted": 0, "superseded": 0, "preferences": 0,
+        "rated": {"served": 0, "helpful": 0, "harmful": 0, "unused": 0},
     })
     if not transcript or not transcript.strip():
         return result
@@ -795,7 +847,63 @@ async def capture_transcript(
 
     result["stored"] = sum(by_kind.values())
     result["anchor_rate"] = (sum(anchor_rates) / len(anchor_rates)) if anchor_rates else None
+    result["rated"] = await rate_session_outcomes(
+        client, session_id=session_id, transcript=transcript, ts=ts
+    )
     return result
+
+
+async def rate_session_outcomes(
+    client: Any, *, session_id: str, transcript: str, ts: str
+) -> dict[str, int]:
+    """Session-end outcome pass (MUD-407): rate the lessons recall served to
+    this session and move their counters.
+
+    Runs whether or not the session produced new lessons — a session that
+    learned nothing can still have acted on what it was given. Rated against
+    the newest window only: the evidence that a lesson was used is where the
+    work happened, and this call is paid once per session, not per window.
+
+    Best-effort. Any failure returns zero counts and leaves the store
+    untouched; capture has already committed its writes by this point and
+    must not be undone by a rater problem.
+    """
+    counts = {"served": 0, "helpful": 0, "harmful": 0, "unused": 0}
+    try:
+        rows = await client.graph.execute_read(*served_lessons_read(session_id))
+    except Exception as e:
+        logger.debug(f"served lookup skipped: {e}")
+        return counts
+    served: list[tuple[str, str]] = []
+    for row in rows or []:
+        kind = next((label for label in (row.get("labels") or []) if label in _RECALL_KINDS), None)
+        props = {k: v for k, v in (row.get("props") or {}).items() if k != "embedding"}
+        if kind and row.get("eid"):
+            served.append((row["eid"], candidate_line({"kind": kind, **props})))
+    if not served:
+        return counts
+    counts["served"] = len(served)
+
+    counts["unused"] = len(served)
+    try:
+        verdicts = await rate_served_lessons(
+            [line for _, line in served], transcript[-WINDOW_CHARS:]
+        )
+        ratings = [
+            {"eid": eid, "helpful": bool(verdict)}
+            for (eid, _line), verdict in zip(served, verdicts)
+            if verdict is not None
+        ]
+        built = outcome_write(ratings, session_id, ts)
+        if built is not None:
+            await client.graph.execute_write(*built)
+    except Exception as e:
+        logger.warning(f"outcome rating failed: {e}")
+        return counts
+    counts["helpful"] = sum(1 for r in ratings if r["helpful"])
+    counts["harmful"] = len(ratings) - counts["helpful"]
+    counts["unused"] = len(served) - len(ratings)
+    return counts
 
 
 def register_coding_tools(mcp: FastMCP) -> None:
@@ -1049,7 +1157,10 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     # What was injected, so a later commit on the lesson's
                     # file can close the loop (MUD-405). Best-effort.
                     served = [m.pop("eid") for m in memories if m.get("eid")]
-                    built = served_write(served, session_id or agent_id, datetime.now(timezone.utc).isoformat())
+                    built = served_write(
+                        served, session_id or agent_id,
+                        datetime.now(timezone.utc).isoformat(), repo,
+                    )
                     if built is not None:
                         try:
                             await client.graph.execute_write(*built)

@@ -132,3 +132,74 @@ async def test_capture_then_recall_round_trip(coding_tools):
     # At least one recalled memory is anchored to a file (not only to the
     # task) — the transcript names both files explicitly.
     assert any(m["files"] for m in memories), memories
+
+
+async def test_served_lessons_are_rated_and_counters_move(coding_tools, memory_client, monkeypatch):
+    """The outcome loop against a real database (MUD-407): recall serves a
+    lesson, the session-end pass rates it, and the counters move by the EMA.
+
+    The rater is stubbed — what is under test is the Cypher, not the model:
+    the CASE arms, the EMA arithmetic, and the rated_at stamp that makes a
+    second capture of the same session a no-op.
+    """
+    from agent_memory_mcp.capture.cypher import OUTCOME_ALPHA, OUTCOME_SEED
+
+    mcp, ctx = coding_tools
+    session = "sess-outcome-1"
+
+    await _tool(mcp, "capture_session_memory")(
+        ctx, agent_id="agent-outcome", session_id="sess-outcome-seed", repo=REPO,
+        branch="main", transcript=TRANSCRIPT, task_key="MUD-407", files=FILES,
+    )
+    recalled = json.loads(
+        await _tool(mcp, "coding_recall")(
+            ctx, prompt="what breaks when I point the tests at a shared database?",
+            agent_id="agent-outcome", repo=REPO, files=FILES, session_id=session,
+        )
+    )
+    assert recalled["memories"], recalled
+
+    async def all_helpful(lessons, transcript):
+        return [True] * len(lessons)
+
+    monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", all_helpful)
+
+    captured = json.loads(
+        await _tool(mcp, "capture_session_memory")(
+            ctx, agent_id="agent-outcome", session_id=session, repo=REPO,
+            branch="main", transcript=TRANSCRIPT, task_key="MUD-407", files=FILES,
+        )
+    )
+    served = captured["rated"]["served"]
+    assert served == len(recalled["memories"]), captured
+    assert captured["rated"]["helpful"] == served
+    assert captured["rated"]["harmful"] == 0
+
+    rows = await memory_client.graph.execute_read(
+        """
+        MATCH (m)-[sv:SERVED_TO]->(:CodingSession {id: $session})
+        RETURN m.helpful AS helpful, m.harmful AS harmful,
+               m.outcome_weight AS weight, sv.rated_at IS NOT NULL AS rated
+        """,
+        {"session": session},
+    )
+    assert len(rows) == served, rows
+    expected = OUTCOME_SEED + OUTCOME_ALPHA * (1.0 - OUTCOME_SEED)
+    for row in rows:
+        assert row["helpful"] == 1 and row["harmful"] == 0, row
+        assert row["weight"] == pytest.approx(expected), row
+        assert row["rated"] is True, row
+
+    # A re-run finds every serving already rated and must not count it twice.
+    again = json.loads(
+        await _tool(mcp, "capture_session_memory")(
+            ctx, agent_id="agent-outcome", session_id=session, repo=REPO,
+            branch="main", transcript=TRANSCRIPT, task_key="MUD-407", files=FILES,
+        )
+    )
+    assert again["rated"] == {"served": 0, "helpful": 0, "harmful": 0, "unused": 0}, again
+    rows = await memory_client.graph.execute_read(
+        "MATCH (m)-[:SERVED_TO]->(:CodingSession {id: $session}) RETURN m.helpful AS helpful",
+        {"session": session},
+    )
+    assert {row["helpful"] for row in rows} == {1}, rows

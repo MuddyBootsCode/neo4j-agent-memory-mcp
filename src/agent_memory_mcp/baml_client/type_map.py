@@ -64,10 +64,18 @@ type_map = {
     "types.RecallVerdict": types.RecallVerdict,
     "stream_types.RecallVerdict": stream_types.RecallVerdict,
 
+    "types.ServedRatings": types.ServedRatings,
+    "stream_types.ServedRatings": stream_types.ServedRatings,
+
+    "types.ServedVerdict": types.ServedVerdict,
+    "stream_types.ServedVerdict": stream_types.ServedVerdict,
+
     "types.TemporalExtraction": types.TemporalExtraction,
     "stream_types.TemporalExtraction": stream_types.TemporalExtraction,
 
 
     "types.CurateAction": types.CurateAction,
+
+    "types.ServedOutcome": types.ServedOutcome,
 
 }
