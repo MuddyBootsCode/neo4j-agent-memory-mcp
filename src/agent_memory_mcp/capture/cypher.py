@@ -268,12 +268,26 @@ def expire_write(eid: str, superseded_by: str | None, ts: str) -> tuple[str, dic
     return query, {"eid": eid, "superseded_by": superseded_by, "ts": ts}
 
 
-def served_write(eids: list[str], session_id: str, ts: str) -> tuple[str, dict[str, Any]] | None:
-    """Recall injected these lessons into a session. None when nothing was."""
+def served_write(
+    eids: list[str], session_id: str, ts: str, repo: str | None = None
+) -> tuple[str, dict[str, Any]] | None:
+    """Recall injected these lessons into a session. None when nothing was.
+
+    The session is MERGEd, not MATCHed. The recall hook calls coding_recall
+    BEFORE record_coding_activity, so on a session's first prompt the
+    session node does not exist yet and a MATCH would drop the edge in
+    silence — losing the first serving of every session, which is the one
+    the outcome loop most wants to rate (MUD-407). ``repo`` is set on
+    create so the repo-scoped reads still find the session; the upsert
+    milliseconds later fills in branch and the agent edge.
+    """
     if not eids:
         return None
     query = """
-        MATCH (s:CodingSession {id: $session_id})
+        MERGE (s:CodingSession {id: $session_id})
+        ON CREATE SET s.repo = $repo, s.started_at = datetime($ts),
+            s.last_seen = datetime($ts)
+        WITH s
         UNWIND $eids AS eid
         MATCH (m) WHERE elementId(m) = eid
         SET m.served_count = coalesce(m.served_count, 0) + 1,
@@ -282,7 +296,7 @@ def served_write(eids: list[str], session_id: str, ts: str) -> tuple[str, dict[s
         ON CREATE SET r.at = datetime($ts), r.count = 1
         ON MATCH SET r.at = datetime($ts), r.count = coalesce(r.count, 0) + 1
     """
-    return query, {"eids": eids, "session_id": session_id, "ts": ts}
+    return query, {"eids": eids, "session_id": session_id, "ts": ts, "repo": repo}
 
 
 def resolve_write(session_id: str) -> tuple[str, dict[str, Any]]:
@@ -298,3 +312,68 @@ def resolve_write(session_id: str) -> tuple[str, dict[str, Any]]:
         RETURN count(*) AS resolved
     """
     return query, {"session_id": session_id}
+
+
+# --- Outcome loop (MUD-407) -------------------------------------------------
+#
+# P2 recorded what recall served; P4 asks what came of it. A session-end pass
+# rates each served lesson helpful or harmful from the transcript, and the
+# counters it writes feed the ranker. `outcome_weight` is an exponential
+# moving average, w + alpha(r - w) with r = 1 for helpful and 0 for harmful,
+# seeded at OUTCOME_SEED so an unrated lesson is neutral rather than bad.
+# Ratings stamp the SERVED_TO edge, so re-running capture for a session
+# cannot rate the same serving twice.
+
+OUTCOME_SEED = 0.5
+OUTCOME_ALPHA = 0.3
+
+
+def served_lessons_read(session_id: str, limit: int = 40) -> tuple[str, dict[str, Any]]:
+    """Lessons recall served to this session that have not been rated yet."""
+    query = """
+        MATCH (m)-[sv:SERVED_TO]->(s:CodingSession {id: $session_id})
+        WHERE sv.rated_at IS NULL
+        RETURN elementId(m) AS eid, labels(m) AS labels,
+               properties(m) AS props
+        ORDER BY sv.at
+        LIMIT $limit
+    """
+    return query, {"session_id": session_id, "limit": limit}
+
+
+def outcome_write(
+    ratings: list[dict[str, Any]],
+    session_id: str,
+    ts: str,
+    alpha: float = OUTCOME_ALPHA,
+    seed: float = OUTCOME_SEED,
+) -> tuple[str, dict[str, Any]] | None:
+    """Apply session-end ratings. ``ratings`` are ``{"eid", "helpful"}``
+    dicts, ``helpful`` true for a helpful lesson and false for a harmful
+    one; unused lessons are not passed. None when nothing was rated.
+
+    The count and the weight move together: the counts say how often, the
+    weight says how lately. Marking the edge rated makes the write
+    idempotent per serving."""
+    if not ratings:
+        return None
+    query = """
+        MATCH (s:CodingSession {id: $session_id})
+        UNWIND $ratings AS rating
+        MATCH (m)-[sv:SERVED_TO]->(s) WHERE elementId(m) = rating.eid
+        SET m.helpful = coalesce(m.helpful, 0) + CASE WHEN rating.helpful THEN 1 ELSE 0 END,
+            m.harmful = coalesce(m.harmful, 0) + CASE WHEN rating.helpful THEN 0 ELSE 1 END,
+            m.outcome_weight = coalesce(m.outcome_weight, $seed)
+                + $alpha * ((CASE WHEN rating.helpful THEN 1.0 ELSE 0.0 END)
+                            - coalesce(m.outcome_weight, $seed)),
+            m.last_rated_at = datetime($ts)
+        SET sv.rated_at = datetime($ts), sv.helpful = rating.helpful
+        RETURN count(*) AS rated
+    """
+    return query, {
+        "ratings": ratings,
+        "session_id": session_id,
+        "ts": ts,
+        "alpha": float(alpha),
+        "seed": float(seed),
+    }

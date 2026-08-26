@@ -28,11 +28,24 @@ from mem import LOCAL_EMBEDDING_CONFIG, open_client
 from step1_corpus import _create_database
 
 
+# Lifecycle counters are written by the write path, not carried in $props,
+# so anchored_memory_write resets them to the first-sighting defaults. A
+# pool exported after MUD-405 carries what the real run accumulated; the
+# outcome prior (MUD-407) reads exactly these, so a rebuild that dropped
+# them would measure a ranker with no history to read.
+_COUNTERS = ("evidence_count", "served_count", "helpful", "harmful", "outcome_weight")
+
+
+def _counters_from(item: dict) -> dict:
+    props = item.get("props") or {}
+    return {k: props[k] for k in _COUNTERS if props.get(k) is not None}
+
+
 def _props_from(item: dict) -> dict:
     """Node props for a pool item. Newer pools carry ``props`` verbatim;
     older ones are parsed back from the embedding text."""
     if item.get("props"):
-        return dict(item["props"])
+        return {k: v for k, v in item["props"].items() if k not in _COUNTERS}
     kind, text = item["kind"], item["text"]
     symptom = None
     if kind != "Decision" and " | " in text:
@@ -72,6 +85,7 @@ async def main() -> None:
 
     t0 = time.time()
     mismatched = 0
+    restored = 0
     async with open_client(GOLDEN_DB) as client:
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         sessions = {it["session"] for it in pool}
@@ -91,12 +105,21 @@ async def main() -> None:
                 print(f"indexes ensured: {ok}")
                 first = False
             q, p = anchored_memory_write(it["kind"], props, it["session"], it["repo"], it["files"], None, ts, embedding=vector)
-            await client.graph.execute_write(q, p)
+            rows = await client.graph.execute_write(q, p)
+            counters = _counters_from(it)
+            if counters and rows:
+                restored += 1
+                await client.graph.execute_write(
+                    "MATCH (m) WHERE elementId(m) = $eid SET m += $counters",
+                    {"eid": rows[0]["eid"], "counters": counters},
+                )
     save_json("pool.json", pool)
     save_json("corpus_stats.json", {"materialized_from": src, "lessons": len(pool),
-                                    "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched})
+                                    "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched,
+                                    "counters_restored": restored})
     print(f"materialized {len(pool)} lessons in {time.time() - t0:.0f}s; "
-          f"{mismatched} whose rebuilt text differs from the pool (labels for those are approximate)")
+          f"{mismatched} whose rebuilt text differs from the pool (labels for those are approximate); "
+          f"{restored} with lifecycle counters restored")
 
 
 if __name__ == "__main__":
