@@ -169,6 +169,10 @@ def format_context(
 # share the hook's fail-open contract: malformed rows degrade, never raise.
 MAX_FILES_SHOWN = 3
 KIND_LABELS = {"Decision": "decision", "Gotcha": "gotcha", "DeadEnd": "dead end"}
+# Recurrence surfacing (MUD-407). A lesson this many sessions have asserted
+# independently is not one session's experience any more; it is how this
+# repo behaves, and the line says so instead of reading like a tip.
+GUARDRAIL_EVIDENCE = 3
 # Relative-time bucket edges, in seconds. Each edge sits past the unit it
 # closes (90s, 90min, 36h) so a value like "89 minutes" still reads in the
 # finer unit instead of rounding down to "1h".
@@ -254,13 +258,23 @@ def format_overlap_block(
     return "\n".join(lines)
 
 
+def _is_guardrail(evidence: Any) -> bool:
+    """True for a lesson asserted by GUARDRAIL_EVIDENCE or more sessions.
+    A missing or malformed count is not a guardrail."""
+    try:
+        return evidence is not None and int(evidence) >= GUARDRAIL_EVIDENCE
+    except (TypeError, ValueError):
+        return False
+
+
 def format_coding_memories(memories: list[dict] | None) -> str | None:
     """Render coding_recall memories, one line per record.
 
     None when there is nothing to show — including when every row is
     missing its text. Kinds map to lowercase labels (DeadEnd → "dead
-    end"); an unknown kind passes through lowercased. Never raises;
-    malformed rows degrade or are skipped.
+    end"); an unknown kind passes through lowercased. A lesson at
+    GUARDRAIL_EVIDENCE or more sessions of evidence is marked a guardrail
+    (MUD-407). Never raises; malformed rows degrade or are skipped.
     """
     if not memories or not isinstance(memories, list):
         return None
@@ -277,6 +291,7 @@ def format_coding_memories(memories: list[dict] | None) -> str | None:
             label = KIND_LABELS.get(kind, kind.lower())
         else:
             label = "note"
+        label = f"{label} · guardrail" if _is_guardrail(row.get("evidence_count")) else label
         task = _clean_task(row.get("task"))
         parts = [p for p in (_shown_files(row.get("files")), task) if p]
         suffix = f" ({', '.join(parts)})" if parts else ""

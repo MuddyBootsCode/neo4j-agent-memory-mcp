@@ -23,6 +23,19 @@ Configuration (environment):
                           payload's session_id, then "unknown-agent"
     NAM_TASK_KEY          Explicit task key; overrides the ticket or
                           branch inferred from git
+
+Second entry point, :func:`subagent_main` (SubagentStop): the same capture
+for a subagent's own transcript. Subagents are the one agent kind the recall
+hook cannot reach — SubagentStart carries no ``additionalContext``, so a
+subagent can contribute to the graph but not read from it. Capturing its
+transcript is the half that is possible: what an Explore agent learns over
+forty tool calls otherwise dies with it, since the parent's transcript keeps
+only the subagent's final answer.
+
+    NAM_SUBAGENT_CAPTURE   "0" disables the subagent hook alone
+    NAM_SUBAGENT_MIN_CHARS Transcripts smaller than this are skipped
+                           (default 2000) — a three-call subagent has
+                           nothing durable to say and extraction is not free
 """
 
 from __future__ import annotations
@@ -44,6 +57,10 @@ from agent_memory_mcp.capture.git_sweep import (
 
 DEFAULT_URL = "http://127.0.0.1:8080/mcp"
 DEFAULT_CAPTURE_TIMEOUT = 30.0
+# Floor on a subagent transcript worth an extraction call. Subagents are
+# spawned freely and most are short lookups; below this the call costs more
+# than the lesson it might find.
+SUBAGENT_MIN_CHARS = 2000
 # Caps the same payload as _MAX_TRANSCRIPT_CHARS in mcp/_coding_tools.py —
 # one on the sending side, one on the receiving side. Move them together.
 # The server windows the rendering (MUD-404), so this is the whole-session
@@ -452,9 +469,108 @@ def run(
         return 0
 
 
+# --- SubagentStop capture -----------------------------------------------
+
+
+def subagent_capture_context(payload: dict) -> dict | None:
+    """Capture context for one subagent run.
+
+    The git context is the parent's — same repo, branch, working tree — but
+    the identity is the subagent's own, so its lessons are attributed to the
+    agent kind that found them and its session does not collide with the
+    parent's (whose SessionEnd capture writes under the plain session id).
+    ``agent_id`` groups by agent type rather than by spawn, so the graph
+    gets one CodeAgent per kind instead of one per invocation.
+    """
+    ctx = gather_capture_context(payload)
+    if ctx is None:
+        return None
+    agent_type = str(payload.get("agent_type") or "").strip() or "subagent"
+    spawn = str(payload.get("agent_id") or payload.get("prompt_id") or "").strip()
+    parent = str(payload.get("session_id") or ctx["session_id"])
+    ctx["agent_id"] = f"subagent:{agent_type}"
+    ctx["session_id"] = f"{parent}:{spawn}" if spawn else parent
+    return ctx
+
+
+def detach_worker(payload: dict) -> None:
+    """Run the capture in a detached process and return immediately.
+
+    SubagentStop runs while the parent session waits for the subagent to
+    finish, and an extraction is tens of seconds against a local model.
+    Blocking there would tax every subagent in every session, so the hook
+    hands the payload to a background process in its own session (so the
+    parent's exit does not take it down) and exits.
+    """
+    import subprocess
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "agent_memory_mcp.hook.capture_hook", "--worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    if proc.stdin is not None:
+        proc.stdin.write(json.dumps(payload).encode())
+        proc.stdin.close()
+
+
+def run_subagent(
+    stdin: TextIO | None = None,
+    spawn: Callable[[dict], None] | None = None,
+) -> int:
+    """SubagentStop entry point: validate cheaply, then detach.
+
+    Always returns 0 and prints nothing. SubagentStop can block a subagent
+    from finishing on exit 2; capture must never do that, so every failure
+    path here is a silent no-op.
+    """
+    if os.environ.get("NAM_CAPTURE_DISABLED") == "1":
+        return 0
+    if os.environ.get("NAM_SUBAGENT_CAPTURE", "1") == "0":
+        return 0
+
+    stdin = stdin if stdin is not None else sys.stdin
+    spawn = spawn if spawn is not None else detach_worker
+
+    try:
+        payload = json.load(stdin)
+        if not isinstance(payload, dict):
+            return 0
+        path = payload.get("transcript_path")
+        if not isinstance(path, str) or not os.path.isfile(path):
+            return 0
+        # Size on disk, not a parse: this runs while the parent waits.
+        floor = int(os.environ.get("NAM_SUBAGENT_MIN_CHARS", SUBAGENT_MIN_CHARS))
+        if os.path.getsize(path) < floor:
+            return 0
+        spawn(payload)
+        return 0
+    except Exception:
+        return 0
+
+
+def run_subagent_worker(
+    stdin: TextIO | None = None,
+    capture: Callable[[str, dict], None] | None = None,
+    gather: Callable[[dict], dict | None] | None = None,
+) -> int:
+    """The detached half: render the subagent transcript and capture it."""
+    return run(
+        stdin=stdin,
+        capture=capture,
+        gather=gather if gather is not None else subagent_capture_context,
+    )
+
+
 def main() -> None:
     sys.exit(run())
 
 
+def subagent_main() -> None:
+    sys.exit(run_subagent())
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(run_subagent_worker() if "--worker" in sys.argv else run())

@@ -53,6 +53,12 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="request")
         return typing.cast(types.TemporalExtraction, __result__)
 
+    def RateServedLessons(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.ServedRatings:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RateServedLessons", llm_response=llm_response, mode="request")
+        return typing.cast(types.ServedRatings, __result__)
+
     def ScreenRecalledMemories(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.RecallScreen:
@@ -102,6 +108,12 @@ class LlmStreamParser:
     ) -> stream_types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.TemporalExtraction, __result__)
+
+    def RateServedLessons(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.ServedRatings:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="RateServedLessons", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.ServedRatings, __result__)
 
     def ScreenRecalledMemories(
         self, llm_response: str, baml_options: BamlCallOptions = {},

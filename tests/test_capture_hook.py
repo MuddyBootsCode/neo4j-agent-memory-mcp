@@ -373,3 +373,113 @@ class TestRun:
         )
         assert code == 0
         assert capture.calls == []
+
+
+class TestSubagentCapture:
+    """SubagentStop: a subagent's own transcript reaches the graph.
+
+    SubagentStart carries no additionalContext, so a subagent cannot be fed
+    from memory; capturing what it learned is the half that is possible.
+    """
+
+    def _payload(self, tmp_path, path, **overrides):
+        payload = {
+            "session_id": "parent-sess",
+            "agent_id": "agent_abc123",
+            "agent_type": "Explore",
+            "transcript_path": path,
+            "cwd": str(tmp_path),
+            "hook_event_name": "SubagentStop",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _big_transcript(self, tmp_path, size=4000):
+        return _jsonl(
+            tmp_path / "sub.jsonl",
+            [_user("find the thing"), _assistant("x" * size)],
+        )
+
+    def test_detaches_the_capture_instead_of_blocking(self, tmp_path, capsys):
+        from agent_memory_mcp.hook.capture_hook import run_subagent
+
+        spawned = []
+        payload = self._payload(tmp_path, self._big_transcript(tmp_path))
+        code = run_subagent(stdin=io.StringIO(json.dumps(payload)), spawn=spawned.append)
+
+        assert code == 0
+        assert capsys.readouterr().out == ""
+        assert spawned == [payload]
+
+    def test_short_transcripts_are_not_worth_an_extraction(self, tmp_path):
+        from agent_memory_mcp.hook.capture_hook import run_subagent
+
+        spawned = []
+        payload = self._payload(tmp_path, _transcript_file(tmp_path))
+        assert run_subagent(stdin=io.StringIO(json.dumps(payload)), spawn=spawned.append) == 0
+        assert spawned == []
+
+    def test_kill_switches_and_bad_payloads_never_spawn(self, tmp_path, monkeypatch):
+        from agent_memory_mcp.hook.capture_hook import run_subagent
+
+        spawned = []
+        good = json.dumps(self._payload(tmp_path, self._big_transcript(tmp_path)))
+
+        monkeypatch.setenv("NAM_SUBAGENT_CAPTURE", "0")
+        assert run_subagent(stdin=io.StringIO(good), spawn=spawned.append) == 0
+        monkeypatch.delenv("NAM_SUBAGENT_CAPTURE")
+        monkeypatch.setenv("NAM_CAPTURE_DISABLED", "1")
+        assert run_subagent(stdin=io.StringIO(good), spawn=spawned.append) == 0
+        monkeypatch.delenv("NAM_CAPTURE_DISABLED")
+
+        assert run_subagent(stdin=io.StringIO("not json{{{"), spawn=spawned.append) == 0
+        missing = json.dumps(self._payload(tmp_path, str(tmp_path / "gone.jsonl")))
+        assert run_subagent(stdin=io.StringIO(missing), spawn=spawned.append) == 0
+        assert spawned == []
+
+    def test_context_keeps_the_parents_repo_and_the_subagents_identity(self, tmp_path, monkeypatch):
+        from agent_memory_mcp.hook import capture_hook
+
+        monkeypatch.setattr(capture_hook, "gather_capture_context", lambda p: _ctx())
+        ctx = capture_hook.subagent_capture_context(
+            self._payload(tmp_path, self._big_transcript(tmp_path))
+        )
+
+        assert ctx["agent_id"] == "subagent:Explore"
+        assert ctx["session_id"] == "parent-sess:agent_abc123"
+        # The git context is the parent's, unchanged.
+        assert ctx["repo"] == "my-repo" and ctx["branch"] == "feature/x"
+        assert ctx["files"] == ["a.py"] and ctx["task_key"] == "MUD-395"
+
+    def test_context_falls_back_when_the_payload_names_no_agent(self, tmp_path, monkeypatch):
+        from agent_memory_mcp.hook import capture_hook
+
+        monkeypatch.setattr(capture_hook, "gather_capture_context", lambda p: _ctx())
+        ctx = capture_hook.subagent_capture_context(
+            {"session_id": "parent-sess", "cwd": str(tmp_path)}
+        )
+        assert ctx["agent_id"] == "subagent:subagent"
+        assert ctx["session_id"] == "parent-sess"
+
+    def test_context_is_none_when_the_parent_context_is(self, tmp_path, monkeypatch):
+        from agent_memory_mcp.hook import capture_hook
+
+        monkeypatch.setattr(capture_hook, "gather_capture_context", lambda p: None)
+        assert capture_hook.subagent_capture_context({"cwd": str(tmp_path)}) is None
+
+    def test_worker_captures_under_the_subagent_identity(self, tmp_path, monkeypatch):
+        from agent_memory_mcp.hook import capture_hook
+
+        capture = Recorder()
+        monkeypatch.setattr(capture_hook, "gather_capture_context", lambda p: _ctx())
+        payload = self._payload(tmp_path, self._big_transcript(tmp_path, size=40))
+        code = capture_hook.run_subagent_worker(
+            stdin=io.StringIO(json.dumps(payload)), capture=capture
+        )
+
+        assert code == 0
+        assert len(capture.calls) == 1
+        transcript, ctx = capture.calls[0]
+        assert "find the thing" in transcript
+        assert ctx["agent_id"] == "subagent:Explore"
+        assert ctx["session_id"] == "parent-sess:agent_abc123"
