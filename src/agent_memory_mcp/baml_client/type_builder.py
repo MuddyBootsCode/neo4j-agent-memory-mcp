@@ -472,7 +472,7 @@ class CuratorVerdictAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("CuratorVerdict")
-        self._properties: typing.Set[str] = set([  "id",  "action",  "known_as",  ])
+        self._properties: typing.Set[str] = set([  "id",  "action",  "known_as",  "reason",  ])
         self._props = CuratorVerdictProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -511,6 +511,10 @@ class CuratorVerdictProperties:
     @property
     def known_as(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("known_as"))
+    
+    @property
+    def reason(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reason"))
     
     
 
@@ -974,7 +978,7 @@ class RecallVerdictAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("RecallVerdict")
-        self._properties: typing.Set[str] = set([  "id",  "keep",  ])
+        self._properties: typing.Set[str] = set([  "id",  "keep",  "reason",  ])
         self._props = RecallVerdictProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -1009,6 +1013,10 @@ class RecallVerdictProperties:
     @property
     def keep(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("keep"))
+    
+    @property
+    def reason(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reason"))
     
     
 
@@ -1056,7 +1064,7 @@ class ServedVerdictAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ServedVerdict")
-        self._properties: typing.Set[str] = set([  "id",  "outcome",  ])
+        self._properties: typing.Set[str] = set([  "id",  "outcome",  "reason",  ])
         self._props = ServedVerdictProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -1091,6 +1099,10 @@ class ServedVerdictProperties:
     @property
     def outcome(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("outcome"))
+    
+    @property
+    def reason(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reason"))
     
     
 

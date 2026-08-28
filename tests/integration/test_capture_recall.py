@@ -159,8 +159,8 @@ async def test_served_lessons_are_rated_and_counters_move(coding_tools, memory_c
     )
     assert recalled["memories"], recalled
 
-    async def all_helpful(lessons, transcript):
-        return [True] * len(lessons)
+    async def all_helpful(lessons, transcript, trace_meta=None):
+        return [(True, "acted on it")] * len(lessons)
 
     monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", all_helpful)
 
