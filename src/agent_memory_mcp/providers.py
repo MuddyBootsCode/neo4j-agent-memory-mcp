@@ -15,6 +15,14 @@ Environment:
                              to a local model and wins over the key-derived
                              Anthropic default.
     NAM_OLLAMA_MODEL         Local model tag (default qwen-judge).
+    NAM_OLLAMA_GATE_MODEL    Model tag for the recall gate only
+                             (ScreenRecalledMemories). Falls back to
+                             NAM_OLLAMA_MODEL when unset. Set it to a small
+                             always-resident model so the gate can meet its
+                             NAM_RECALL_GATE_TIMEOUT deadline (MUD-407: the
+                             36B default unloads between uses and cold
+                             reload takes minutes, so the gate timed out on
+                             100% of live calls).
     NAM_OLLAMA_REASONING     reasoning_effort for the local model (default
                              "none" — see ollama_client_options).
     NAM_OLLAMA_URL           OpenAI-compatible base URL.
@@ -106,7 +114,7 @@ def ollama_client_options() -> dict[str, Any]:
     """
     return {
         "base_url": os.environ.get("NAM_OLLAMA_URL", DEFAULT_OLLAMA_URL),
-        "model": os.environ.get("NAM_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+        "model": ollama_main_model(),
         "api_key": "ollama",  # ignored by Ollama; openai-generic requires one
         "temperature": 0,
         "max_tokens": OLLAMA_MAX_TOKENS,
@@ -129,6 +137,68 @@ def ollama_registry() -> Any | None:
     )
     registry.set_primary(OLLAMA_CLIENT_NAME)
     return registry
+
+
+def ollama_main_model() -> str:
+    """The model extraction/curation/rating run on."""
+    return os.environ.get("NAM_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+
+
+def ollama_gate_model() -> str:
+    """The model the recall gate runs on: NAM_OLLAMA_GATE_MODEL, falling
+    back to the main model when unset or blank (fail-safe: nothing changes
+    for users who don't set it)."""
+    gate = os.environ.get("NAM_OLLAMA_GATE_MODEL", "").strip()
+    return gate or ollama_main_model()
+
+
+def ollama_gate_client_options() -> dict[str, Any]:
+    """BAML client options for the recall gate's Ollama client.
+
+    Identical to ``ollama_client_options`` when no dedicated gate model is
+    configured (exact fallback). With a dedicated gate model, the model is
+    swapped and ``response_format: json_object`` is added — unknown options
+    pass through to the request body, and Ollama's /v1 honours it as
+    constrained JSON decoding. Measured on qwen3:4b with a 10-candidate
+    screen: without it the model free-writes ~1300 tokens of reasoning
+    (26-69s); with it, 182 tokens of verdict JSON in ~3.2s warm — the only
+    way a small gate model meets the NAM_RECALL_GATE_TIMEOUT deadline.
+    """
+    options = ollama_client_options()
+    gate_model = ollama_gate_model()
+    if gate_model != options["model"]:
+        options["model"] = gate_model
+        options["response_format"] = {"type": "json_object"}
+    return options
+
+
+def ollama_gate_registry() -> Any | None:
+    """ClientRegistry routing to the gate model, or None when not opted in."""
+    if not ollama_enabled():
+        return None
+    from baml_py import ClientRegistry
+
+    registry = ClientRegistry()
+    registry.add_llm_client(
+        name=OLLAMA_CLIENT_NAME,
+        provider="openai-generic",
+        options=ollama_gate_client_options(),
+        retry_policy="StandardRetry",
+    )
+    registry.set_primary(OLLAMA_CLIENT_NAME)
+    return registry
+
+
+def gate_baml_options() -> dict[str, Any]:
+    """baml_options for the recall gate (ScreenRecalledMemories) ONLY.
+
+    Same provider selection as ``default_baml_options``, but under
+    NAM_LLM_PROVIDER=ollama the gate routes to NAM_OLLAMA_GATE_MODEL
+    (default: NAM_OLLAMA_MODEL, i.e. identical behaviour). Extraction,
+    curation, and RateServedLessons stay on the main model.
+    """
+    registry = ollama_gate_registry() or anthropic_registry()
+    return {"client_registry": registry} if registry else {}
 
 
 def default_baml_options() -> dict[str, Any]:
