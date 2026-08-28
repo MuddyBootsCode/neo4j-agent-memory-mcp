@@ -54,6 +54,9 @@ services:
       NAM_LLM_PROVIDER: ${NAM_LLM_PROVIDER:-}
       NAM_OLLAMA_URL: ${NAM_OLLAMA_URL:-http://host.docker.internal:11434/v1}
       NAM_OLLAMA_MODEL: ${NAM_OLLAMA_MODEL:-qwen-judge}
+      # Small always-resident model for the recall gate only; empty default
+      # falls back to NAM_OLLAMA_MODEL (MUD-407).
+      NAM_OLLAMA_GATE_MODEL: ${NAM_OLLAMA_GATE_MODEL:-}
       NAM_OLLAMA_REASONING: ${NAM_OLLAMA_REASONING:-none}
       NAM_EMBEDDING_PROVIDER: ${NAM_EMBEDDING_PROVIDER:-}
       NEO4J_URI: bolt://neo4j:7687
