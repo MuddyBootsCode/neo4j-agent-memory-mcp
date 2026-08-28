@@ -454,6 +454,42 @@ def rrf_fuse(legs: list[list[dict[str, Any]]], k: int = RRF_K) -> list[dict[str,
     return sorted(fused.values(), key=lambda r: r["score"], reverse=True)
 
 
+def _lesson_dedup_key(row: dict[str, Any]) -> str:
+    """Normalized lesson text for duplicate detection: the same string the
+    lesson embeds (``memory_embedding_text``), casefolded with whitespace
+    collapsed. Empty when the row has no text at all."""
+    labels = row.get("labels") or []
+    kind = next((label for label in labels if label in _RECALL_KINDS), None)
+    text = memory_embedding_text(kind or "", row.get("props") or {})
+    return " ".join(text.casefold().split())
+
+
+def dedupe_fused(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop fused rows whose normalized lesson text duplicates a
+    higher-ranked row (MUD-407).
+
+    The same lesson captured in several sessions is several :CodingMemory
+    nodes with distinct elementIds, so RRF's per-eid keying serves the
+    identical text repeatedly. Keyed on the normalized embedding text, first
+    occurrence wins — ``rows`` arrives sorted by fused score, so that is the
+    highest-ranked instance. Rows with no text are kept as-is rather than
+    collapsed with each other. Pure list filter; empty and single-item
+    inputs pass through unchanged.
+    """
+    if len(rows) < 2:
+        return rows
+    seen: set[str] = set()
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        key = _lesson_dedup_key(row)
+        if key:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(row)
+    return kept
+
+
 async def retrieve_candidates(
     client: Any, *, prompt: str, repo: str, files: list[str],
     task_key: str | None, limit: int, embedding: list[float] | None = None,
@@ -475,7 +511,9 @@ async def retrieve_candidates(
             names.append("fulltext")
     if not legs:
         return [], None
-    fused = rrf_fuse(legs)[:limit]
+    # Dedup before truncating so freed slots backfill with the next-ranked
+    # distinct lessons instead of shrinking the recall.
+    fused = dedupe_fused(rrf_fuse(legs))[:limit]
     return fused, ("fused" if len(names) == 2 else names[0])
 
 
