@@ -13,6 +13,7 @@ dependencies = [
     "baml-py>=0.70.0",
     "boto3>=1.42.88",
     "cachetools>=5.3.0",
+    "opik>=2.2.44",
 ]
 
 [project.scripts]

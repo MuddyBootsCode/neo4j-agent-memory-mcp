@@ -37,14 +37,17 @@ class TestBuilders:
         assert outcome_write([], "s", "t") is None
 
     def test_outcome_write_moves_counts_weight_and_marks_the_edge(self):
-        q, p = outcome_write([{"eid": "4:a:1", "helpful": True}], "s", "t")
+        rating = {"eid": "4:a:1", "helpful": True, "reason": "used the flag"}
+        q, p = outcome_write([rating], "s", "t")
         assert "coalesce(m.helpful, 0) + CASE WHEN rating.helpful THEN 1 ELSE 0 END" in q
         assert "coalesce(m.harmful, 0) + CASE WHEN rating.helpful THEN 0 ELSE 1 END" in q
         assert "m.outcome_weight" in q and "$alpha" in q
         # Idempotent per serving: a re-run finds the edge rated and skips it.
         assert "sv.rated_at = datetime($ts)" in q
+        # MUD-427: the judge's reason lands on the rated edge.
+        assert "sv.reason = rating.reason" in q
         assert p["alpha"] == OUTCOME_ALPHA and p["seed"] == OUTCOME_SEED
-        assert p["ratings"] == [{"eid": "4:a:1", "helpful": True}]
+        assert p["ratings"] == [rating]
 
     @pytest.mark.parametrize("builder", [served_lessons_read, outcome_write])
     def test_no_argument_interpolation(self, builder):
@@ -74,26 +77,39 @@ class TestRater:
         import agent_memory_mcp.baml_client.async_client as ac
 
         class FakeVerdict:
-            def __init__(self, id, outcome):
-                self.id, self.outcome = id, outcome
+            def __init__(self, id, outcome, reason=None):
+                self.id, self.outcome, self.reason = id, outcome, reason
 
         class FakeRatings:
             def __init__(self, verdicts):
                 self.verdicts = verdicts
 
         async def fake_rate(lessons, transcript, baml_options=None):
-            return FakeRatings([FakeVerdict(i, o) for i, o in verdicts])
+            return FakeRatings([FakeVerdict(*v) for v in verdicts])
 
         monkeypatch.setattr(ac.b, "RateServedLessons", fake_rate, raising=False)
         return await rate_served_lessons(list(lessons), "transcript text")
 
     async def test_maps_outcomes_to_helpful_harmful_and_unused(self, monkeypatch):
         out = await self._rate(monkeypatch, [(0, "HELPFUL"), (1, "HARMFUL"), (2, "UNUSED")])
-        assert out == [True, False, None]
+        assert out == [(True, None), (False, None), (None, None)]
+
+    async def test_reasons_ride_along_with_the_verdicts(self, monkeypatch):
+        """MUD-427: the judge's citation comes back with each rating."""
+        out = await self._rate(monkeypatch, [
+            (0, "HELPFUL", "used the flag"),
+            (1, "HARMFUL", "sent the session down the asyncpg path"),
+            (2, "UNUSED", "transcript is about the deploy"),
+        ])
+        assert out == [
+            (True, "used the flag"),
+            (False, "sent the session down the asyncpg path"),
+            (None, None),  # unused stays unrated; its reason moves nothing
+        ]
 
     async def test_out_of_range_and_missing_ids_stay_unrated(self, monkeypatch):
         out = await self._rate(monkeypatch, [(0, "HELPFUL"), (7, "HARMFUL")])
-        assert out == [True, None, None]
+        assert out == [(True, None), (None, None), (None, None)]
 
     async def test_rater_failure_leaves_every_lesson_unrated(self, monkeypatch):
         import agent_memory_mcp.baml_client.async_client as ac
@@ -102,19 +118,19 @@ class TestRater:
             raise RuntimeError("model down")
 
         monkeypatch.setattr(ac.b, "RateServedLessons", boom, raising=False)
-        assert await rate_served_lessons(["a", "b"], "t") == [None, None]
+        assert await rate_served_lessons(["a", "b"], "t") == [(None, None), (None, None)]
 
     async def test_kill_switch_and_empty_input_skip_the_call(self, monkeypatch):
         monkeypatch.setenv("NAM_OUTCOME_RATER", "off")
-        assert await rate_served_lessons(["a"], "t") == [None]
+        assert await rate_served_lessons(["a"], "t") == [(None, None)]
         monkeypatch.delenv("NAM_OUTCOME_RATER")
         assert await rate_served_lessons([], "t") == []
-        assert await rate_served_lessons(["a"], "   ") == [None]
+        assert await rate_served_lessons(["a"], "   ") == [(None, None)]
 
 
 def _stub_rater(monkeypatch, verdicts):
-    async def fake_rate(lessons, transcript):
-        return list(verdicts)
+    async def fake_rate(lessons, transcript, trace_meta=None):
+        return [(v, None) if not isinstance(v, tuple) else v for v in verdicts]
 
     monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", fake_rate)
 
@@ -132,7 +148,7 @@ class TestSessionEndPass:
         graph = FakeGraph(read_results=[_served_rows()])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
         _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
-        _stub_rater(monkeypatch, [True, False])
+        _stub_rater(monkeypatch, [(True, "pinned it"), (False, "reverted the choice")])
 
         result = json.loads(await tools["capture_session_memory"](
             mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
@@ -143,8 +159,8 @@ class TestSessionEndPass:
         writes = [(q, p) for q, p in graph.writes if "outcome_weight" in q]
         assert len(writes) == 1
         assert writes[0][1]["ratings"] == [
-            {"eid": "4:l:1", "helpful": True},
-            {"eid": "4:l:2", "helpful": False},
+            {"eid": "4:l:1", "helpful": True, "reason": "pinned it"},
+            {"eid": "4:l:2", "helpful": False, "reason": "reverted the choice"},
         ]
 
     async def test_unused_lessons_are_not_written_as_harmful(self, monkeypatch, mock_ctx):
@@ -164,9 +180,9 @@ class TestSessionEndPass:
     async def test_nothing_served_costs_no_model_call(self, monkeypatch, mock_ctx):
         called = []
 
-        async def fake_rate(lessons, transcript):
+        async def fake_rate(lessons, transcript, trace_meta=None):
             called.append(lessons)
-            return [None] * len(lessons)
+            return [(None, None)] * len(lessons)
 
         monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", fake_rate)
         graph = FakeGraph(read_results=[[]])
@@ -188,7 +204,7 @@ class TestSessionEndPass:
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
         _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
 
-        async def boom(lessons, transcript):
+        async def boom(lessons, transcript, trace_meta=None):
             raise RuntimeError("rater down")
 
         monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", boom)

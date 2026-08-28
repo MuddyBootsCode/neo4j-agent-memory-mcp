@@ -29,7 +29,10 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import time
 from typing import Any
+
+from agent_memory_mcp import tracing
 
 from .unified import _clamp
 
@@ -95,6 +98,7 @@ async def extract_coding_memory(
     branch: str,
     task: str | None,
     files: list[str],
+    trace_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the coding-memory BAML extraction over a session transcript.
 
@@ -120,11 +124,13 @@ async def extract_coding_memory(
     from agent_memory_mcp.providers import default_baml_options
 
     context = CodingSessionContext(branch=branch, task=task, files=files)
+    started = time.perf_counter()
     result = await _async_client.b.ExtractCodingMemory(
         transcript=transcript,
         context=context,
         baml_options=default_baml_options(),
     )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
 
     # Normalised form -> the caller's spelling, so stored anchors match the
     # CodeFile nodes the deterministic plane already wrote.
@@ -219,7 +225,7 @@ async def extract_coding_memory(
         len(decisions), len(gotchas), len(dead_ends),
         len(preferences), anchor_rate, dropped_unanchored,
     )
-    return {
+    out = {
         "decisions": decisions,
         "gotchas": gotchas,
         "dead_ends": dead_ends,
@@ -227,6 +233,24 @@ async def extract_coding_memory(
         "anchor_rate": anchor_rate,
         "dropped_unanchored": dropped_unanchored,
     }
+    tracing.emit_trace(
+        "extraction",
+        input={
+            "transcript": tracing.truncate_transcript(transcript),
+            "branch": branch,
+            "task": task,
+            "files": list(files),
+        },
+        output=out,
+        metadata={
+            "model": tracing.model_tag(),
+            "elapsed_ms": elapsed_ms,
+            "extracted": len(decisions) + len(gotchas) + len(dead_ends) + len(preferences),
+            "dropped_unanchored": dropped_unanchored,
+            **(trace_meta or {}),
+        },
+    )
+    return out
 
 
 def _verdict_counts() -> dict[str, int]:
@@ -237,6 +261,7 @@ async def curate_coding_memory(
     candidates: list[dict[str, Any]],
     transcript: str,
     existing: list[str],
+    trace_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Screen candidates in one batched call; return what to write.
 
@@ -269,6 +294,7 @@ async def curate_coding_memory(
 
     block = "\n".join(f"{i}. {candidate_line(c)}" for i, c in enumerate(candidates))
     existing_block = "\n".join(f"{i}. {line}" for i, line in enumerate(existing)) or "(none)"
+    started = time.perf_counter()
     try:
         curated = await _async_client.b.CurateCodingMemory(
             candidates=block,
@@ -277,6 +303,7 @@ async def curate_coding_memory(
             baml_options=default_baml_options(),
         )
         verdicts: dict[int, tuple[str, int | None]] = {}
+        verdict_log: list[dict[str, Any]] = []
         for v in curated.verdicts:
             if not (isinstance(v.id, int) and 0 <= v.id < len(candidates)):
                 continue
@@ -291,10 +318,31 @@ async def curate_coding_memory(
             if action == "supersedes" and known is None:
                 action = "write"
             verdicts[v.id] = (action, known)
+            verdict_log.append({
+                "id": v.id, "action": action, "known_as": known,
+                "reason": getattr(v, "reason", None),
+            })
     except Exception:
         logger.warning("CurateCodingMemory failed; keeping all candidates", exc_info=True)
         counts["write"] = len(candidates)
         return {"kept": list(candidates), "counts": counts, "known": []}
+
+    tracing.emit_trace(
+        "curator",
+        input={
+            "candidates": block,
+            "existing": existing_block,
+            "transcript": tracing.truncate_transcript(transcript),
+        },
+        output={"verdicts": verdict_log},
+        metadata={
+            "model": tracing.model_tag(),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            "kept": sum(1 for a, _ in verdicts.values() if a in ("write", "supersedes")),
+            "of": len(candidates),
+            **(trace_meta or {}),
+        },
+    )
 
     coverage = len(verdicts) / len(candidates)
     if coverage < MIN_VERDICT_COVERAGE:
@@ -348,19 +396,22 @@ def _rater_enabled() -> bool:
 async def rate_served_lessons(
     lessons: list[str],
     transcript: str,
-) -> list[bool | None]:
+    trace_meta: dict[str, Any] | None = None,
+) -> list[tuple[bool | None, str | None]]:
     """Rate lessons recall served to a finished session, one per input line.
 
     ``lessons`` are rendered lesson lines shown to the model numbered by
-    list position. Returns a list the same length: True for helpful, False
-    for harmful, None for unused or unrated.
+    list position. Returns a list the same length of ``(verdict, reason)``
+    pairs: True for helpful, False for harmful, None for unused or unrated
+    (MUD-427: the reason is the judge's one-sentence citation, None when
+    the model gave none or the lesson went unrated).
 
     Fail-open: the rater disabled, raising, or returning nothing leaves
     every lesson unrated. An unrated lesson keeps the neutral weight it
     already has, so a broken rater degrades to "no outcome signal", never
     to a store full of lessons marked harmful.
     """
-    unrated: list[bool | None] = [None] * len(lessons)
+    unrated: list[tuple[bool | None, str | None]] = [(None, None)] * len(lessons)
     if not lessons or not transcript.strip() or not _rater_enabled():
         return unrated
 
@@ -368,6 +419,7 @@ async def rate_served_lessons(
     from agent_memory_mcp.providers import default_baml_options
 
     block = "\n".join(f"{i}. {line}" for i, line in enumerate(lessons))
+    started = time.perf_counter()
     try:
         rated = await _async_client.b.RateServedLessons(
             lessons=block,
@@ -380,16 +432,34 @@ async def rate_served_lessons(
 
     out = list(unrated)
     counts = {"helpful": 0, "harmful": 0, "unused": 0}
+    verdict_log: list[dict[str, Any]] = []
     for v in getattr(rated, "verdicts", []) or []:
         if not (isinstance(v.id, int) and 0 <= v.id < len(lessons)):
             continue
         outcome = str(getattr(v.outcome, "value", v.outcome)).lower()
+        reason = getattr(v, "reason", None)
         if outcome == "helpful":
-            out[v.id] = True
+            out[v.id] = (True, reason)
         elif outcome == "harmful":
-            out[v.id] = False
+            out[v.id] = (False, reason)
         else:
             outcome = "unused"
         counts[outcome] = counts.get(outcome, 0) + 1
+        verdict_log.append({"id": v.id, "outcome": outcome, "reason": reason})
     logger.info("RateServedLessons: %s", counts)
+    tracing.emit_trace(
+        "served-rater",
+        input={
+            "lessons": block,
+            "transcript": tracing.truncate_transcript(transcript),
+        },
+        output={"verdicts": verdict_log},
+        metadata={
+            "model": tracing.model_tag(),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            "of": len(lessons),
+            **counts,
+            **(trace_meta or {}),
+        },
+    )
     return out

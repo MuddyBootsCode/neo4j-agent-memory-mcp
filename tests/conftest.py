@@ -30,6 +30,18 @@ def _no_ambient_anthropic_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_opik_key(monkeypatch):
+    """Keep a developer's exported OPIK_API_KEY out of the test run.
+
+    With the key set, judge-call tracing (MUD-427) would construct a real
+    Opik client and batch traces to Comet from unit tests. Without it every
+    tracing call is a no-op; test_tracing.py covers the keyed path with a
+    fake SDK.
+    """
+    monkeypatch.delenv("OPIK_API_KEY", raising=False)
+
+
 # ── BAML Mocking ─────────────────────────────────────────────────────
 
 
