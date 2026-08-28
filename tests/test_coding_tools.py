@@ -857,6 +857,107 @@ class TestHybridRecall:
         assert result["strategy"] == "anchor"
 
 
+def _fused_row(text, eid, kind="Gotcha", **props):
+    return {
+        "labels": [kind, "CodingMemory"],
+        "props": {"text": text, **props},
+        "eid": eid,
+        "files": [],
+        "task": None,
+        "at": "2026-08-21T00:00:00Z",
+    }
+
+
+class TestRecallDedup:
+    """MUD-407: the same lesson captured in several sessions is several
+    nodes; recall must not spend slots serving the identical text twice."""
+
+    def test_duplicates_collapse_to_highest_ranked_instance(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        rows = [
+            _fused_row("run npx vitest run", "eid-1"),
+            _fused_row("check the lockfile", "eid-2"),
+            _fused_row("run npx vitest run", "eid-3"),
+            _fused_row("run npx vitest run", "eid-4"),
+        ]
+        kept = dedupe_fused(rows)
+        assert [r["eid"] for r in kept] == ["eid-1", "eid-2"]
+
+    def test_distinct_texts_survive(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        rows = [
+            _fused_row("pin the version", "eid-1"),
+            _fused_row("unpin the version", "eid-2"),
+            _fused_row("delete the lockfile", "eid-3"),
+        ]
+        assert dedupe_fused(rows) == rows
+
+    def test_whitespace_and_case_variants_collapse(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        rows = [
+            _fused_row("Run  the full\tsuite", "eid-1"),
+            _fused_row("run the full suite ", "eid-2"),
+        ]
+        kept = dedupe_fused(rows)
+        assert [r["eid"] for r in kept] == ["eid-1"]
+
+    def test_dead_end_duplicates_compare_on_joined_fields(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        dead_end = {
+            "labels": ["DeadEnd", "CodingMemory"],
+            "props": {"attempt": "used a stash", "why_failed": "no-op"},
+            "eid": "eid-1",
+        }
+        twin = dict(dead_end, eid="eid-2")
+        kept = dedupe_fused([dead_end, twin])
+        assert [r["eid"] for r in kept] == ["eid-1"]
+
+    def test_rows_without_text_are_not_collapsed_together(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        rows = [_fused_row("", "eid-1"), _fused_row("", "eid-2")]
+        assert dedupe_fused(rows) == rows
+
+    def test_empty_and_single_item_pass_through(self):
+        from agent_memory_mcp.mcp._coding_tools import dedupe_fused
+
+        assert dedupe_fused([]) == []
+        single = [_fused_row("pin it", "eid-1")]
+        assert dedupe_fused(single) == single
+
+    async def test_backfill_keeps_limit_distinct_results(self, monkeypatch):
+        """Dedup runs before the top-k cut, so freed slots backfill with the
+        next-ranked distinct lessons instead of shrinking the recall."""
+        from unittest.mock import MagicMock
+
+        from agent_memory_mcp.mcp._coding_tools import retrieve_candidates
+
+        vector_rows = [
+            dict(_fused_row("run npx vitest run", f"eid-{i}"), score=0.9 - i / 100)
+            for i in range(3)
+        ] + [
+            dict(_fused_row("check the lockfile", "eid-10"), score=0.5),
+            dict(_fused_row("pin the version", "eid-11"), score=0.4),
+            dict(_fused_row("delete node_modules", "eid-12"), score=0.3),
+        ]
+        graph = FakeGraph(read_results=[vector_rows, []])
+        client = MagicMock()
+        client.graph = graph
+        client.long_term._embedder = FakeEmbedder()
+
+        fused, strategy = await retrieve_candidates(
+            client, prompt="why does the test suite fail?", repo="my-repo",
+            files=[], task_key=None, limit=3,
+        )
+
+        assert strategy == "vector"
+        assert [r["eid"] for r in fused] == ["eid-0", "eid-10", "eid-11"]
+
+
 class TestCaptureEmbeds:
     async def test_lessons_are_embedded_preferences_are_not(
         self, monkeypatch, mock_ctx
