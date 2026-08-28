@@ -543,14 +543,14 @@ async def screen_memories(
         return memories
 
     from agent_memory_mcp.baml_client.async_client import b
-    from agent_memory_mcp.providers import default_baml_options
+    from agent_memory_mcp.providers import gate_baml_options
 
     try:
         screen = await asyncio.wait_for(
             b.ScreenRecalledMemories(
                 query=prompt,
                 candidates=_candidate_block(memories),
-                baml_options=default_baml_options(),
+                baml_options=gate_baml_options(),
             ),
             timeout=GATE_TIMEOUT_S,
         )

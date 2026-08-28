@@ -285,52 +285,66 @@ try:
                     Neo4jDockerManager,
                     connect_with_retry,
                 )
+                from agent_memory_mcp.mcp._gate_warmup import (
+                    start_gate_warmup,
+                    stop_gate_warmup,
+                )
 
                 # Phase 0: Validate LLM provider credentials for the Resilient
                 # BAML fallback chain before doing anything else. Raises
                 # loudly if no provider in the chain is usable at all.
                 check_resilient_provider_credentials()
 
-                # Phase 1: Ensure Neo4j container is running
-                docker_cfg = getattr(settings, "_docker_config", {})
-                neo4j_cfg = settings.neo4j
-                docker_mgr = Neo4jDockerManager(
-                    uri=str(neo4j_cfg.uri),
-                    docker_auto=docker_cfg.get("docker_auto", True),
-                    startup_timeout=docker_cfg.get("startup_timeout", 60),
-                    compose_file=docker_cfg.get("compose_file"),
-                )
+                # Keep the recall-gate model resident in Ollama for the life
+                # of the server (MUD-407). No-op unless a dedicated gate
+                # model is configured; fail-open on any error.
+                warmup_task = start_gate_warmup()
 
-                async with docker_mgr:
-                    # Phase 2: Connect the MemoryClient with retries
-                    try:
-                        client, client_cm = await connect_with_retry(
-                            lambda: _MemoryClient(settings),
-                            max_attempts=5,
-                            delay=2.0,
+                try:
+                    # Phase 1: Ensure Neo4j container is running
+                    docker_cfg = getattr(settings, "_docker_config", {})
+                    neo4j_cfg = settings.neo4j
+                    docker_mgr = Neo4jDockerManager(
+                        uri=str(neo4j_cfg.uri),
+                        docker_auto=docker_cfg.get("docker_auto", True),
+                        startup_timeout=docker_cfg.get("startup_timeout", 60),
+                        compose_file=docker_cfg.get("compose_file"),
+                    )
+
+                    async with docker_mgr:
+                        # Phase 2: Connect the MemoryClient with retries
+                        try:
+                            client, client_cm = await connect_with_retry(
+                                lambda: _MemoryClient(settings),
+                                max_attempts=5,
+                                delay=2.0,
+                            )
+                        except RuntimeError as exc:
+                            logger.error(
+                                "Neo4j unavailable — server will start but "
+                                "tools will return errors until Neo4j is "
+                                "reachable: %s",
+                                exc,
+                            )
+                            yield {"client": None}
+                            return
+
+                        # Phase 3: Ensure temporal/graph indexes exist
+                        try:
+                            await ensure_indexes(client.graph)
+                        except Exception as e:
+                            logger.warning("Could not create indexes: %s", e)
+
+                        logger.info(
+                            "MemoryClient ready (database=%s)", neo4j_cfg.database
                         )
-                    except RuntimeError as exc:
-                        logger.error(
-                            "Neo4j unavailable — server will start but "
-                            "tools will return errors until Neo4j is "
-                            "reachable: %s",
-                            exc,
-                        )
-                        yield {"client": None}
-                        return
 
-                    # Phase 3: Ensure temporal/graph indexes exist
-                    try:
-                        await ensure_indexes(client.graph)
-                    except Exception as e:
-                        logger.warning("Could not create indexes: %s", e)
-
-                    logger.info("MemoryClient ready (database=%s)", neo4j_cfg.database)
-
-                    try:
-                        yield {"client": client}
-                    finally:
-                        await client_cm.__aexit__(None, None, None)
+                        try:
+                            yield {"client": client}
+                        finally:
+                            await client_cm.__aexit__(None, None, None)
+                finally:
+                    stop_gate_warmup(warmup_task)
 
         mcp = FastMCP(
             server_name,
@@ -394,7 +408,16 @@ try:
 
             @asynccontextmanager
             async def _preconnected_lifespan(server: FastMCP):
-                yield {"client": memory_client}
+                from agent_memory_mcp.mcp._gate_warmup import (
+                    start_gate_warmup,
+                    stop_gate_warmup,
+                )
+
+                warmup_task = start_gate_warmup()
+                try:
+                    yield {"client": memory_client}
+                finally:
+                    stop_gate_warmup(warmup_task)
 
             self._mcp = FastMCP(
                 server_name,
