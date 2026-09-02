@@ -81,6 +81,15 @@ _ERROR_RE = re.compile(
 )
 MAX_ERROR_RESULT_CHARS = 2_000
 MAX_OK_RESULT_CHARS = 200
+
+# A blocked or rejected action is not an attempt that failed: nothing ran,
+# so there is no dead end to learn from. These never become candidates.
+_NOT_AN_ATTEMPT_RE = re.compile(
+    r"(?i)(denied by the Claude Code auto mode classifier|"
+    r"Permission for this action was denied|"
+    r"<tool_use_error>Blocked|"
+    r"The user doesn't want to proceed|tool use was rejected)"
+)
 MAX_TOOL_INPUT_CHARS = 200
 # Tools whose call is worth a line in the rendering. Read/Grep/Glob are
 # navigation, not evidence.
@@ -307,7 +316,15 @@ def transcript_touched_files(path: str, repo_dir: str, cap: int = MAX_FILES_SENT
 def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[dict]:
     """Tool calls whose result was an error: ``{"tool", "input", "error",
     "file"}`` in transcript order, newest last. Zero-LLM DeadEnd candidates
-    (MUD-404); the curator decides whether each is worth keeping."""
+    (MUD-404); the curator decides whether each is worth keeping.
+
+    Only results the client flagged ``is_error`` qualify. The keyword regex
+    that decides rendering is not used here: a successful ``cat`` of a file
+    that mentions "Traceback" matched it, and those became most of the
+    store's DeadEnds (MUD-407 A1). Claude Code sets the flag on every failed
+    tool call, so nothing real is lost. Blocked and rejected actions are
+    flagged too but nothing ran, so they are skipped.
+    """
     calls: dict[str, dict] = {}
     steps: list[dict] = []
     try:
@@ -328,7 +345,9 @@ def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[di
                     }
                 elif block.get("type") == "tool_result":
                     text = " ".join(_block_text(block.get("content")).split())
-                    if not text or not (block.get("is_error") or _ERROR_RE.search(text)):
+                    if not text or not block.get("is_error"):
+                        continue
+                    if _NOT_AN_ATTEMPT_RE.search(text):
                         continue
                     call = calls.get(block.get("tool_use_id"), {"tool": "tool", "input": "", "file": None})
                     steps.append({**call, "error": _truncate_middle(text, 600)})
