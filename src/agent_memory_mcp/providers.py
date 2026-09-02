@@ -23,6 +23,9 @@ Environment:
                              36B default unloads between uses and cold
                              reload takes minutes, so the gate timed out on
                              100% of live calls).
+    NAM_OLLAMA_PIN_MAIN_MODEL Keep NAM_OLLAMA_MODEL resident too (1/true);
+                             opt-in, holds the model's memory for the
+                             server's life (MUD-407 A3).
     NAM_OLLAMA_REASONING     reasoning_effort for the local model (default
                              "none" — see ollama_client_options).
     NAM_OLLAMA_URL           OpenAI-compatible base URL.
