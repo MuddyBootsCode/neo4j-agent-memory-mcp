@@ -416,6 +416,25 @@ def session_files(cwd: str, transcript_path: Any) -> list[str]:
     return list(seen)[:MAX_FILES_SENT]
 
 
+def capture_call_args(transcript: str, ctx: dict) -> dict:
+    """Arguments for capture_session_memory. ``background`` (default on,
+    NAM_CAPTURE_BACKGROUND=0 to wait) asks the server to queue the capture
+    and answer at once: a capture takes minutes against a local model and
+    this hook has a 60 s budget, so waiting only meant every response was
+    a closed-connection error in the server log (MUD-407 A3)."""
+    return {
+        "agent_id": ctx["agent_id"],
+        "session_id": ctx["session_id"],
+        "repo": ctx["repo"],
+        "branch": ctx["branch"],
+        "transcript": transcript,
+        "task_key": ctx["task_key"],
+        "files": ctx["files"],
+        "error_steps": ctx.get("error_steps") or [],
+        "background": os.environ.get("NAM_CAPTURE_BACKGROUND", "1") != "0",
+    }
+
+
 def capture_via_mcp(transcript: str, ctx: dict) -> None:
     """Call capture_session_memory on the running server.
 
@@ -436,19 +455,7 @@ def capture_via_mcp(transcript: str, ctx: dict) -> None:
 
     async def _call() -> None:
         async with Client(transport, timeout=timeout) as client:
-            await client.call_tool(
-                "capture_session_memory",
-                {
-                    "agent_id": ctx["agent_id"],
-                    "session_id": ctx["session_id"],
-                    "repo": ctx["repo"],
-                    "branch": ctx["branch"],
-                    "transcript": transcript,
-                    "task_key": ctx["task_key"],
-                    "files": ctx["files"],
-                    "error_steps": ctx.get("error_steps") or [],
-                },
-            )
+            await client.call_tool("capture_session_memory", capture_call_args(transcript, ctx))
 
     asyncio.run(asyncio.wait_for(_call(), timeout=timeout))
 

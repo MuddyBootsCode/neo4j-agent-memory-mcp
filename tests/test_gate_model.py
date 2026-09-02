@@ -114,6 +114,28 @@ class TestWarmupEnabled:
         monkeypatch.setenv("NAM_OLLAMA_MODEL", "qwen-judge")
         monkeypatch.setenv("NAM_OLLAMA_GATE_MODEL", "qwen3:4b")
         assert _gate_warmup.warmup_enabled() is True
+        assert _gate_warmup.warmup_models() == ["qwen3:4b"]
+
+    def test_pinning_the_main_model_enables_warmup_on_its_own(self, monkeypatch):
+        """MUD-407 A3: the 36B judge unloads between captures and reloads
+        for minutes under contention, which is the multi-minute tail on
+        every capture. Opt-in because it holds 23 GB for the server's life."""
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("NAM_OLLAMA_MODEL", "qwen-judge")
+        monkeypatch.setenv("NAM_OLLAMA_PIN_MAIN_MODEL", "1")
+        assert _gate_warmup.warmup_enabled() is True
+        assert _gate_warmup.warmup_models() == ["qwen-judge"]
+
+    def test_pin_main_and_gate_lists_both_once(self, monkeypatch):
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("NAM_OLLAMA_MODEL", "qwen-judge")
+        monkeypatch.setenv("NAM_OLLAMA_GATE_MODEL", "qwen3:4b")
+        monkeypatch.setenv("NAM_OLLAMA_PIN_MAIN_MODEL", "1")
+        assert _gate_warmup.warmup_models() == ["qwen3:4b", "qwen-judge"]
+
+    def test_pin_main_not_under_ollama_is_nothing(self, monkeypatch):
+        monkeypatch.setenv("NAM_OLLAMA_PIN_MAIN_MODEL", "1")
+        assert _gate_warmup.warmup_models() == []
 
 
 class TestNativeBaseUrl:
@@ -154,6 +176,19 @@ class TestWarmupFailOpen:
         )
         assert await _gate_warmup.warm_gate_model_once() is True
         assert calls == [("http://localhost:11434", "qwen3:4b")]
+
+    async def test_warm_once_pins_every_configured_model(self, monkeypatch):
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("NAM_OLLAMA_MODEL", "qwen-judge")
+        monkeypatch.setenv("NAM_OLLAMA_GATE_MODEL", "qwen3:4b")
+        monkeypatch.setenv("NAM_OLLAMA_PIN_MAIN_MODEL", "1")
+        monkeypatch.setenv("NAM_OLLAMA_URL", "http://localhost:11434/v1")
+        calls = []
+        monkeypatch.setattr(
+            _gate_warmup, "_post_keep_alive", lambda url, model: calls.append((url, model))
+        )
+        assert await _gate_warmup.warm_gate_model_once() is True
+        assert calls == [("http://localhost:11434", "qwen3:4b"), ("http://localhost:11434", "qwen-judge")]
 
 
 class TestStartStop:
