@@ -77,7 +77,7 @@ def _stub_curator_with(monkeypatch, *, known=(), supersedes=None):
     """Curator: every candidate WRITE, except those named in ``known``
     (index -> existing index) which become ALREADY_KNOWN, and the candidate
     at ``supersedes[0]`` which SUPERSEDES existing ``supersedes[1]``."""
-    async def fake_curate(candidates, transcript, existing):
+    async def fake_curate(candidates, transcript, existing, trace_meta=None):
         kept, known_pairs = [], []
         for i, c in enumerate(candidates):
             if i in dict(known):
