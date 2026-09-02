@@ -93,12 +93,18 @@ class TestCurate:
         await curate_coding_memory(_cands()[:1], "t", [])
         assert mock.await_args.kwargs["existing"] == "(none)"
 
-    async def test_mostly_missing_verdicts_keep_everything(self, monkeypatch, caplog):
-        _stub(monkeypatch, _verdicts("UNSUPPORTED"))  # 1 verdict for 4 candidates: 25% coverage
-        out = await curate_coding_memory(_cands(), "t", [])
+    async def test_mostly_missing_verdicts_keep_extractor_candidates_only(self, monkeypatch, caplog):
+        """Fail-open keeps what the extractor asserted, never a raw error
+        step: with no verdict, raw tool output is not a lesson anyone asked
+        for (the A1 finding on MUD-407: 4,751 DeadEnds of `cat` output)."""
+        _stub(monkeypatch, _verdicts("UNSUPPORTED"))  # 1 verdict for 5 candidates: 20% coverage
+        cands = _cands() + [dict(_cands()[2], attempt="Bash: cat notes.md", source="error_step")]
+        out = await curate_coding_memory(cands, "t", [])
         assert len(out["kept"]) == 4
+        assert all(c.get("source") != "error_step" for c in out["kept"])
         assert out["counts"]["write"] == 4
-        assert "keeping all" in caplog.text
+        assert out["counts"]["dropped_error_steps"] == 1
+        assert "keeping extractor candidates" in caplog.text
 
     async def test_nearly_complete_verdicts_are_applied_and_uncovered_error_steps_dropped(self, monkeypatch):
         # 9 of 10 covered: the one the model skipped is kept if it came from
@@ -123,11 +129,15 @@ class TestCurate:
         # 3/4 = 75% < 80%: fail-open, keep all.
         assert len(out["kept"]) == 4
 
-    async def test_curator_failure_keeps_everything(self, monkeypatch, caplog):
+    async def test_curator_failure_keeps_extractor_candidates_and_drops_error_steps(self, monkeypatch, caplog):
         _stub(monkeypatch, side_effect=RuntimeError("ollama down"))
-        out = await curate_coding_memory(_cands(), "t", [])
+        cands = _cands() + [dict(_cands()[2], attempt="Bash: ggops --help", source="error_step")]
+        out = await curate_coding_memory(cands, "t", [])
         assert len(out["kept"]) == 4
-        assert "keeping all" in caplog.text
+        assert all(c.get("source") != "error_step" for c in out["kept"])
+        assert out["counts"]["write"] == 4
+        assert out["counts"]["dropped_error_steps"] == 1
+        assert "keeping extractor candidates" in caplog.text
 
     async def test_kill_switch_skips_the_call(self, monkeypatch):
         monkeypatch.setenv("NAM_CAPTURE_JUDGE", "off")
