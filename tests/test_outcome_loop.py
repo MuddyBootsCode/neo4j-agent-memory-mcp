@@ -16,7 +16,7 @@ from agent_memory_mcp.capture.cypher import (
     outcome_write,
     served_lessons_read,
 )
-from agent_memory_mcp.extraction.coding import rate_served_lessons
+from agent_memory_mcp.extraction.coding import UNUSED, rate_served_lessons
 from test_coding_tools import FakeEmbedder, FakeGraph, _extraction, _register, _stub_extract
 
 
@@ -32,6 +32,31 @@ class TestBuilders:
         q, p = served_lessons_read("sess")
         assert "SERVED_TO" in q and "sv.rated_at IS NULL" in q
         assert p == {"session_id": "sess", "limit": 40}
+
+    def test_served_read_is_newest_first_and_carries_the_prompt(self):
+        """The rater judges a serving against the transcript that followed
+        it. Oldest-first with a cap meant a long session's first 40 servings
+        were rated against its last window forever (MUD-407 A2)."""
+        q, _ = served_lessons_read("sess")
+        assert "ORDER BY sv.at DESC" in q
+        assert "sv.prompt AS prompt" in q and "sv.at AS at" in q
+
+    def test_served_write_stores_the_prompt_on_the_edge(self):
+        from agent_memory_mcp.capture.cypher import served_write
+
+        q, p = served_write(["4:a:1"], "s", "t", "repo", prompt="  why does   pytest hang? " + "x" * 400)
+        assert "r.prompt = $prompt" in q
+        assert p["prompt"].startswith("why does pytest hang? x")
+        assert len(p["prompt"]) == 300
+
+    def test_served_unused_write_stamps_the_edge_without_moving_counters(self):
+        from agent_memory_mcp.capture.cypher import served_unused_write
+
+        assert served_unused_write([], "s", "t") is None
+        q, p = served_unused_write(["4:a:1", "4:a:2"], "s", "t")
+        assert "sv.rated_at = datetime($ts)" in q and "sv.outcome = 'unused'" in q
+        assert "helpful" not in q and "outcome_weight" not in q
+        assert p == {"eids": ["4:a:1", "4:a:2"], "session_id": "s", "ts": "t"}
 
     def test_outcome_write_is_none_for_nothing_rated(self):
         assert outcome_write([], "s", "t") is None
@@ -92,7 +117,7 @@ class TestRater:
 
     async def test_maps_outcomes_to_helpful_harmful_and_unused(self, monkeypatch):
         out = await self._rate(monkeypatch, [(0, "HELPFUL"), (1, "HARMFUL"), (2, "UNUSED")])
-        assert out == [(True, None), (False, None), (None, None)]
+        assert out == [(True, None), (False, None), (UNUSED, None)]
 
     async def test_reasons_ride_along_with_the_verdicts(self, monkeypatch):
         """MUD-427: the judge's citation comes back with each rating."""
@@ -104,7 +129,7 @@ class TestRater:
         assert out == [
             (True, "used the flag"),
             (False, "sent the session down the asyncpg path"),
-            (None, None),  # unused stays unrated; its reason moves nothing
+            (UNUSED, "transcript is about the deploy"),  # judged, moves no counter
         ]
 
     async def test_out_of_range_and_missing_ids_stay_unrated(self, monkeypatch):
@@ -129,10 +154,17 @@ class TestRater:
 
 
 def _stub_rater(monkeypatch, verdicts):
+    """Stub the rater with one verdict list served to every call; returns
+    the list of (lessons, transcript) pairs it was called with."""
+    calls = []
+
     async def fake_rate(lessons, transcript, trace_meta=None):
-        return [(v, None) if not isinstance(v, tuple) else v for v in verdicts]
+        calls.append((list(lessons), transcript))
+        out = [(v, None) if not isinstance(v, tuple) else v for v in verdicts]
+        return out[: len(lessons)] + [(None, None)] * max(0, len(lessons) - len(out))
 
     monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.rate_served_lessons", fake_rate)
+    return calls
 
 
 def _served_rows():
@@ -163,7 +195,9 @@ class TestSessionEndPass:
             {"eid": "4:l:2", "helpful": False, "reason": "reverted the choice"},
         ]
 
-    async def test_unused_lessons_are_not_written_as_harmful(self, monkeypatch, mock_ctx):
+    async def test_unrated_lessons_are_written_nowhere(self, monkeypatch, mock_ctx):
+        """None from the rater is "no verdict", not UNUSED: nothing is
+        stamped, so the next capture reads the serving again."""
         graph = FakeGraph(read_results=[_served_rows()])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
         _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
@@ -174,8 +208,102 @@ class TestSessionEndPass:
             transcript="user: hi", files=["a.py"],
         ))
 
-        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 2}
-        assert not [q for q, _ in graph.writes if "outcome_weight" in q]
+        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 0}
+        assert not [q for q, _ in graph.writes if "outcome_weight" in q or "sv.outcome" in q]
+
+    async def test_unused_verdicts_stamp_the_edge_but_leave_the_counters(self, monkeypatch, mock_ctx):
+        """UNUSED is a judgment, not an absence of one: the serving is done
+        with, so a recapture must not re-read it. Nothing on the lesson moves."""
+        graph = FakeGraph(read_results=[_served_rows()])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+        _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
+        _stub_rater(monkeypatch, [(UNUSED, "about the deploy"), (True, "pinned it")])
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript="user: hi", files=["a.py"],
+        ))
+
+        assert result["rated"] == {"served": 2, "helpful": 1, "harmful": 0, "unused": 1}
+        stamps = [(q, p) for q, p in graph.writes if "sv.outcome = 'unused'" in q]
+        assert len(stamps) == 1 and stamps[0][1]["eids"] == ["4:l:1"]
+        weights = [(q, p) for q, p in graph.writes if "outcome_weight" in q]
+        assert len(weights) == 1 and [r["eid"] for r in weights[0][1]["ratings"]] == ["4:l:2"]
+
+    async def test_each_serving_is_rated_against_the_window_after_its_prompt(self, monkeypatch, mock_ctx):
+        """Two prompts, two servings each. The rater runs once per prompt,
+        newest first, on the transcript from that prompt onward, so a
+        lesson served at the start of a long session is judged on the work
+        it was served for and not on the shutdown chatter."""
+        rows = [
+            {"eid": "4:l:3", "labels": ["Gotcha"], "props": {"text": "late lesson"},
+             "at": "2026-09-02T10:00:00Z", "prompt": "now fix the flaky test"},
+            {"eid": "4:l:4", "labels": ["Decision"], "props": {"text": "late decision", "reason": "r"},
+             "at": "2026-09-02T10:00:00Z", "prompt": "now fix the flaky test"},
+            {"eid": "4:l:1", "labels": ["Gotcha"], "props": {"text": "early lesson"},
+             "at": "2026-09-02T09:00:00Z", "prompt": "why does   pytest hang?"},
+            {"eid": "4:l:2", "labels": ["DeadEnd"], "props": {"attempt": "a", "why_failed": "w"},
+             "at": "2026-09-02T09:00:00Z", "prompt": "why does   pytest hang?"},
+        ]
+        transcript = (
+            "user: why does pytest hang?\nassistant: the integration marker. EARLY-WORK\n"
+            "user: now fix the flaky test\nassistant: pinned the seed. LATE-WORK\n"
+            "user: ok shut it down\nassistant: done."
+        )
+        graph = FakeGraph(read_results=[rows])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+        _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
+        calls = _stub_rater(monkeypatch, [(True, "used"), (UNUSED, "no")])
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript=transcript, files=["a.py"],
+        ))
+
+        assert [len(lessons) for lessons, _ in calls] == [2, 2]
+        assert calls[0][1].startswith("user: now fix the flaky test") and "LATE-WORK" in calls[0][1]
+        assert calls[1][1].startswith("user: why does pytest hang?") and "EARLY-WORK" in calls[1][1]
+        assert result["rated"] == {"served": 4, "helpful": 2, "harmful": 0, "unused": 2}
+        assert result["rated_windows"] == 2
+
+    async def test_window_cap_leaves_older_servings_for_the_next_capture(self, monkeypatch, mock_ctx):
+        monkeypatch.setenv("NAM_OUTCOME_MAX_WINDOWS", "1")
+        rows = [
+            {"eid": "4:l:3", "labels": ["Gotcha"], "props": {"text": "late"},
+             "at": "2026-09-02T10:00:00Z", "prompt": "second prompt"},
+            {"eid": "4:l:1", "labels": ["Gotcha"], "props": {"text": "early"},
+             "at": "2026-09-02T09:00:00Z", "prompt": "first prompt"},
+        ]
+        graph = FakeGraph(read_results=[rows])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+        _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
+        calls = _stub_rater(monkeypatch, [(UNUSED, None)])
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript="user: first prompt\nassistant: a\nuser: second prompt\nassistant: b", files=["a.py"],
+        ))
+
+        assert len(calls) == 1 and calls[0][1].startswith("user: second prompt")
+        # The older serving is neither rated nor stamped: it waits.
+        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 1}
+        stamps = [p for q, p in graph.writes if "sv.outcome = 'unused'" in q]
+        assert stamps == [{"eids": ["4:l:3"], "session_id": "s", "ts": stamps[0]["ts"]}]
+
+    async def test_prompt_missing_from_the_transcript_falls_back_to_the_tail(self, monkeypatch, mock_ctx):
+        rows = [{"eid": "4:l:1", "labels": ["Gotcha"], "props": {"text": "x"},
+                 "at": "2026-09-02T09:00:00Z", "prompt": "a prompt from a resumed session"}]
+        graph = FakeGraph(read_results=[rows])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+        _stub_extract(monkeypatch, result=_extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[]))
+        calls = _stub_rater(monkeypatch, [(UNUSED, None)])
+
+        await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript="user: something else\nassistant: TAIL", files=["a.py"],
+        )
+
+        assert calls[0][1].endswith("TAIL")
 
     async def test_nothing_served_costs_no_model_call(self, monkeypatch, mock_ctx):
         called = []
@@ -215,7 +343,7 @@ class TestSessionEndPass:
         ))
 
         assert "error" not in result
-        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 2}
+        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 0}
         assert not [q for q, _ in graph.writes if "outcome_weight" in q]
 
     async def test_write_failure_leaves_the_counters_untouched(self, monkeypatch, mock_ctx):
@@ -230,7 +358,7 @@ class TestSessionEndPass:
         ))
 
         assert "error" not in result
-        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 2}
+        assert result["rated"] == {"served": 2, "helpful": 0, "harmful": 0, "unused": 0}
 
 
 class TestOutcomePrior:
