@@ -39,6 +39,7 @@ from agent_memory_mcp.capture.cypher import (
     reassert_write,
     resolve_write,
     served_lessons_read,
+    served_unused_write,
     served_write,
     RECALL_KINDS,
     SHARED_RECALL_LABEL,
@@ -48,6 +49,7 @@ from agent_memory_mcp.capture.cypher import (
     session_upsert,
 )
 from agent_memory_mcp.extraction.coding import (
+    UNUSED,
     candidate_line,
     curate_coding_memory,
     extract_coding_memory,
@@ -810,6 +812,7 @@ async def capture_transcript(
         "curated": {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0},
         "reasserted": 0, "superseded": 0, "preferences": 0,
         "rated": {"served": 0, "helpful": 0, "harmful": 0, "unused": 0},
+        "rated_windows": 0,
     })
     if not transcript or not transcript.strip():
         return result
@@ -913,13 +916,46 @@ async def capture_transcript(
 
     result["stored"] = sum(by_kind.values())
     result["anchor_rate"] = (sum(anchor_rates) / len(anchor_rates)) if anchor_rates else None
-    result["rated"] = await rate_session_outcomes(
+    rated = await rate_session_outcomes(
         client, session_id=session_id, transcript=transcript, ts=ts
     )
+    result["rated_windows"] = rated.pop("windows", 0)
+    result["rated"] = rated
     # Latency is free at session end; a bounded flush here means capture-side
     # traces survive even an unclean server shutdown. No-op without a key.
     tracing.flush()
     return result
+
+
+def window_after(transcript: str, prompt: str | None, size: int = WINDOW_CHARS) -> str:
+    """The transcript from ``prompt`` onward, ``size`` chars at most; the
+    tail when there is no prompt or it cannot be found (a serving from a
+    resumed session whose earlier turns are not in this transcript).
+
+    Whitespace is collapsed on both sides before matching because the
+    served prompt is stored collapsed and the rendered transcript joins
+    text blocks with single spaces. The last occurrence wins: a prompt
+    submitted twice is rated on its latest run, which is the one the edge
+    timestamp refers to."""
+    if not prompt:
+        return transcript[-size:]
+    needle = " ".join(prompt.split())[:60]
+    hay = " ".join(transcript.split())
+    idx = hay.rfind(needle) if needle else -1
+    if idx < 0:
+        return transcript[-size:]
+    # Include the "user: " prefix when the prompt starts a rendered line.
+    prefix = "user: "
+    if hay[max(0, idx - len(prefix)):idx] == prefix:
+        idx -= len(prefix)
+    return hay[idx:idx + size]
+
+
+def _max_outcome_windows() -> int:
+    try:
+        return max(1, int(os.environ.get("NAM_OUTCOME_MAX_WINDOWS", "3")))
+    except ValueError:
+        return 3
 
 
 async def rate_session_outcomes(
@@ -929,13 +965,21 @@ async def rate_session_outcomes(
     this session and move their counters.
 
     Runs whether or not the session produced new lessons — a session that
-    learned nothing can still have acted on what it was given. Rated against
-    the newest window only: the evidence that a lesson was used is where the
-    work happened, and this call is paid once per session, not per window.
+    learned nothing can still have acted on what it was given. Servings are
+    grouped by the prompt they were served for and each group is rated
+    against the transcript window that followed that prompt, newest group
+    first, at most ``NAM_OUTCOME_MAX_WINDOWS`` (default 3) rater calls per
+    capture. Groups past the cap stay unrated and are read again by the
+    next capture of this session. A serving whose prompt is not in the
+    transcript is rated against the tail.
 
-    Best-effort. Any failure returns zero counts and leaves the store
-    untouched; capture has already committed its writes by this point and
-    must not be undone by a rater problem.
+    UNUSED verdicts stamp the edge without touching the lesson: the
+    serving is judged and done with. Unrated servings (rater failed or
+    skipped the id) are left for the next capture.
+
+    Best-effort. Any failure returns the counts so far and leaves the store
+    otherwise untouched; capture has already committed its writes by this
+    point and must not be undone by a rater problem.
     """
     counts = {"served": 0, "helpful": 0, "harmful": 0, "unused": 0}
     try:
@@ -943,36 +987,45 @@ async def rate_session_outcomes(
     except Exception as e:
         logger.debug(f"served lookup skipped: {e}")
         return counts
-    served: list[tuple[str, str]] = []
+    # Rows arrive newest first; dict insertion order keeps the groups so.
+    groups: dict[str | None, list[tuple[str, str]]] = {}
     for row in rows or []:
         kind = next((label for label in (row.get("labels") or []) if label in _RECALL_KINDS), None)
         props = {k: v for k, v in (row.get("props") or {}).items() if k != "embedding"}
         if kind and row.get("eid"):
-            served.append((row["eid"], candidate_line({"kind": kind, **props})))
-    if not served:
+            prompt = row.get("prompt") or None
+            groups.setdefault(prompt, []).append((row["eid"], candidate_line({"kind": kind, **props})))
+    counts["served"] = sum(len(g) for g in groups.values())
+    if not groups:
         return counts
-    counts["served"] = len(served)
 
-    counts["unused"] = len(served)
-    try:
-        verdicts = await rate_served_lessons(
-            [line for _, line in served], transcript[-WINDOW_CHARS:],
-            trace_meta={"session_id": session_id},
-        )
-        ratings = [
-            {"eid": eid, "helpful": bool(verdict), "reason": reason}
-            for (eid, _line), (verdict, reason) in zip(served, verdicts)
-            if verdict is not None
-        ]
-        built = outcome_write(ratings, session_id, ts)
-        if built is not None:
-            await client.graph.execute_write(*built)
-    except Exception as e:
-        logger.warning(f"outcome rating failed: {e}")
-        return counts
-    counts["helpful"] = sum(1 for r in ratings if r["helpful"])
-    counts["harmful"] = len(ratings) - counts["helpful"]
-    counts["unused"] = len(served) - len(ratings)
+    for wi, (prompt, served) in enumerate(groups.items()):
+        if wi >= _max_outcome_windows():
+            break
+        try:
+            verdicts = await rate_served_lessons(
+                [line for _, line in served], window_after(transcript, prompt),
+                trace_meta={"session_id": session_id, "window": wi, "prompt": (prompt or "")[:80]},
+            )
+            ratings = [
+                {"eid": eid, "helpful": bool(verdict), "reason": reason}
+                for (eid, _line), (verdict, reason) in zip(served, verdicts)
+                if isinstance(verdict, bool)
+            ]
+            unused = [eid for (eid, _line), (verdict, _r) in zip(served, verdicts) if verdict == UNUSED]
+            built = outcome_write(ratings, session_id, ts)
+            if built is not None:
+                await client.graph.execute_write(*built)
+            stamp = served_unused_write(unused, session_id, ts)
+            if stamp is not None:
+                await client.graph.execute_write(*stamp)
+        except Exception as e:
+            logger.warning(f"outcome rating failed: {e}")
+            return counts
+        counts["helpful"] += sum(1 for r in ratings if r["helpful"])
+        counts["harmful"] += sum(1 for r in ratings if not r["helpful"])
+        counts["unused"] += len(unused)
+        counts["windows"] = wi + 1
     return counts
 
 
@@ -1236,6 +1289,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     built = served_write(
                         served, session_id or agent_id,
                         datetime.now(timezone.utc).isoformat(), repo,
+                        prompt=prompt,
                     )
                     if built is not None:
                         try:

@@ -268,10 +268,19 @@ def expire_write(eid: str, superseded_by: str | None, ts: str) -> tuple[str, dic
     return query, {"eid": eid, "superseded_by": superseded_by, "ts": ts}
 
 
+SERVED_PROMPT_CHARS = 300
+
+
 def served_write(
-    eids: list[str], session_id: str, ts: str, repo: str | None = None
+    eids: list[str], session_id: str, ts: str, repo: str | None = None,
+    prompt: str | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     """Recall injected these lessons into a session. None when nothing was.
+
+    ``prompt`` (whitespace-collapsed, first 300 chars) rides on the edge so
+    the session-end rater can find the transcript that followed this
+    serving and judge the lesson against the work it was served for
+    (MUD-407 A2).
 
     The session is MERGEd, not MATCHed. The recall hook calls coding_recall
     BEFORE record_coding_activity, so on a session's first prompt the
@@ -293,10 +302,15 @@ def served_write(
         SET m.served_count = coalesce(m.served_count, 0) + 1,
             m.last_served_at = datetime($ts)
         MERGE (m)-[r:SERVED_TO]->(s)
-        ON CREATE SET r.at = datetime($ts), r.count = 1
-        ON MATCH SET r.at = datetime($ts), r.count = coalesce(r.count, 0) + 1
+        ON CREATE SET r.at = datetime($ts), r.count = 1, r.prompt = $prompt
+        ON MATCH SET r.at = datetime($ts), r.count = coalesce(r.count, 0) + 1,
+            r.prompt = $prompt
     """
-    return query, {"eids": eids, "session_id": session_id, "ts": ts, "repo": repo}
+    collapsed = " ".join((prompt or "").split())[:SERVED_PROMPT_CHARS] or None
+    return query, {
+        "eids": eids, "session_id": session_id, "ts": ts, "repo": repo,
+        "prompt": collapsed,
+    }
 
 
 def resolve_write(session_id: str) -> tuple[str, dict[str, Any]]:
@@ -329,16 +343,40 @@ OUTCOME_ALPHA = 0.3
 
 
 def served_lessons_read(session_id: str, limit: int = 40) -> tuple[str, dict[str, Any]]:
-    """Lessons recall served to this session that have not been rated yet."""
+    """Lessons recall served to this session that have not been rated yet,
+    newest serving first, each with the prompt it was served for.
+
+    Newest first because the cap has to cut somewhere and the recent
+    servings are the ones whose transcript is most likely present; oldest
+    first rated a long session's first 40 servings against its last window
+    on every capture (MUD-407 A2)."""
     query = """
         MATCH (m)-[sv:SERVED_TO]->(s:CodingSession {id: $session_id})
         WHERE sv.rated_at IS NULL
         RETURN elementId(m) AS eid, labels(m) AS labels,
-               properties(m) AS props
-        ORDER BY sv.at
+               properties(m) AS props, sv.at AS at, sv.prompt AS prompt
+        ORDER BY sv.at DESC
         LIMIT $limit
     """
     return query, {"session_id": session_id, "limit": limit}
+
+
+def served_unused_write(
+    eids: list[str], session_id: str, ts: str
+) -> tuple[str, dict[str, Any]] | None:
+    """The rater judged these servings UNUSED: mark the edge rated so the
+    next capture does not re-read it, and move nothing on the lesson. An
+    over-served lesson is a retrieval miss, not evidence against itself."""
+    if not eids:
+        return None
+    query = """
+        MATCH (s:CodingSession {id: $session_id})
+        UNWIND $eids AS eid
+        MATCH (m)-[sv:SERVED_TO]->(s) WHERE elementId(m) = eid
+        SET sv.rated_at = datetime($ts), sv.outcome = 'unused'
+        RETURN count(*) AS stamped
+    """
+    return query, {"eids": eids, "session_id": session_id, "ts": ts}
 
 
 def outcome_write(
