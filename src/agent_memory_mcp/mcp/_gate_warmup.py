@@ -33,14 +33,35 @@ WARMUP_INTERVAL_S = 600.0
 _WARMUP_REQUEST_TIMEOUT_S = 30.0
 
 
-def warmup_enabled() -> bool:
-    """True only when a dedicated gate model is configured on Ollama."""
+def warmup_models() -> list[str]:
+    """Models to keep resident, in pin order; empty when there is nothing to.
+
+    The dedicated gate model when one is configured (MUD-407: the recall
+    gate has a 6 s budget and a cold load takes minutes). The main model
+    too when NAM_OLLAMA_PIN_MAIN_MODEL=1 (MUD-407 A3): the 36B judge
+    unloads between captures and reloads under contention, which is the
+    multi-minute tail on every capture. Opt-in because it holds ~23 GB for
+    the life of the server.
+    """
+    import os
+
     from agent_memory_mcp import providers
 
     if not providers.ollama_enabled():
-        return False
+        return []
+    models: list[str] = []
     gate = providers.ollama_gate_model()
-    return gate != providers.ollama_main_model()
+    main = providers.ollama_main_model()
+    if gate != main:
+        models.append(gate)
+    if os.environ.get("NAM_OLLAMA_PIN_MAIN_MODEL", "").strip().lower() in ("1", "true", "yes"):
+        models.append(main)
+    return models
+
+
+def warmup_enabled() -> bool:
+    """True when at least one model is configured to stay resident."""
+    return bool(warmup_models())
 
 
 def native_ollama_base_url() -> str:
@@ -77,18 +98,22 @@ def _post_keep_alive(base_url: str, model: str) -> None:
 
 
 async def warm_gate_model_once() -> bool:
-    """One warm-up attempt. Fail-open: returns False on any error."""
-    from agent_memory_mcp import providers
-
+    """One warm-up pass over every configured model. Fail-open: returns
+    False on any error, after trying each model."""
+    ok = True
     try:
         base_url = native_ollama_base_url()
-        model = providers.ollama_gate_model()
-        await asyncio.to_thread(_post_keep_alive, base_url, model)
-        logger.debug("gate model %s pinned resident via %s", model, base_url)
-        return True
+        for model in warmup_models():
+            try:
+                await asyncio.to_thread(_post_keep_alive, base_url, model)
+                logger.debug("model %s pinned resident via %s", model, base_url)
+            except Exception:
+                logger.debug("warm-up of %s failed (fail-open)", model, exc_info=True)
+                ok = False
     except Exception:
-        logger.debug("gate model warm-up failed (fail-open)", exc_info=True)
+        logger.debug("model warm-up failed (fail-open)", exc_info=True)
         return False
+    return ok
 
 
 async def gate_warmup_loop(interval_s: float = WARMUP_INTERVAL_S) -> None:
@@ -107,14 +132,12 @@ def start_gate_warmup() -> asyncio.Task | None:
     try:
         if not warmup_enabled():
             return None
-        from agent_memory_mcp import providers
-
         task = asyncio.get_running_loop().create_task(
             gate_warmup_loop(), name="nam-gate-warmup"
         )
         logger.info(
-            "gate warm-up started: pinning %s resident every %.0fs",
-            providers.ollama_gate_model(),
+            "model warm-up started: pinning %s resident every %.0fs",
+            ", ".join(warmup_models()),
             WARMUP_INTERVAL_S,
         )
         return task

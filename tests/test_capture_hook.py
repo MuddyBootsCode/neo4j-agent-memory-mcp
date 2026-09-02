@@ -364,6 +364,18 @@ class TestRun:
         assert code == 0
         assert capture.calls == []
 
+    def test_capture_asks_for_background_by_default(self, monkeypatch):
+        """The server queues the capture and answers at once, so the hook
+        (60 s budget) is never mid-call when a 15-minute capture ends."""
+        from agent_memory_mcp.hook.capture_hook import capture_call_args
+
+        ctx = {"agent_id": "a", "session_id": "s", "repo": "r", "branch": "b",
+               "task_key": None, "files": [], "error_steps": []}
+        args = capture_call_args("user: hi", ctx)
+        assert args["background"] is True and args["transcript"] == "user: hi"
+        monkeypatch.setenv("NAM_CAPTURE_BACKGROUND", "0")
+        assert capture_call_args("user: hi", ctx)["background"] is False
+
     def test_capture_error_fails_open(self, tmp_path, capsys):
         def boom(transcript, ctx):
             raise ConnectionError("server down")

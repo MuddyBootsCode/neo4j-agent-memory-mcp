@@ -736,6 +736,73 @@ class TestCaptureSessionMemory:
         assert result["dropped_unanchored"] == 1
 
 
+class TestCaptureQueue:
+    """MUD-407 A3: captures run one at a time and the hook does not wait.
+
+    131 subagent captures in five days queued on one 36B model, pushing
+    p95 to 54 minutes; the hook's 30 s client was long gone when each one
+    finished, so every response was a ClosedResourceError in the log."""
+
+    async def test_background_returns_queued_and_runs_the_capture(self, monkeypatch, mock_ctx):
+        from agent_memory_mcp.mcp import _coding_tools
+
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        _stub_extract(monkeypatch)
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript="user: do the thing\nassistant: done", background=True,
+        ))
+
+        assert result == {"queued": True, "pending": 1}
+        assert graph.writes == []  # nothing yet: the tool returned first
+        await _coding_tools.drain_capture_queue()
+        assert any("CodingSession" in q for q, _ in graph.writes)
+
+    async def test_captures_run_one_at_a_time(self, monkeypatch, mock_ctx):
+        import asyncio
+
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        running = 0
+        peak = 0
+
+        async def slow_extract(transcript, branch=None, task=None, files=None, trace_meta=None):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            return _extraction(decisions=[], gotchas=[], dead_ends=[], preferences=[])
+
+        monkeypatch.setattr("agent_memory_mcp.mcp._coding_tools.extract_coding_memory", slow_extract)
+
+        await asyncio.gather(*(
+            tools["capture_session_memory"](
+                mock_ctx, agent_id="a", session_id=f"s{i}", repo="r", branch="b",
+                transcript=f"user: hi {i}",
+            )
+            for i in range(3)
+        ))
+        assert peak == 1
+
+    async def test_background_failure_is_logged_not_raised(self, monkeypatch, mock_ctx, caplog):
+        from agent_memory_mcp.mcp import _coding_tools
+
+        graph = FakeGraph()
+        tools = _register(monkeypatch, graph)
+        _stub_extract(monkeypatch, exc=RuntimeError("extractor down"))
+
+        result = json.loads(await tools["capture_session_memory"](
+            mock_ctx, agent_id="a", session_id="s", repo="r", branch="b",
+            transcript="user: hi", background=True,
+        ))
+        assert result["queued"] is True
+        await _coding_tools.drain_capture_queue()
+        assert "extractor down" in caplog.text
+
+
 class TestHybridRecall:
     """MUD-401: rank by prompt similarity, anchor as a boost not a gate."""
 

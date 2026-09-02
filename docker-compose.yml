@@ -57,6 +57,10 @@ services:
       # Small always-resident model for the recall gate only; empty default
       # falls back to NAM_OLLAMA_MODEL (MUD-407).
       NAM_OLLAMA_GATE_MODEL: ${NAM_OLLAMA_GATE_MODEL:-}
+      # Keep the main model resident too (MUD-407 A3); opt-in, ~23 GB.
+      NAM_OLLAMA_PIN_MAIN_MODEL: ${NAM_OLLAMA_PIN_MAIN_MODEL:-}
+      # Captures share the model; run them one at a time by default.
+      NAM_CAPTURE_CONCURRENCY: ${NAM_CAPTURE_CONCURRENCY:-1}
       NAM_OLLAMA_REASONING: ${NAM_OLLAMA_REASONING:-none}
       NAM_EMBEDDING_PROVIDER: ${NAM_EMBEDDING_PROVIDER:-}
       # Opik tracing for the judge calls (MUD-427). The SDK's own env vars,

@@ -779,6 +779,50 @@ def _node_props(item: dict[str, Any]) -> dict[str, Any]:
     return props
 
 
+# --- Capture queue (MUD-407 A3) ---------------------------------------------
+#
+# Captures share one local model. Left to run concurrently, 131 subagent
+# captures in five days queued on it and pushed p95 to 54 minutes, timing
+# out the curator and starving the recall gate. They run one at a time now
+# (NAM_CAPTURE_CONCURRENCY), and a caller that cannot wait — the hooks have
+# a 60 s budget — asks for ``background`` and gets an answer at once.
+# The queue is in-process: a server restart drops what is still pending,
+# which is what a timeout did before, minus the log noise.
+
+_capture_gates: dict[Any, asyncio.Semaphore] = {}
+_background_captures: set[asyncio.Task] = set()
+
+
+def _capture_concurrency() -> int:
+    try:
+        return max(1, int(os.environ.get("NAM_CAPTURE_CONCURRENCY", "1")))
+    except ValueError:
+        return 1
+
+
+def _capture_gate() -> asyncio.Semaphore:
+    """One semaphore per event loop: tests create a loop per case, and a
+    semaphore bound to a closed loop cannot be awaited."""
+    loop = asyncio.get_running_loop()
+    gate = _capture_gates.get(loop)
+    if gate is None:
+        gate = asyncio.Semaphore(_capture_concurrency())
+        _capture_gates[loop] = gate
+    return gate
+
+
+def capture_pending() -> int:
+    """Background captures not yet finished."""
+    return sum(1 for t in _background_captures if not t.done())
+
+
+async def drain_capture_queue() -> None:
+    """Wait for every background capture to finish. For shutdown and tests."""
+    pending = [t for t in _background_captures if not t.done()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 async def capture_transcript(
     client: Any,
     *,
@@ -1145,6 +1189,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
         task_key: str | None = None,
         files: list[str] | None = None,
         error_steps: list[dict] | None = None,
+        background: bool = False,
     ) -> str:
         """Extract anchored memories from a session transcript and store them.
 
@@ -1168,30 +1213,55 @@ def register_coding_tools(mcp: FastMCP) -> None:
         transaction; nodes are CREATEd, so a retry after a partial failure
         may duplicate items the curator did not yet know about.
 
+        Captures run one at a time per server (NAM_CAPTURE_CONCURRENCY).
+        With ``background`` the call is queued and returns at once with
+        {"queued": true, "pending": N}; the hooks use this because a
+        capture takes minutes against a local model and they cannot wait.
+
         Returns JSON: {"stored", "by_kind", "dropped_unanchored",
-        "anchor_rate", "embedded", "windows", "curated"}.
+        "anchor_rate", "embedded", "windows", "curated", "rated",
+        "rated_windows"}.
         """
         client = get_client(ctx)
-        progress: dict[str, Any] = {}
-        try:
-            result = await capture_transcript(
-                client,
-                transcript=transcript,
-                agent_id=agent_id,
-                session_id=session_id,
-                repo=repo,
-                branch=branch,
-                task_key=task_key,
-                files=list(files or []),
-                error_steps=list(error_steps or []),
-                progress=progress,
+
+        async def _run() -> dict[str, Any]:
+            progress: dict[str, Any] = {}
+            async with _capture_gate():
+                try:
+                    return await capture_transcript(
+                        client,
+                        transcript=transcript,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        repo=repo,
+                        branch=branch,
+                        task_key=task_key,
+                        files=list(files or []),
+                        error_steps=list(error_steps or []),
+                        progress=progress,
+                    )
+                except Exception as e:
+                    # The payload carries the partial progress made before
+                    # the failure, so a caller can see what landed.
+                    logger.error(f"Error in capture_session_memory: {e}")
+                    return {"error": str(e), **progress}
+
+        if not background:
+            return json.dumps(await _run())
+
+        async def _run_logged() -> None:
+            result = await _run()
+            logger.info(
+                "background capture finished session=%s repo=%s stored=%s rated=%s error=%s",
+                session_id, repo, result.get("stored"), result.get("rated"), result.get("error"),
             )
-            return json.dumps(result)
-        except Exception as e:
-            # The payload carries the partial progress made before the
-            # failure, so a caller can see what landed.
-            logger.error(f"Error in capture_session_memory: {e}")
-            return json.dumps({"error": str(e), **progress})
+
+        task = asyncio.get_running_loop().create_task(
+            _run_logged(), name=f"nam-capture-{session_id[:12]}"
+        )
+        _background_captures.add(task)
+        task.add_done_callback(_background_captures.discard)
+        return json.dumps({"queued": True, "pending": capture_pending()})
 
     @mcp.tool()
     @log_tool_call
