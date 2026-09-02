@@ -193,7 +193,8 @@ class TestTouchedFilesAndErrorSteps:
                     {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make test"}},
                     {"type": "tool_use", "id": "e1", "name": "Edit", "input": {"file_path": "/repo/src/x.py"}},
                 ]),
-                _user([{"type": "tool_result", "tool_use_id": "b1", "content": "FAILED tests/test_x.py::t - assert 1 == 2"}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True,
+                        "content": "Exit code 1 FAILED tests/test_x.py::t - assert 1 == 2"}]),
                 _user([{"type": "tool_result", "tool_use_id": "e1", "content": "ok"}]),
                 _user([{"type": "tool_result", "tool_use_id": "missing", "content": "boom", "is_error": True}]),
             ],
@@ -201,9 +202,52 @@ class TestTouchedFilesAndErrorSteps:
         steps = error_steps(path, "/repo")
         assert steps == [
             {"tool": "Bash", "input": "make test", "file": None,
-             "error": "FAILED tests/test_x.py::t - assert 1 == 2"},
+             "error": "Exit code 1 FAILED tests/test_x.py::t - assert 1 == 2"},
             {"tool": "tool", "input": "", "file": None, "error": "boom"},
         ]
+
+    def test_error_steps_require_the_is_error_flag(self, tmp_path):
+        """A successful `cat` of a file that mentions "Traceback" is not a
+        dead end. Claude Code flags every failed tool result with is_error
+        (130/130 exit-code failures in a sample of 60 real transcripts), so
+        the keyword regex only decides rendering, never candidacy."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "c1", "name": "Bash", "input": {"command": "cat notes.md"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "c1",
+                        "content": "## Known error\nTraceback (most recent call last): ... was fixed in #12"}]),
+            ],
+        )
+        assert error_steps(path, "/repo") == []
+
+    def test_error_steps_skip_permission_and_hook_blocks(self, tmp_path):
+        """A denied action is not an attempt that failed; nothing was tried."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([
+                    {"type": "tool_use", "id": "d1", "name": "Bash", "input": {"command": "aws ec2 describe-instances"}},
+                    {"type": "tool_use", "id": "d2", "name": "Bash", "input": {"command": "sleep 45"}},
+                    {"type": "tool_use", "id": "d3", "name": "Bash", "input": {"command": "rm -rf build"}},
+                    {"type": "tool_use", "id": "ok", "name": "Bash", "input": {"command": "make"}},
+                ]),
+                _user([{"type": "tool_result", "tool_use_id": "d1", "is_error": True,
+                        "content": "Permission for this action was denied by the Claude Code auto mode classifier. Reason: Blocked by classifier."}]),
+                _user([{"type": "tool_result", "tool_use_id": "d2", "is_error": True,
+                        "content": "<tool_use_error>Blocked: sleep 45 followed by: tail -3 /tmp/x.txt</tool_use_error>"}]),
+                _user([{"type": "tool_result", "tool_use_id": "d3", "is_error": True,
+                        "content": "The user doesn't want to proceed with this tool use. The tool use was rejected."}]),
+                _user([{"type": "tool_result", "tool_use_id": "ok", "is_error": True,
+                        "content": "Exit code 2 make: *** No rule to make target 'all'.  Stop."}]),
+            ],
+        )
+        steps = error_steps(path, "/repo")
+        assert [s["input"] for s in steps] == ["make"]
 
     def test_error_steps_missing_file_is_empty(self, tmp_path):
         from agent_memory_mcp.hook.capture_hook import error_steps
@@ -319,6 +363,18 @@ class TestRun:
         )
         assert code == 0
         assert capture.calls == []
+
+    def test_capture_asks_for_background_by_default(self, monkeypatch):
+        """The server queues the capture and answers at once, so the hook
+        (60 s budget) is never mid-call when a 15-minute capture ends."""
+        from agent_memory_mcp.hook.capture_hook import capture_call_args
+
+        ctx = {"agent_id": "a", "session_id": "s", "repo": "r", "branch": "b",
+               "task_key": None, "files": [], "error_steps": []}
+        args = capture_call_args("user: hi", ctx)
+        assert args["background"] is True and args["transcript"] == "user: hi"
+        monkeypatch.setenv("NAM_CAPTURE_BACKGROUND", "0")
+        assert capture_call_args("user: hi", ctx)["background"] is False
 
     def test_capture_error_fails_open(self, tmp_path, capsys):
         def boom(transcript, ctx):

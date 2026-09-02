@@ -257,6 +257,17 @@ def _verdict_counts() -> dict[str, int]:
     return {"write": 0, "already_known": 0, "supersedes": 0, "not_durable": 0, "unsupported": 0}
 
 
+def _fail_open(candidates: list[dict[str, Any]], counts: dict[str, int]) -> dict[str, Any]:
+    """The curator gave no usable verdict: keep what the extractor asserted,
+    drop raw error steps. A raw step is only a lesson once a judge says so;
+    with no judge it is tool output, and writing it made 4,751 DeadEnds of
+    help screens and file listings (MUD-407 A1)."""
+    kept = [c for c in candidates if c.get("source") != "error_step"]
+    counts["write"] = len(kept)
+    counts["dropped_error_steps"] = len(candidates) - len(kept)
+    return {"kept": kept, "counts": counts, "known": []}
+
+
 async def curate_coding_memory(
     candidates: list[dict[str, Any]],
     transcript: str,
@@ -323,9 +334,10 @@ async def curate_coding_memory(
                 "reason": getattr(v, "reason", None),
             })
     except Exception:
-        logger.warning("CurateCodingMemory failed; keeping all candidates", exc_info=True)
-        counts["write"] = len(candidates)
-        return {"kept": list(candidates), "counts": counts, "known": []}
+        logger.warning(
+            "CurateCodingMemory failed; keeping extractor candidates", exc_info=True
+        )
+        return _fail_open(candidates, counts)
 
     tracing.emit_trace(
         "curator",
@@ -347,11 +359,10 @@ async def curate_coding_memory(
     coverage = len(verdicts) / len(candidates)
     if coverage < MIN_VERDICT_COVERAGE:
         logger.warning(
-            "CurateCodingMemory covered %d/%d candidates; keeping all",
+            "CurateCodingMemory covered %d/%d candidates; keeping extractor candidates",
             len(verdicts), len(candidates),
         )
-        counts["write"] = len(candidates)
-        return {"kept": list(candidates), "counts": counts, "known": []}
+        return _fail_open(candidates, counts)
 
     # A nearly complete verdict set is applied as given. Candidates the
     # model skipped are kept only when they came from the extractor; a raw
@@ -388,6 +399,11 @@ async def curate_coding_memory(
 
 _RATER_KILL_SWITCH_ENV = "NAM_OUTCOME_RATER"
 
+# The rater's third answer. Distinct from None (unrated: the model failed or
+# skipped the id) because an UNUSED serving is finished with, while an
+# unrated one should be read again next capture.
+UNUSED = "unused"
+
 
 def _rater_enabled() -> bool:
     return os.environ.get(_RATER_KILL_SWITCH_ENV, "").strip().lower() != "off"
@@ -402,9 +418,10 @@ async def rate_served_lessons(
 
     ``lessons`` are rendered lesson lines shown to the model numbered by
     list position. Returns a list the same length of ``(verdict, reason)``
-    pairs: True for helpful, False for harmful, None for unused or unrated
-    (MUD-427: the reason is the judge's one-sentence citation, None when
-    the model gave none or the lesson went unrated).
+    pairs: True for helpful, False for harmful, :data:`UNUSED` for a
+    lesson the model judged unused, None when it went unrated (MUD-427:
+    the reason is the judge's one-sentence citation, None when the model
+    gave none or the lesson went unrated).
 
     Fail-open: the rater disabled, raising, or returning nothing leaves
     every lesson unrated. An unrated lesson keeps the neutral weight it
@@ -443,7 +460,8 @@ async def rate_served_lessons(
         elif outcome == "harmful":
             out[v.id] = (False, reason)
         else:
-            outcome = "unused"
+            outcome = UNUSED
+            out[v.id] = (UNUSED, reason)
         counts[outcome] = counts.get(outcome, 0) + 1
         verdict_log.append({"id": v.id, "outcome": outcome, "reason": reason})
     logger.info("RateServedLessons: %s", counts)
