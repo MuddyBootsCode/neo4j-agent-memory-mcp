@@ -569,6 +569,7 @@ class TestCaptureSessionMemory:
             "superseded": 0,
             "preferences": 0,
             "rated": {"served": 0, "helpful": 0, "harmful": 0, "unused": 0},
+            "rated_windows": 0,
         }
 
     async def test_empty_transcript_skips_extraction_and_writes(
@@ -606,6 +607,7 @@ class TestCaptureSessionMemory:
             "superseded": 0,
             "preferences": 0,
             "rated": {"served": 0, "helpful": 0, "harmful": 0, "unused": 0},
+            "rated_windows": 0,
         }
 
     async def test_transcript_tail_and_files_are_capped(self, monkeypatch, mock_ctx):
@@ -703,6 +705,7 @@ class TestCaptureSessionMemory:
             "superseded": 0,
             "preferences": 0,
             "rated": {"served": 0, "helpful": 0, "harmful": 0, "unused": 0},
+            "rated_windows": 0,
         }
 
     async def test_write_failure_reports_partial_counts(
