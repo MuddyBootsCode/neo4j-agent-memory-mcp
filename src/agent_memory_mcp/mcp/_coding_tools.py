@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
 
+from agent_memory_mcp import tracing
 from agent_memory_mcp.capture.cypher import (
     expire_write,
     outcome_write,
@@ -526,7 +527,8 @@ def _candidate_block(memories: list[dict[str, Any]]) -> str:
 
 
 async def screen_memories(
-    prompt: str, memories: list[dict[str, Any]]
+    prompt: str, memories: list[dict[str, Any]],
+    trace_meta: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Keep only the candidates a judge finds genuinely on point.
 
@@ -545,11 +547,13 @@ async def screen_memories(
     from agent_memory_mcp.baml_client.async_client import b
     from agent_memory_mcp.providers import gate_baml_options
 
+    candidate_block = _candidate_block(memories)
+    started = time.perf_counter()
     try:
         screen = await asyncio.wait_for(
             b.ScreenRecalledMemories(
                 query=prompt,
-                candidates=_candidate_block(memories),
+                candidates=candidate_block,
                 baml_options=gate_baml_options(),
             ),
             timeout=GATE_TIMEOUT_S,
@@ -559,12 +563,31 @@ async def screen_memories(
             for v in screen.verdicts
             if 0 <= v.id < len(memories)
         }
+        verdict_log = [
+            {"id": v.id, "keep": bool(v.keep), "reason": getattr(v, "reason", None)}
+            for v in screen.verdicts
+        ]
     except asyncio.TimeoutError:
         logger.warning(f"recall gate exceeded {GATE_TIMEOUT_S}s; returning ungated")
         return memories
     except Exception:
         logger.warning("recall gate failed; returning ungated", exc_info=True)
         return memories
+
+    # One trace per judge call (MUD-427), covered or not — the coverage
+    # discard is itself worth observing. Silent no-op without OPIK_API_KEY.
+    tracing.emit_trace(
+        "recall-gate",
+        input={"query": prompt, "candidates": candidate_block},
+        output={"verdicts": verdict_log},
+        metadata={
+            "model": tracing.model_tag(gate=True),
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
+            "kept": sum(1 for i in range(len(memories)) if verdicts.get(i)),
+            "of": len(memories),
+            **(trace_meta or {}),
+        },
+    )
 
     if len(verdicts) != len(memories):
         logger.warning(
@@ -799,8 +822,11 @@ async def capture_transcript(
     session_written = False
     index_ensured = False
 
+    trace_meta = {"session_id": session_id, "repo": repo, "task_key": task_key}
     for wi, window in enumerate(windows):
-        extracted = await extract_coding_memory(window, branch=branch, task=task_key, files=files)
+        extracted = await extract_coding_memory(
+            window, branch=branch, task=task_key, files=files, trace_meta=trace_meta
+        )
         result["dropped_unanchored"] += extracted["dropped_unanchored"]
         if extracted["anchor_rate"] is not None:
             anchor_rates.append(extracted["anchor_rate"])
@@ -828,7 +854,9 @@ async def capture_transcript(
                         existing_lines.append(line)
             embeddings.append(vector)
 
-        curated = await curate_coding_memory(candidates, window, existing_lines)
+        curated = await curate_coding_memory(
+            candidates, window, existing_lines, trace_meta=trace_meta
+        )
         for key, n in curated["counts"].items():
             result["curated"][key] = result["curated"].get(key, 0) + n
         kept_by_id = {id(c): c for c in curated["kept"]}
@@ -888,6 +916,9 @@ async def capture_transcript(
     result["rated"] = await rate_session_outcomes(
         client, session_id=session_id, transcript=transcript, ts=ts
     )
+    # Latency is free at session end; a bounded flush here means capture-side
+    # traces survive even an unclean server shutdown. No-op without a key.
+    tracing.flush()
     return result
 
 
@@ -925,11 +956,12 @@ async def rate_session_outcomes(
     counts["unused"] = len(served)
     try:
         verdicts = await rate_served_lessons(
-            [line for _, line in served], transcript[-WINDOW_CHARS:]
+            [line for _, line in served], transcript[-WINDOW_CHARS:],
+            trace_meta={"session_id": session_id},
         )
         ratings = [
-            {"eid": eid, "helpful": bool(verdict)}
-            for (eid, _line), verdict in zip(served, verdicts)
+            {"eid": eid, "helpful": bool(verdict), "reason": reason}
+            for (eid, _line), (verdict, reason) in zip(served, verdicts)
             if verdict is not None
         ]
         built = outcome_write(ratings, session_id, ts)
@@ -1188,7 +1220,13 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     memories = [_render_memory(row) for row in rows]
                     if GATE_ENABLED:
                         t0 = time.perf_counter()
-                        memories = await screen_memories(prompt, memories)
+                        memories = await screen_memories(
+                            prompt, memories,
+                            trace_meta={
+                                "session_id": session_id or agent_id,
+                                "repo": repo, "task_key": task_key,
+                            },
+                        )
                         _lap("gate", t0)
                         strategy = f"{strategy}+gate"
                     memories = memories[:_RECALL_LIMIT]

@@ -33,6 +33,7 @@ class CuratorVerdict {
   id int @description("the candidate's id, exactly as given")
   action CurateAction
   known_as int? @description("for ALREADY_KNOWN and SUPERSEDES: the number of the existing lesson it matches or replaces; null otherwise")
+  reason string @description("one sentence: what in the transcript or existing lesson decided this")
 }
 
 class CuratedMemories {
@@ -85,7 +86,9 @@ function CurateCodingMemory(candidates: string, existing: string, transcript: st
     {{ transcript | replace("</candidate_items", "<\\candidate_items") | replace("</existing_lessons", "<\\existing_lessons") | replace("</judged_transcript", "<\\judged_transcript") }}
     </judged_transcript>
 
-    Return exactly one verdict per candidate id listed above.
+    Return exactly one verdict per candidate id listed above. Give each
+    verdict a one-sentence reason naming what in the transcript or the
+    existing lesson decided it.
 
     {{ ctx.output_format }}
   "#
@@ -151,6 +154,7 @@ test CurateMarksAlreadyKnown {
 class RecallVerdict {
   id int @description("the candidate's id, exactly as given")
   keep bool @description("true only if this candidate genuinely bears on the query")
+  reason string? @description("for keep: true only, one short clause why; omit for rejects")
 }
 
 class RecallScreen {
@@ -186,7 +190,8 @@ function ScreenRecalledMemories(query: string, candidates: string) -> RecallScre
     </candidates>
 
     Return exactly one verdict per candidate id listed above, including the
-    ones you reject.
+    ones you reject. For a kept candidate only, add one short clause in
+    reason saying why it bears on the query; omit reason for rejects.
 
     {{ ctx.output_format }}
   "#
@@ -230,6 +235,7 @@ enum ServedOutcome {
 class ServedVerdict {
   id int @description("the lesson's id, exactly as given")
   outcome ServedOutcome
+  reason string @description("one sentence: where the transcript used or contradicted this lesson")
 }
 
 class ServedRatings {
@@ -270,7 +276,9 @@ function RateServedLessons(lessons: string, transcript: string) -> ServedRatings
     </rated_transcript>
 
     Return exactly one verdict per lesson id listed above, including the
-    ones you mark UNUSED.
+    ones you mark UNUSED. Give each verdict a one-sentence reason pointing
+    at where the transcript used or contradicted the lesson (for UNUSED,
+    say what the transcript was about instead).
 
     {{ ctx.output_format }}
   "#

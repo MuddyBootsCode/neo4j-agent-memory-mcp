@@ -86,6 +86,7 @@ class CuratorVerdict(BaseModel):
     id: int = Field(description='the candidate\'s id, exactly as given')
     action: CurateAction
     known_as: typing.Optional[int] = Field(default=None, description='for ALREADY_KNOWN and SUPERSEDES: the number of the existing lesson it matches or replaces; null otherwise')
+    reason: str = Field(description='one sentence: what in the transcript or existing lesson decided this')
 
 class ExtractedCodingPreference(BaseModel):
     category: str = Field(description='Preference category: e.g. testing, style, tooling, workflow')
@@ -143,6 +144,7 @@ class RecallScreen(BaseModel):
 class RecallVerdict(BaseModel):
     id: int = Field(description='the candidate\'s id, exactly as given')
     keep: bool = Field(description='true only if this candidate genuinely bears on the query')
+    reason: typing.Optional[str] = Field(default=None, description='for keep: true only, one short clause why; omit for rejects')
 
 class ServedRatings(BaseModel):
     verdicts: typing.List["ServedVerdict"] = Field(description='exactly one entry per lesson, including the unused ones')
@@ -150,6 +152,7 @@ class ServedRatings(BaseModel):
 class ServedVerdict(BaseModel):
     id: int = Field(description='the lesson\'s id, exactly as given')
     outcome: ServedOutcome
+    reason: str = Field(description='one sentence: where the transcript used or contradicted this lesson')
 
 class TemporalExtraction(BaseModel):
     valid_at: typing.Optional[str] = Field(default=None, description='Extracted datetime when fact became true, in ISO 8601. E.g., \'2026-03-01T00:00:00Z\'. null if not determinable.')

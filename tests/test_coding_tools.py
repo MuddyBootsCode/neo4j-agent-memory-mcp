@@ -453,7 +453,7 @@ def _stub_extract(monkeypatch, result=None, exc=None):
     """Replace extract_coding_memory in the tool module; returns call log."""
     calls = []
 
-    async def fake(transcript, *, branch, task, files):
+    async def fake(transcript, *, branch, task, files, trace_meta=None):
         calls.append(
             {"transcript": transcript, "branch": branch, "task": task, "files": files}
         )
@@ -471,7 +471,7 @@ def _stub_extract(monkeypatch, result=None, exc=None):
 def _stub_curator(monkeypatch, keep=None):
     """Curator keeps everything (or the given predicate) and no neighbour
     lookup hits the graph, so the capture tests exercise the write path."""
-    async def fake_curate(candidates, transcript, existing):
+    async def fake_curate(candidates, transcript, existing, trace_meta=None):
         kept = [c for c in candidates if keep is None or keep(c)]
         return {"kept": kept, "counts": {"write": len(kept), "already_known": 0, "supersedes": 0,
                                          "not_durable": len(candidates) - len(kept), "unsupported": 0},

@@ -348,13 +348,15 @@ def outcome_write(
     alpha: float = OUTCOME_ALPHA,
     seed: float = OUTCOME_SEED,
 ) -> tuple[str, dict[str, Any]] | None:
-    """Apply session-end ratings. ``ratings`` are ``{"eid", "helpful"}``
-    dicts, ``helpful`` true for a helpful lesson and false for a harmful
-    one; unused lessons are not passed. None when nothing was rated.
+    """Apply session-end ratings. ``ratings`` are ``{"eid", "helpful",
+    "reason"}`` dicts, ``helpful`` true for a helpful lesson and false for
+    a harmful one, ``reason`` the judge's one-sentence citation (or None);
+    unused lessons are not passed. None when nothing was rated.
 
     The count and the weight move together: the counts say how often, the
     weight says how lately. Marking the edge rated makes the write
-    idempotent per serving."""
+    idempotent per serving. The reason lands on the SERVED_TO edge
+    (MUD-427), so "why was this rated harmful" is answerable in Neo4j."""
     if not ratings:
         return None
     query = """
@@ -367,7 +369,8 @@ def outcome_write(
                 + $alpha * ((CASE WHEN rating.helpful THEN 1.0 ELSE 0.0 END)
                             - coalesce(m.outcome_weight, $seed)),
             m.last_rated_at = datetime($ts)
-        SET sv.rated_at = datetime($ts), sv.helpful = rating.helpful
+        SET sv.rated_at = datetime($ts), sv.helpful = rating.helpful,
+            sv.reason = rating.reason
         RETURN count(*) AS rated
     """
     return query, {
