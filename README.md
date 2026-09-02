@@ -259,14 +259,19 @@ with the most failure and correction evidence (`NAM_CAPTURE_MAX_WINDOWS`,
 default 4). Lessons anchor to files from the transcript's edits, the last
 24 hours of commits, and the working tree. One `CurateCodingMemory` call
 per window screens the candidates against the nearest lessons already
-stored (`NAM_CAPTURE_JUDGE=off` skips it).
+stored (`NAM_CAPTURE_JUDGE=off` skips it). Captures run one at a time per
+server (`NAM_CAPTURE_CONCURRENCY`); at the end of each, the lessons recall
+served to the session are rated helpful, harmful, or unused against the
+transcript that followed each serving prompt, newest first, at most
+`NAM_OUTCOME_MAX_WINDOWS` (default 3) rater calls per capture.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `NAM_CAPTURE_DISABLED` | — | Set to `1` to disable the hook (kill switch) |
 | `NAM_HOOK_URL` | `http://127.0.0.1:8080/mcp` | Server endpoint |
 | `NAM_HTTP_TOKEN` | — | Bearer token, if the server requires one |
-| `NAM_CAPTURE_TIMEOUT` | `30` | Whole-call budget, seconds (extraction is an LLM call) |
+| `NAM_CAPTURE_TIMEOUT` | `30` | Whole-call budget, seconds. Enough with background capture (below); a foreground capture takes minutes |
+| `NAM_CAPTURE_BACKGROUND` | `1` | Server queues the capture and answers at once. `0` waits for the result |
 | `NAM_AGENT_ID` | payload session id | Stable agent identity |
 | `NAM_TASK_KEY` | inferred from branch | Explicit task key override |
 
