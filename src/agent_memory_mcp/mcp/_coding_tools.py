@@ -115,6 +115,11 @@ GATE_ENABLED = os.environ.get("NAM_RECALL_GATE", "1") != "0"
 # it, which reads as an empty recall rather than a slow one (seen in the
 # MUD-403/404 golden runs: one query per run stalled for the full 900 s).
 GATE_TIMEOUT_S = float(os.environ.get("NAM_RECALL_GATE_TIMEOUT", "6"))
+# While a capture holds the lane the judge is generating and the gate model
+# queues behind it on the same GPU: on swarm days 90%+ of gate calls hit the
+# cap and came back ungated after the full wait (MUD-435 S3). Skip the wait
+# and return the same ungated list; NAM_RECALL_GATE_SKIP_WHEN_BUSY=0 waits.
+GATE_SKIP_WHEN_BUSY = os.environ.get("NAM_RECALL_GATE_SKIP_WHEN_BUSY", "1") != "0"
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
 # constant, never user input — so this is not an injection surface. It keeps
@@ -800,6 +805,15 @@ def _capture_concurrency() -> int:
         return 1
 
 
+def capture_lane_busy() -> bool:
+    """True while every capture slot is taken, i.e. the judge is busy."""
+    try:
+        gate = _capture_gates.get(asyncio.get_running_loop())
+    except RuntimeError:
+        return False
+    return gate is not None and gate.locked()
+
+
 def _capture_gate() -> asyncio.Semaphore:
     """One semaphore per event loop: tests create a loop per case, and a
     semaphore bound to a closed loop cannot be awaited."""
@@ -1343,15 +1357,22 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     memories = [_render_memory(row) for row in rows]
                     if GATE_ENABLED:
                         t0 = time.perf_counter()
-                        memories = await screen_memories(
-                            prompt, memories,
-                            trace_meta={
-                                "session_id": session_id or agent_id,
-                                "repo": repo, "task_key": task_key,
-                            },
-                        )
+                        if GATE_SKIP_WHEN_BUSY and capture_lane_busy():
+                            logger.info(
+                                f"recall gate skipped; capture lane busy, "
+                                f"{len(memories)} candidates ungated"
+                            )
+                            strategy = f"{strategy}+gate-skipped"
+                        else:
+                            memories = await screen_memories(
+                                prompt, memories,
+                                trace_meta={
+                                    "session_id": session_id or agent_id,
+                                    "repo": repo, "task_key": task_key,
+                                },
+                            )
+                            strategy = f"{strategy}+gate"
                         _lap("gate", t0)
-                        strategy = f"{strategy}+gate"
                     memories = memories[:_RECALL_LIMIT]
                     # What was injected, so a later commit on the lesson's
                     # file can close the loop (MUD-405). Best-effort.

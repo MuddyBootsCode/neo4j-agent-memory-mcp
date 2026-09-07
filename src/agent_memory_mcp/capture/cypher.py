@@ -239,17 +239,43 @@ def anchored_memory_write(
 # the lesson's file closes the loop with RESOLVED_BY.
 
 
+def session_family(session_id: str) -> str:
+    """The parent session an id belongs to, for counting evidence.
+
+    Subagent sessions are ``parent:spawn`` (capture_hook); the parent and
+    every spawn under it are one family, since a swarm of twenty subagents
+    restating one lesson is one session's worth of evidence, not twenty. A
+    spawn whose parent id was unknown (``:spawn``) is its own family, and a
+    main session is its own."""
+    if ":" in session_id and not session_id.startswith(":"):
+        return session_id.split(":", 1)[0]
+    return session_id
+
+
 def reassert_write(eid: str, session_id: str, ts: str) -> tuple[str, dict[str, Any]]:
-    """An existing lesson was stated again by another session."""
+    """An existing lesson was stated again by another session.
+
+    The ``REASSERTED_IN`` edge is recorded per session; ``evidence_count``
+    moves only when no session of the same family (see
+    :func:`session_family`) has asserted or produced the lesson before.
+    Subagent swarms had pushed lessons to evidence 60–114 in days and made
+    45% of the store a "guardrail" (MUD-435 A4)."""
+    family = session_family(session_id)
     query = """
         MATCH (m) WHERE elementId(m) = $eid
         MATCH (s:CodingSession {id: $session_id})
-        SET m.evidence_count = coalesce(m.evidence_count, 1) + 1,
+        OPTIONAL MATCH (m)-[:MADE_IN|REASSERTED_IN]->(o:CodingSession)
+            WHERE o.id = $family OR o.id STARTS WITH $family_prefix
+        WITH m, s, count(o) AS seen
+        SET m.evidence_count = coalesce(m.evidence_count, 1) + CASE WHEN seen = 0 THEN 1 ELSE 0 END,
             m.last_asserted_at = datetime($ts)
         MERGE (m)-[r:REASSERTED_IN]->(s)
         SET r.at = datetime($ts)
     """
-    return query, {"eid": eid, "session_id": session_id, "ts": ts}
+    return query, {
+        "eid": eid, "session_id": session_id, "ts": ts,
+        "family": family, "family_prefix": f"{family}:",
+    }
 
 
 def expire_write(eid: str, superseded_by: str | None, ts: str) -> tuple[str, dict[str, Any]]:
