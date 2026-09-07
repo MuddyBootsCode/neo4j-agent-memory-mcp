@@ -814,13 +814,32 @@ def _gate_shares_judge() -> bool:
     return ollama_enabled()
 
 
-def capture_lane_busy() -> bool:
-    """True while every capture slot is taken, i.e. the judge is busy."""
-    try:
-        gate = _capture_gates.get(asyncio.get_running_loop())
-    except RuntimeError:
+# Captures in flight, independent of how many slots the semaphore has: with
+# NAM_CAPTURE_CONCURRENCY=2 and one capture running the semaphore is not
+# locked, but the judge is already generating (Codex F6).
+_active_captures = 0
+
+
+class _capture_slot:
+    """Enter the capture lane: one semaphore permit, counted as active."""
+
+    async def __aenter__(self):
+        global _active_captures
+        self._gate = _capture_gate()
+        await self._gate.acquire()
+        _active_captures += 1
+        return self
+
+    async def __aexit__(self, *exc):
+        global _active_captures
+        _active_captures -= 1
+        self._gate.release()
         return False
-    return gate is not None and gate.locked()
+
+
+def capture_lane_busy() -> bool:
+    """True while any capture is in flight, i.e. the judge is busy."""
+    return _active_captures > 0
 
 
 def _capture_gate() -> asyncio.Semaphore:
@@ -1249,7 +1268,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
 
         async def _run() -> dict[str, Any]:
             progress: dict[str, Any] = {}
-            async with _capture_gate():
+            async with _capture_slot():
                 try:
                     return await capture_transcript(
                         client,

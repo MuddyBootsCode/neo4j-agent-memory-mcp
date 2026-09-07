@@ -1179,14 +1179,10 @@ class TestRecallGate:
         graph = FakeGraph(read_results=[self._rows(3)])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
-        lane = ct._capture_gate()
-        await lane.acquire()
-        try:
+        async with ct._capture_slot():
             result = json.loads(await tools["coding_recall"](
                 mock_ctx, prompt="q", agent_id="a", repo="r",
             ))
-        finally:
-            lane.release()
 
         assert len(result["memories"]) == 3
         assert result["strategy"] == "vector+gate-skipped"
@@ -1201,14 +1197,10 @@ class TestRecallGate:
         graph = FakeGraph(read_results=[self._rows(3)])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
-        lane = ct._capture_gate()
-        await lane.acquire()
-        try:
+        async with ct._capture_slot():
             result = json.loads(await tools["coding_recall"](
                 mock_ctx, prompt="q", agent_id="a", repo="r",
             ))
-        finally:
-            lane.release()
 
         assert len(result["memories"]) == 1
         assert result["strategy"] == "vector+gate"
@@ -1222,17 +1214,34 @@ class TestRecallGate:
         graph = FakeGraph(read_results=[self._rows(3)])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
 
-        lane = ct._capture_gate()
-        await lane.acquire()
-        try:
+        async with ct._capture_slot():
             result = json.loads(await tools["coding_recall"](
                 mock_ctx, prompt="q", agent_id="a", repo="r",
             ))
-        finally:
-            lane.release()
 
         assert len(result["memories"]) == 1
         assert result["strategy"] == "vector+gate"
+
+    async def test_gate_skipped_with_one_of_two_slots_taken(self, monkeypatch, mock_ctx):
+        """Busy means any capture in flight, not every slot taken (Codex F6)."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("NAM_CAPTURE_CONCURRENCY", "2")
+        ct._capture_gates.clear()  # a fresh semaphore with two permits
+        self._screen(monkeypatch, {0: True, 1: False, 2: False})
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        async with ct._capture_slot():
+            assert not ct._capture_gate().locked()
+            result = json.loads(await tools["coding_recall"](
+                mock_ctx, prompt="q", agent_id="a", repo="r",
+            ))
+
+        assert len(result["memories"]) == 3
+        assert result["strategy"] == "vector+gate-skipped"
+        assert not ct.capture_lane_busy()
 
     async def test_gate_runs_when_capture_lane_idle(self, monkeypatch, mock_ctx):
         self._screen(monkeypatch, {0: True, 1: False, 2: False})
