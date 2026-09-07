@@ -1174,6 +1174,7 @@ class TestRecallGate:
         wait, return the same ungated list, and say so in the strategy."""
         import agent_memory_mcp.mcp._coding_tools as ct
 
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")  # gate shares the judge's GPU
         self._screen(monkeypatch, {0: True, 1: False, 2: False})  # would keep 1 of 3 if it ran
         graph = FakeGraph(read_results=[self._rows(3)])
         tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
@@ -1191,9 +1192,31 @@ class TestRecallGate:
         assert result["strategy"] == "vector+gate-skipped"
         assert result["timing_ms"]["gate"] < 100
 
+    async def test_gate_runs_while_busy_on_a_hosted_provider(self, monkeypatch, mock_ctx):
+        """A hosted gate does not queue behind the local judge (Codex F2)."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.delenv("NAM_LLM_PROVIDER", raising=False)
+        self._screen(monkeypatch, {0: True, 1: False, 2: False})
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        lane = ct._capture_gate()
+        await lane.acquire()
+        try:
+            result = json.loads(await tools["coding_recall"](
+                mock_ctx, prompt="q", agent_id="a", repo="r",
+            ))
+        finally:
+            lane.release()
+
+        assert len(result["memories"]) == 1
+        assert result["strategy"] == "vector+gate"
+
     async def test_gate_runs_while_busy_when_skip_disabled(self, monkeypatch, mock_ctx):
         import agent_memory_mcp.mcp._coding_tools as ct
 
+        monkeypatch.setenv("NAM_LLM_PROVIDER", "ollama")
         self._screen(monkeypatch, {0: True, 1: False, 2: False})
         monkeypatch.setattr(ct, "GATE_SKIP_WHEN_BUSY", False)
         graph = FakeGraph(read_results=[self._rows(3)])

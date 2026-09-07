@@ -65,6 +65,9 @@ services:
       NAM_OLLAMA_PIN_MAIN_MODEL: ${NAM_OLLAMA_PIN_MAIN_MODEL:-}
       # Captures share the model; run them one at a time by default.
       NAM_CAPTURE_CONCURRENCY: ${NAM_CAPTURE_CONCURRENCY:-1}
+      # While a capture holds the lane the Ollama gate queues behind the
+      # judge; skip it rather than wait out the cap (MUD-435 A3). 0 waits.
+      NAM_RECALL_GATE_SKIP_WHEN_BUSY: ${NAM_RECALL_GATE_SKIP_WHEN_BUSY:-1}
       NAM_OLLAMA_REASONING: ${NAM_OLLAMA_REASONING:-none}
       NAM_EMBEDDING_PROVIDER: ${NAM_EMBEDDING_PROVIDER:-}
       # Opik tracing for the judge calls (MUD-427). The SDK's own env vars,

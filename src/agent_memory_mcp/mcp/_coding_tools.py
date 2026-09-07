@@ -117,8 +117,9 @@ GATE_ENABLED = os.environ.get("NAM_RECALL_GATE", "1") != "0"
 GATE_TIMEOUT_S = float(os.environ.get("NAM_RECALL_GATE_TIMEOUT", "6"))
 # While a capture holds the lane the judge is generating and the gate model
 # queues behind it on the same GPU: on swarm days 90%+ of gate calls hit the
-# cap and came back ungated after the full wait (MUD-435 S3). Skip the wait
-# and return the same ungated list; NAM_RECALL_GATE_SKIP_WHEN_BUSY=0 waits.
+# cap and came back ungated after the full wait (MUD-435 S3). With the gate
+# on that same local Ollama, skip the wait and return the same ungated list;
+# NAM_RECALL_GATE_SKIP_WHEN_BUSY=0 waits. A hosted gate always screens.
 GATE_SKIP_WHEN_BUSY = os.environ.get("NAM_RECALL_GATE_SKIP_WHEN_BUSY", "1") != "0"
 
 # The label disjunction is interpolated from _RECALL_KINDS — a fixed module
@@ -805,6 +806,14 @@ def _capture_concurrency() -> int:
         return 1
 
 
+def _gate_shares_judge() -> bool:
+    """True when the gate runs on the same local Ollama as the judge, so a
+    running capture is what makes it slow. A hosted gate (Anthropic,
+    Bedrock) is unaffected by the capture lane and keeps screening."""
+    from agent_memory_mcp.providers import ollama_enabled
+    return ollama_enabled()
+
+
 def capture_lane_busy() -> bool:
     """True while every capture slot is taken, i.e. the judge is busy."""
     try:
@@ -1357,7 +1366,7 @@ def register_coding_tools(mcp: FastMCP) -> None:
                     memories = [_render_memory(row) for row in rows]
                     if GATE_ENABLED:
                         t0 = time.perf_counter()
-                        if GATE_SKIP_WHEN_BUSY and capture_lane_busy():
+                        if GATE_SKIP_WHEN_BUSY and capture_lane_busy() and _gate_shares_judge():
                             logger.info(
                                 f"recall gate skipped; capture lane busy, "
                                 f"{len(memories)} candidates ungated"

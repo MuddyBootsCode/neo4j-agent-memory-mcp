@@ -80,21 +80,20 @@ async def main() -> int:
 
     from pydantic import SecretStr
 
-    from neo4j_agent_memory import MemoryClient, MemorySettings
     from neo4j_agent_memory.config.settings import Neo4jConfig
+    from neo4j_agent_memory.graph.client import Neo4jClient
 
-    settings = MemorySettings(
-        neo4j=Neo4jConfig(
-            uri=os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
-            username=os.environ.get("NEO4J_USER", "neo4j"),
-            password=SecretStr(os.environ.get("NEO4J_PASSWORD", "graphmemory")),
-            database=args.database,
-        ),
-    )
-    client = MemoryClient(settings)
-    await client.connect()
+    # The bare driver wrapper, not MemoryClient: MemoryClient.connect() runs
+    # the schema setup, and a dry run must issue no writes (Codex F3).
+    graph = Neo4jClient(Neo4jConfig(
+        uri=os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
+        username=os.environ.get("NEO4J_USER", "neo4j"),
+        password=SecretStr(os.environ.get("NEO4J_PASSWORD", "graphmemory")),
+        database=args.database,
+    ))
+    await graph.connect()
     try:
-        row = (await client.graph.execute_read(_SUMMARY, {}))[0]
+        row = (await graph.execute_read(_SUMMARY, {}))[0]
         print(
             f"{row['lessons']} lessons in {args.database!r}: {row['changed']} change; "
             f"guardrails (evidence >= 3) {row['guardrails_old']} -> {row['guardrails_new']}; "
@@ -102,7 +101,7 @@ async def main() -> int:
         )
         if not row["changed"]:
             return 0
-        rows = await client.graph.execute_read(_EXPORT, {})
+        rows = await graph.execute_read(_EXPORT, {})
         for r in rows[:8]:
             print(f"  [{r['kind']}] {r['old']:>4} -> {r['new']:<3} {r['text'][:80]!r}")
         if not args.apply:
@@ -117,18 +116,18 @@ async def main() -> int:
 
         written = 0
         while True:
-            out = await client.graph.execute_write(_APPLY, {"batch": BATCH})
+            out = await graph.execute_write(_APPLY, {"batch": BATCH})
             n = out[0]["n"] if out else 0
             if not n:
                 break
             written += n
             print(f"  updated {written}/{row['changed']}", end="\r", flush=True)
         print(f"updated {written} lesson(s)")
-        after = (await client.graph.execute_read(_SUMMARY, {}))[0]
+        after = (await graph.execute_read(_SUMMARY, {}))[0]
         print(f"remaining to change: {after['changed']}; guardrails now {after['guardrails_new']}")
         return 0 if after["changed"] == 0 else 1
     finally:
-        await client.close()
+        await graph.close()
 
 
 if __name__ == "__main__":
