@@ -203,3 +203,30 @@ async def test_served_lessons_are_rated_and_counters_move(coding_tools, memory_c
         {"session": session},
     )
     assert {row["helpful"] for row in rows} == {1}, rows
+
+
+@pytest.mark.integration
+async def test_sibling_subagents_reassert_once_per_family(memory_client):
+    """Two subagents of one parent restating a lesson at the same moment add
+    one unit of evidence, not two (MUD-435 A4; Codex F1 on the race)."""
+    from agent_memory_mcp.capture.cypher import anchored_memory_write, reassert_write, session_upsert
+
+    ts = "2026-09-07T00:00:00Z"
+    g = memory_client.graph
+    for sid in ("origin", "swarm:a", "swarm:b", "swarm:c"):
+        await g.execute_write(*session_upsert("agent", sid, "repo-x", "main", None, ts))
+    rows = await g.execute_write(*anchored_memory_write(
+        "Gotcha", {"text": "family evidence probe", "confidence": 0.9}, "origin", "repo-x", ["probe.py"], None, ts,
+    ))  # one anchor: the eid comes back through the UNWIND over anchor paths
+    eid = rows[0]["eid"]
+
+    import asyncio
+    await asyncio.gather(*(g.execute_write(*reassert_write(eid, sid, ts)) for sid in ("swarm:a", "swarm:b", "swarm:c")))
+
+    out = await g.execute_read(
+        "MATCH (m) WHERE elementId(m) = $eid "
+        "OPTIONAL MATCH (m)-[r:REASSERTED_IN]->() RETURN m.evidence_count AS evidence, count(r) AS edges",
+        {"eid": eid},
+    )
+    assert out[0]["edges"] == 3          # every session keeps its edge
+    assert out[0]["evidence"] == 2       # origin + one swarm family, not 4

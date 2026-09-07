@@ -43,6 +43,8 @@ class TestBuilders:
         assert "o.id = $family OR o.id STARTS WITH $family_prefix" in q
         assert "coalesce(m.evidence_count, 1) + CASE WHEN seen = 0 THEN 1 ELSE 0 END" in q
         assert "MERGE (m)-[r:REASSERTED_IN]->(s)" in q
+        # The lock-taking SET runs before the family read (Codex F1).
+        assert q.index("SET m.last_asserted_at") < q.index("OPTIONAL MATCH")
         assert p == {
             "eid": "4:abc:1", "session_id": "parent:spawn1", "ts": "2026-01-01T00:00:00Z",
             "family": "parent", "family_prefix": "parent:",

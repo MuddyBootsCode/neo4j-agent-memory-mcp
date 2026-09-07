@@ -261,14 +261,19 @@ def reassert_write(eid: str, session_id: str, ts: str) -> tuple[str, dict[str, A
     Subagent swarms had pushed lessons to evidence 60–114 in days and made
     45% of the store a "guardrail" (MUD-435 A4)."""
     family = session_family(session_id)
+    # The first SET takes the write lock on the lesson before the family
+    # read, so two sibling captures committing at once (NAM_CAPTURE_CONCURRENCY
+    # > 1, or two servers) serialise here and the second one sees the
+    # first one's edge instead of both counting seen = 0.
     query = """
         MATCH (m) WHERE elementId(m) = $eid
         MATCH (s:CodingSession {id: $session_id})
+        SET m.last_asserted_at = datetime($ts)
+        WITH m, s
         OPTIONAL MATCH (m)-[:MADE_IN|REASSERTED_IN]->(o:CodingSession)
             WHERE o.id = $family OR o.id STARTS WITH $family_prefix
         WITH m, s, count(o) AS seen
-        SET m.evidence_count = coalesce(m.evidence_count, 1) + CASE WHEN seen = 0 THEN 1 ELSE 0 END,
-            m.last_asserted_at = datetime($ts)
+        SET m.evidence_count = coalesce(m.evidence_count, 1) + CASE WHEN seen = 0 THEN 1 ELSE 0 END
         MERGE (m)-[r:REASSERTED_IN]->(s)
         SET r.at = datetime($ts)
     """
