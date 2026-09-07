@@ -109,7 +109,13 @@ async def main() -> int:
             return 0
 
         export = args.export or f"evidence-families-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.jsonl"
-        with open(export, "w", encoding="utf-8") as fh:
+        if os.path.exists(export):
+            # A retry after a partial run would export only what is still
+            # unchanged and truncate the original counts of the batches
+            # that already committed (Codex F5). Keep every export.
+            print(f"refusing to overwrite {export}; pass a new --export path")
+            return 2
+        with open(export, "x", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps({"eid": r["eid"], "kind": r["kind"], "old": r["old"], "new": r["new"]}) + "\n")
         print(f"exported {len(rows)} old/new pair(s) to {export}")
