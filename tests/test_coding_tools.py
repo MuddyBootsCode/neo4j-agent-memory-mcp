@@ -1167,6 +1167,62 @@ class TestRecallGate:
         assert len(result["memories"]) == 3
         assert result["timing_ms"]["gate"] < 1000
 
+    async def test_gate_skipped_while_capture_lane_busy(self, monkeypatch, mock_ctx):
+        """While a capture holds the lane the judge is generating and the
+        gate model queues behind it: on swarm days 90%+ of gate calls hit the
+        cap and came back ungated after the full wait (MUD-435 S3). Skip the
+        wait, return the same ungated list, and say so in the strategy."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        self._screen(monkeypatch, {0: True, 1: False, 2: False})  # would keep 1 of 3 if it ran
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        lane = ct._capture_gate()
+        await lane.acquire()
+        try:
+            result = json.loads(await tools["coding_recall"](
+                mock_ctx, prompt="q", agent_id="a", repo="r",
+            ))
+        finally:
+            lane.release()
+
+        assert len(result["memories"]) == 3
+        assert result["strategy"] == "vector+gate-skipped"
+        assert result["timing_ms"]["gate"] < 100
+
+    async def test_gate_runs_while_busy_when_skip_disabled(self, monkeypatch, mock_ctx):
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        self._screen(monkeypatch, {0: True, 1: False, 2: False})
+        monkeypatch.setattr(ct, "GATE_SKIP_WHEN_BUSY", False)
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        lane = ct._capture_gate()
+        await lane.acquire()
+        try:
+            result = json.loads(await tools["coding_recall"](
+                mock_ctx, prompt="q", agent_id="a", repo="r",
+            ))
+        finally:
+            lane.release()
+
+        assert len(result["memories"]) == 1
+        assert result["strategy"] == "vector+gate"
+
+    async def test_gate_runs_when_capture_lane_idle(self, monkeypatch, mock_ctx):
+        self._screen(monkeypatch, {0: True, 1: False, 2: False})
+        graph = FakeGraph(read_results=[self._rows(3)])
+        tools = _register(monkeypatch, graph, embedder=FakeEmbedder())
+
+        result = json.loads(await tools["coding_recall"](
+            mock_ctx, prompt="q", agent_id="a", repo="r",
+        ))
+
+        assert len(result["memories"]) == 1
+        assert result["strategy"] == "vector+gate"
+
     async def test_partial_verdicts_are_discarded_whole(self, monkeypatch, mock_ctx):
         """A truncated judge must not look like a decisive one."""
         self._screen(monkeypatch, {0: True})  # 1 verdict for 3 candidates

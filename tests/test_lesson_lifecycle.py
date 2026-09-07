@@ -12,6 +12,7 @@ from agent_memory_mcp.capture.cypher import (
     anchored_memory_write,
     expire_write,
     reassert_write,
+    session_family,
     resolve_write,
     served_write,
 )
@@ -33,11 +34,28 @@ class TestBuilders:
         assert "m.served_count = 0, m.helpful = 0, m.harmful = 0" in q
         assert q.strip().endswith("RETURN DISTINCT elementId(m) AS eid")
 
-    def test_reassert_increments_evidence_and_links_session(self):
-        q, p = reassert_write("4:abc:1", "sess", "2026-01-01T00:00:00Z")
-        assert "coalesce(m.evidence_count, 1) + 1" in q
-        assert "REASSERTED_IN" in q
-        assert p == {"eid": "4:abc:1", "session_id": "sess", "ts": "2026-01-01T00:00:00Z"}
+    def test_reassert_counts_evidence_once_per_session_family(self):
+        """A parent session and its subagents are one family: a lesson every
+        subagent of one swarm restates gains one unit of evidence, not one
+        per subagent (MUD-435 A4). The edge is still recorded per session."""
+        q, p = reassert_write("4:abc:1", "parent:spawn1", "2026-01-01T00:00:00Z")
+        assert "MADE_IN|REASSERTED_IN" in q
+        assert "o.id = $family OR o.id STARTS WITH $family_prefix" in q
+        assert "coalesce(m.evidence_count, 1) + CASE WHEN seen = 0 THEN 1 ELSE 0 END" in q
+        assert "MERGE (m)-[r:REASSERTED_IN]->(s)" in q
+        assert p == {
+            "eid": "4:abc:1", "session_id": "parent:spawn1", "ts": "2026-01-01T00:00:00Z",
+            "family": "parent", "family_prefix": "parent:",
+        }
+
+    @pytest.mark.parametrize("session_id, family", [
+        ("abc", "abc"),                 # a main session is its own family
+        ("abc:spawn1", "abc"),          # a subagent belongs to its parent
+        (":spawn1", ":spawn1"),         # a spawn with no parent id stands alone
+        ("a:b:c", "a"),                 # only the first segment is the parent
+    ])
+    def test_session_family(self, session_id, family):
+        assert session_family(session_id) == family
 
     def test_expire_sets_fields_and_supersedes_edge_only_with_successor(self):
         q, p = expire_write("old", "new", "t")
@@ -122,7 +140,8 @@ class TestCapturePipelineLifecycle:
         assert result["reasserted"] == 1
         assert result["stored"] == 3
         reassert = [p for q, p in graph.writes if "REASSERTED_IN" in q]
-        assert reassert == [{"eid": "4:old:1", "session_id": "s", "ts": reassert[0]["ts"]}]
+        assert reassert == [{"eid": "4:old:1", "session_id": "s", "ts": reassert[0]["ts"],
+                             "family": "s", "family_prefix": "s:"}]
         assert not any("keep hooks thin" in json.dumps(p) for q, p in graph.writes if "CREATE (m:" in q)
 
     async def test_supersedes_writes_the_new_lesson_and_expires_the_old(self, monkeypatch, mock_ctx):
