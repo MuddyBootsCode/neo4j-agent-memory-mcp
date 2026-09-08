@@ -320,6 +320,68 @@ def memory_embedding_text(kind: str, props: dict[str, Any]) -> str:
     return f"{symptom} | {body}" if symptom else body
 
 
+# Context prefix (MUD-456, P5 E1). Anthropic's contextual retrieval, on
+# lessons instead of chunks: prepend where the lesson comes from before
+# embedding it, so a prompt that shares no words with the fix can still
+# reach it through the repo, the kind, or the files it is anchored to.
+# NAM_EMBED_CONTEXT_PREFIX names the parts ("1" for all of them), which is
+# what makes the E1 ablation an env change and nothing else.
+_CONTEXT_PREFIX_PARTS = ("repo", "kind", "files")
+_MAX_PREFIX_FILES = 4
+
+
+def context_prefix_spec(raw: str) -> tuple[str, ...]:
+    """Parse NAM_EMBED_CONTEXT_PREFIX into prefix parts, in format order."""
+    tokens = {t.strip().lower() for t in (raw or "").split(",") if t.strip()}
+    if "1" in tokens:
+        return _CONTEXT_PREFIX_PARTS
+    return tuple(part for part in _CONTEXT_PREFIX_PARTS if part in tokens)
+
+
+CONTEXT_PREFIX: tuple[str, ...] = context_prefix_spec(
+    os.environ.get("NAM_EMBED_CONTEXT_PREFIX", "")
+)
+
+
+def _prefix_basenames(files: list[str]) -> str:
+    """Up to four distinct file basenames, sorted.
+
+    Sorted rather than as given: capture has the extractor's order and the
+    backfill has the graph's, and a lesson that embeds differently
+    depending on which wrote it is two points in the vector space.
+    """
+    names = sorted({os.path.basename(str(path)) for path in files if path})
+    return ", ".join(names[:_MAX_PREFIX_FILES])
+
+
+def memory_embedding_input(
+    kind: str,
+    props: dict[str, Any],
+    *,
+    repo: str | None = None,
+    files: list[str] | None = None,
+) -> str:
+    """The string handed to the embedder for a lesson.
+
+    The canonical text by default. What varies here must never reach
+    ``memory_embedding_text``: that one identifies a lesson.
+    """
+    canonical = memory_embedding_text(kind, props)
+    if not canonical.strip():
+        return canonical
+    parts: list[str] = []
+    for part in CONTEXT_PREFIX:
+        if part == "repo" and repo:
+            parts.append(str(repo))
+        elif part == "kind" and kind:
+            parts.append(kind.lower())
+        elif part == "files" and files:
+            names = _prefix_basenames(files)
+            if names:
+                parts.append(names)
+    return f"{' · '.join(parts)} | {canonical}" if parts else canonical
+
+
 def _embedder(client: Any) -> Any:
     """The client's embedder, or None when embeddings are unavailable."""
     return getattr(client.long_term, "_embedder", None)
@@ -935,7 +997,10 @@ async def capture_transcript(
         for c in candidates:
             vector = None
             if c["kind"] in RECALL_KINDS:
-                vector = await _embed(client, memory_embedding_text(c["kind"], _node_props(c)))
+                vector = await _embed(client, memory_embedding_input(
+                    c["kind"], _node_props(c),
+                    repo=repo, files=list(c.get("anchor_files") or []),
+                ))
                 for eid, line in await _neighbors(client, repo, vector):
                     if eid not in seen_eids:
                         seen_eids.add(eid)

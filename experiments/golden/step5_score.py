@@ -30,6 +30,11 @@ from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session
 from mem import open_client
 
 CAP = 5
+# Which configs to score. The gate (E) is a local model call per query and
+# ran at its 6 s timeout throughout p4-live, so an index-side experiment
+# that only needs the ceiling and the ranking asks for "cosine20,D" and
+# skips ten minutes of timeouts (MUD-456).
+CONFIGS = [c.strip() for c in os.environ.get("GOLDEN_CONFIGS", "cosine20,D,E").split(",") if c.strip()]
 # Query expansion (MUD-406): prepend the previous N human prompts and the
 # last assistant text from the same session, so a short follow-up like
 # "Keep the lineage doc" carries the conversation it belongs to. 0 = the
@@ -128,7 +133,13 @@ async def main() -> None:
         return labels.get(f"{qid}:{lid}")
 
     db = os.environ.get("GOLDEN_REUSE_DB") or GOLDEN_DB
-    configs = ["cosine20", "D", "E"]
+    unknown = [c for c in CONFIGS if c not in ("cosine20", "D", "E")]
+    if unknown:
+        raise SystemExit(f"unknown GOLDEN_CONFIGS entries: {unknown}")
+    configs = [c for c in ("cosine20", "D", "E") if c in CONFIGS]
+    if not configs:
+        raise SystemExit("GOLDEN_CONFIGS selected nothing to score")
+    need_d = "D" in configs or "E" in configs
     agg = {c: {"injected": 0, "relevant": 0, "unlabeled": 0, "covered": 0, "top5_injected": 0, "top5_relevant": 0, "recall_num": 0} for c in configs}
     relevant_total = 0
     timings: dict[str, list[float]] = {"embed_ms": [], "vector_ms": [], "gate_ms": []}
@@ -142,16 +153,27 @@ async def main() -> None:
             relevant_ids = {lid for lid in pool_by_repo.get(q["repo"], set()) if rel(qid, lid)}
             relevant_total += len(relevant_ids)
 
-            cos, t1, emb = await _retrieve(client, q, config="cosine20", limit=20)
-            d, t2, _ = await _retrieve(client, q, config="D", limit=GATE_DEPTH, embedding=emb)
-            timings["embed_ms"].append(t1["embed_ms"])
-            timings["vector_ms"].append(t2.get("vector_ms", 0.0))
-            t0 = time.perf_counter()
-            e = await screen_memories(q["prompt"], list(d)) if d else []
-            timings["gate_ms"].append((time.perf_counter() - t0) * 1000)
+            cos: list[dict] = []
+            d: list[dict] = []
+            e: list[dict] = []
+            emb = None
+            if "cosine20" in configs:
+                cos, t1, emb = await _retrieve(client, q, config="cosine20", limit=20)
+                timings["embed_ms"].append(t1["embed_ms"])
+            if need_d:
+                d, t2, emb = await _retrieve(client, q, config="D", limit=GATE_DEPTH, embedding=emb)
+                if "embed_ms" in t2:
+                    timings["embed_ms"].append(t2["embed_ms"])
+                timings["vector_ms"].append(t2.get("vector_ms", 0.0))
+            if "E" in configs:
+                t0 = time.perf_counter()
+                e = await screen_memories(q["prompt"], list(d)) if d else []
+                timings["gate_ms"].append((time.perf_counter() - t0) * 1000)
 
             row = {"query_id": qid, "anchorable": q["anchorable"], "short": q["short"], "relevant_in_pool": len(relevant_ids)}
             for name, items in (("cosine20", cos), ("D", d), ("E", e)):
+                if name not in configs:
+                    continue
                 got = [it["id"] for it in items]
                 hits = [lid for lid in got if rel(qid, lid)]
                 a = agg[name]
@@ -164,7 +186,9 @@ async def main() -> None:
                 a["top5_relevant"] += sum(1 for lid in got[:CAP] if rel(qid, lid))
                 row[name] = {"ids": got, "hits": len(hits)}
             per_query.append(row)
-            print(f"q{qid:<3} pool_rel={len(relevant_ids):<2} cos20={row['cosine20']['hits']}/{len(cos)} D={row['D']['hits']}/{len(d)} E={row['E']['hits']}/{len(e)}  gate {timings['gate_ms'][-1]:.0f}ms")
+            scored = " ".join(f"{n}={row[n]['hits']}/{len(row[n]['ids'])}" for n in configs)
+            gate = f"  gate {timings['gate_ms'][-1]:.0f}ms" if "E" in configs else ""
+            print(f"q{qid:<3} pool_rel={len(relevant_ids):<2} {scored}{gate}")
 
     n = len(queries)
     table = {}
@@ -178,11 +202,15 @@ async def main() -> None:
             "unlabeled_injected": a["unlabeled"],
             **{k: a[k] for k in ("injected", "relevant")},
         }
-    latency = {k: {"p50_ms": _pct(v, 0.5), "p95_ms": _pct(v, 0.95)} for k, v in timings.items()}
+    latency = {k: {"p50_ms": _pct(v, 0.5), "p95_ms": _pct(v, 0.95)} for k, v in timings.items() if v}
     summary = {"queries": n, "pool": len(pool), "relevant_pairs": relevant_total,
                "relevant_per_query": relevant_total / n, "configs": table, "latency": latency,
                "gate_depth": GATE_DEPTH, "threshold": HYBRID_THRESHOLD, "anchor_boost": ANCHOR_BOOST,
                "embedding_model": os.environ.get("NAM_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+               # What the index was built with, from the run that built it --
+               # not this process's env, which never embeds a lesson.
+               "context_prefix": (load_json("corpus_stats.json") or {}).get("context_prefix"),
+               "scored_configs": configs,
                "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
