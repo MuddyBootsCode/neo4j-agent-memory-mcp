@@ -308,19 +308,51 @@ def unlabeled_pairs(labels: dict, queries: list[dict], pool: list[dict]) -> int:
     )
 
 
-def complete_fingerprints(labels: dict, queries: list[dict], pool: list[dict]) -> dict:
-    """Fingerprints for the queries whose labels are complete.
+def fingerprints_for_labelled(labels: dict, queries: list[dict]) -> dict:
+    """Fingerprints for every query that has at least one verdict.
 
-    The fingerprint's claim is "these labels judged this text", so writing
-    one for a query still being labelled would certify judgments that do
-    not exist yet — and an interrupted run would leave the query marked
-    current and unlabelled.
+    The fingerprint answers "which text were these judged against", not
+    "is this query finished". Withholding it until a query is complete
+    leaves a half-labelled query unfingerprinted, and a text change there
+    would let step4 keep the chunks already saved — judged against the old
+    prompt — and top them up against the new one, then certify the mixture
+    as coherent. Completeness is a separate question, answered by
+    :func:`unlabeled_pairs`.
     """
-    by_repo = _pool_ids_by_repo(pool)
+    labelled = {key.split(":", 1)[0] for key in labels}
     return {
         str(q["query_id"]): query_fingerprint(q)
         for q in queries
-        if all(f"{q['query_id']}:{lid}" in labels for lid in by_repo.get(q["repo"], ()))
+        if str(q["query_id"]) in labelled
+    }
+
+
+def rewrite_lessons(entry) -> list[str]:
+    """The guesses in a rewrites.json entry, in either shape.
+
+    Entries written before provenance existed are a bare list; entries
+    written since are ``{"fingerprint": ..., "lessons": [...]}``.
+    """
+    if isinstance(entry, dict):
+        return list(entry.get("lessons") or [])
+    return list(entry or [])
+
+
+def stale_rewrites(store: dict, queries: list[dict]) -> set[str]:
+    """Rewrite entries whose query has changed since they were generated.
+
+    HyDE guesses are keyed by query_id and step5 attaches them the same
+    way, so a query regenerated under its own id would silently inherit
+    the guesses written for the prompt it replaced (MUD-459, Codex
+    review). An entry with no fingerprint predates this and is left alone;
+    step5 reports how many of those it is trusting.
+    """
+    return {
+        str(q["query_id"])
+        for q in queries
+        if isinstance(store.get(str(q["query_id"])), dict)
+        and store[str(q["query_id"])].get("fingerprint")
+        and store[str(q["query_id"])]["fingerprint"] != query_fingerprint(q)
     }
 
 

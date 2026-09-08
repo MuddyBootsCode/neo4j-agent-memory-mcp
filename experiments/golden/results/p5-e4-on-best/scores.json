@@ -30,12 +30,12 @@
     },
     "latency": {
       "embed_ms": {
-        "p50_ms": 12.851000006776303,
-        "p95_ms": 61.572874983539805
+        "p50_ms": 10.361499997088686,
+        "p95_ms": 23.886209004558623
       },
       "vector_ms": {
-        "p50_ms": 303.0614170129411,
-        "p95_ms": 1643.1089580000844
+        "p50_ms": 263.32045800518245,
+        "p95_ms": 454.02441601618193
       }
     },
     "gate_depth": 10,
@@ -54,7 +54,10 @@
     "query_card": null,
     "queries_with_error_line": 0,
     "hyde": "results/p5-e4/rewrites.json",
-    "symptom_only": false
+    "symptom_only": false,
+    "unlabeled_pairs": 0,
+    "labelled_pairs_owed": 28700,
+    "fingerprinted_queries": 0
   },
   "per_query": [
     {

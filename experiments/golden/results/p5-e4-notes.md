@@ -55,5 +55,17 @@ is idle.
 Latency: four vector legs instead of one takes the query's p50 from ~50 ms
 to ~120 ms, which is noise next to the generation call.
 
+## Provenance
+
+The Codex review found that rewrites were keyed by query_id alone, on both
+sides: `step3b_hyde` resumed on the id, and step5 attached the guesses by
+the id, so a query regenerated under its own number would silently inherit
+the guesses written for the prompt it replaced — an invalid comparison
+that reports nothing. Each entry now carries the fingerprint of the query
+it was generated from; step3b regenerates what no longer matches and step5
+refuses to score a mismatch. Both committed files were migrated to that
+shape against the queries they were actually generated from, and the run
+above reproduces to the decimal afterwards.
+
 Same artifact policy as the other P5 runs; `rewrites.json` and
 `rewrites-gate.json` live once, under `p5-e4/`.
