@@ -11,9 +11,10 @@ both indexes.
     NAM_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5 NAM_EMBEDDING_DIMENSIONS=768 \\
     uv run --no-sync --project ../.. python step1b_materialize.py
 
-NAM_EMBED_CONTEXT_PREFIX (MUD-456) changes what is embedded without
-changing what identifies a lesson, so the labels still apply. The parts
-that were used land in corpus_stats.json.
+NAM_EMBED_CONTEXT_PREFIX (MUD-456) and GOLDEN_TRIGGERS (MUD-457, a path
+to a step1c triggers.json) change what is embedded without changing what
+identifies a lesson, so the labels still apply. What was used lands in
+corpus_stats.json.
 
 Copies pool.json, queries.json and labels.json from the source run into the
 new run directory so steps 5 and 6 work unchanged.
@@ -81,6 +82,19 @@ async def main() -> None:
         if os.path.exists(os.path.join(src_dir, name)):
             shutil.copy(os.path.join(src_dir, name), result_path(name))
 
+    # Trigger sentences (MUD-457): keyed by lesson id, which the canonical
+    # text fixes, so one step1c generation serves every E2 variant.
+    triggers: dict[str, list[str]] = {}
+    triggers_from = os.environ.get("GOLDEN_TRIGGERS")
+    if triggers_from:
+        triggers_from = (triggers_from if os.path.isabs(triggers_from)
+                         else os.path.join(HERE, triggers_from))
+        with open(triggers_from, encoding="utf-8") as fh:
+            triggers = json.load(fh)
+        if os.path.abspath(triggers_from) != os.path.abspath(result_path("triggers.json")):
+            shutil.copy(triggers_from, result_path("triggers.json"))
+        print(f"triggers: {sum(1 for v in triggers.values() if v)} lessons carry them")
+
     # Holdout: a pool exported from the live store carries lessons from the
     # sessions the queries came from (and their subagents). Replaying a
     # prompt against knowledge extracted from its own session is not
@@ -117,7 +131,7 @@ async def main() -> None:
             # Canonical text keys the id and the labels; the embedder sees
             # whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456).
             vector = await _embed(client, embedding_input(
-                it["kind"], props, it["repo"], it["files"]))
+                it["kind"], props, it["repo"], it["files"], triggers.get(it["id"])))
             if first:
                 ok = await ensure_coding_memory_index(client)
                 print(f"indexes ensured: {ok}")
@@ -137,7 +151,9 @@ async def main() -> None:
     save_json("corpus_stats.json", {"materialized_from": src, "lessons": len(pool),
                                     "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched,
                                     "counters_restored": restored,
-                                    "context_prefix": context_prefix()})
+                                    "context_prefix": context_prefix(),
+                                    "triggers_from": triggers_from,
+                                    "triggers_used": sum(1 for it in pool if triggers.get(it["id"]))})
     print(f"materialized {len(pool)} lessons in {time.time() - t0:.0f}s; "
           f"{mismatched} whose rebuilt text differs from the pool (labels for those are approximate); "
           f"{restored} with lifecycle counters restored")

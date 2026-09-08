@@ -49,6 +49,9 @@ type_map = {
     "types.ExtractedReasoningStep": types.ExtractedReasoningStep,
     "stream_types.ExtractedReasoningStep": stream_types.ExtractedReasoningStep,
 
+    "types.LessonTriggerSet": types.LessonTriggerSet,
+    "stream_types.LessonTriggerSet": stream_types.LessonTriggerSet,
+
     "types.ReasoningChainInput": types.ReasoningChainInput,
     "stream_types.ReasoningChainInput": stream_types.ReasoningChainInput,
 

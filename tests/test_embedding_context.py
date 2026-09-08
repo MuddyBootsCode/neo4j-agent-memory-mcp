@@ -93,6 +93,38 @@ class TestEmbeddingInputSplit:
         ) == "five.py, four.py, one.py, three.py | pin the version"
 
 
+class TestTriggersInTheEmbeddingInput:
+    """MUD-457 (E2): trigger sentences ride in the embedded string, never
+    in the canonical text — a lesson that gains triggers keeps its id."""
+
+    def test_triggers_are_appended_after_the_lesson(self, monkeypatch):
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "CONTEXT_PREFIX", ("files",))
+
+        assert ct.memory_embedding_input(
+            "Gotcha", {"text": "pin the version"}, files=["src/deps.py"],
+            triggers=["You are editing deps.py and the build resolves 2.0.",
+                      "A fresh checkout installs a different version."],
+        ) == (
+            "deps.py | pin the version"
+            " | You are editing deps.py and the build resolves 2.0."
+            " A fresh checkout installs a different version."
+        )
+
+    def test_no_triggers_leaves_the_string_alone(self):
+        from agent_memory_mcp.mcp._coding_tools import (
+            memory_embedding_input,
+            memory_embedding_text,
+        )
+
+        props = {"text": "pin the version"}
+        for triggers in (None, [], ["", "   "]):
+            assert memory_embedding_input(
+                "Gotcha", props, triggers=triggers
+            ) == memory_embedding_text("Gotcha", props)
+
+
 class TestContextPrefixSpec:
     @pytest.mark.parametrize(
         "raw,expected",

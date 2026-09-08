@@ -251,12 +251,14 @@ def lesson_text(kind: str, props: dict) -> str:
     return memory_embedding_text(kind, props)
 
 
-def embedding_input(kind: str, props: dict, repo: str, files: list[str]) -> str:
+def embedding_input(kind: str, props: dict, repo: str, files: list[str],
+                    triggers: list[str] | None = None) -> str:
     """What the embedder is given for a lesson: the canonical text, plus
-    whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456)."""
+    whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456) and the lesson's
+    trigger sentences when the run has them (MUD-457)."""
     from agent_memory_mcp.mcp._coding_tools import memory_embedding_input
 
-    return memory_embedding_input(kind, props, repo=repo, files=files)
+    return memory_embedding_input(kind, props, repo=repo, files=files, triggers=triggers)
 
 
 def context_prefix() -> list[str]:
