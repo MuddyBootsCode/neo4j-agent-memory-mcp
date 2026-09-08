@@ -1,0 +1,47 @@
+[
+  {
+    "query_id": 70,
+    "repo": "gradgraph-auth-platform",
+    "chunk": 0,
+    "model": "claude-opus-5",
+    "effort": "medium",
+    "input": 78,
+    "output": 999,
+    "cache_write": 7972,
+    "cache_read": 0,
+    "cost_usd": 0.07519,
+    "elapsed_s": 16.0,
+    "missing": 0,
+    "relevant": 5
+  },
+  {
+    "query_id": 0,
+    "repo": "gradgraph-auth-platform",
+    "chunk": 3,
+    "model": "claude-opus-5",
+    "effort": "medium",
+    "input": 110,
+    "output": 1596,
+    "cache_write": 7989,
+    "cache_read": 0,
+    "cost_usd": 0.09038,
+    "elapsed_s": 21.7,
+    "missing": 0,
+    "relevant": 5
+  },
+  {
+    "query_id": 79,
+    "repo": "gradgraph-auth-platform",
+    "chunk": 3,
+    "model": "claude-opus-5",
+    "effort": "medium",
+    "input": 235,
+    "output": 2829,
+    "cache_write": 0,
+    "cache_read": 7989,
+    "cost_usd": 0.07589,
+    "elapsed_s": 37.8,
+    "missing": 0,
+    "relevant": 8
+  }
+]
