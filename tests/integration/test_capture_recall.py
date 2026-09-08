@@ -216,8 +216,8 @@ async def test_sibling_subagents_reassert_once_per_family(memory_client):
     for sid in ("origin", "swarm:a", "swarm:b", "swarm:c"):
         await g.execute_write(*session_upsert("agent", sid, "repo-x", "main", None, ts))
     rows = await g.execute_write(*anchored_memory_write(
-        "Gotcha", {"text": "family evidence probe", "confidence": 0.9}, "origin", "repo-x", ["probe.py"], None, ts,
-    ))  # one anchor: the eid comes back through the UNWIND over anchor paths
+        "Gotcha", {"text": "family evidence probe", "confidence": 0.9}, "origin", "repo-x", [], None, ts,
+    ))  # no anchors: the eid must still come back (Codex F8)
     eid = rows[0]["eid"]
 
     import asyncio

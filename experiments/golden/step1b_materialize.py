@@ -23,7 +23,7 @@ import os
 import shutil
 import time
 
-from lib import GOLDEN_DB, HERE, drop_database, lesson_text, result_path, save_json
+from lib import GOLDEN_DB, HERE, drop_database, lesson_text, load_json, result_path, save_json, session_family
 from mem import LOCAL_EMBEDDING_CONFIG, open_client
 from step1_corpus import _create_database
 
@@ -76,6 +76,16 @@ async def main() -> None:
         if os.path.exists(os.path.join(src_dir, name)):
             shutil.copy(os.path.join(src_dir, name), result_path(name))
 
+    # Holdout: a pool exported from the live store carries lessons from the
+    # sessions the queries came from (and their subagents). Replaying a
+    # prompt against knowledge extracted from its own session is not
+    # recall, so those families are dropped here and refused in step5.
+    query_families = {session_family(q["session"]) for q in load_json("queries.json", [])}
+    before = len(pool)
+    pool = [it for it in pool if session_family(it["session"]) not in query_families]
+    if before != len(pool):
+        print(f"holdout: dropped {before - len(pool)} lesson(s) from query-session families")
+
     from agent_memory_mcp.capture.cypher import anchored_memory_write, session_upsert
     from agent_memory_mcp.mcp._coding_tools import _embed, ensure_coding_memory_index
 
@@ -107,6 +117,8 @@ async def main() -> None:
             q, p = anchored_memory_write(it["kind"], props, it["session"], it["repo"], it["files"], None, ts, embedding=vector)
             rows = await client.graph.execute_write(q, p)
             counters = _counters_from(it)
+            if counters and not rows:
+                raise SystemExit(f"no eid returned for {it['id']}; counters would be lost")
             if counters and rows:
                 restored += 1
                 await client.graph.execute_write(
