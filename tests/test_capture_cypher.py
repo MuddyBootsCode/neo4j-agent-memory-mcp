@@ -274,7 +274,8 @@ class TestAnchoredMemoryWrite:
         )
         assert "MATCH (s:CodingSession {id: $session_id})" in query
         assert "MERGE (m)-[:MADE_IN]->(s)" in query
-        assert "UNWIND $anchor_paths AS path" in query
+        assert "FOREACH (path IN $anchor_paths |" in query
+        assert query.strip().endswith("RETURN elementId(m) AS eid")  # even with no anchors
         assert "MERGE (f:CodeFile {repo: $repo, path: path})" in query
         assert "MERGE (m)-[:ABOUT]->(f)" in query
 

@@ -256,3 +256,11 @@ async def drop_database(name: str) -> None:
             await session.run(f"DROP DATABASE `{name}` IF EXISTS")
     finally:
         await driver.close()
+
+
+def session_family(session_id: str) -> str:
+    """Parent session of a ``parent:spawn`` subagent id; the id itself
+    otherwise (same rule as agent_memory_mcp.capture.cypher)."""
+    if ":" in session_id and not session_id.startswith(":"):
+        return session_id.split(":", 1)[0]
+    return session_id

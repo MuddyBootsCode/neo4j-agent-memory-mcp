@@ -59,10 +59,13 @@ _EXPORT = _RECOUNT + """
     ORDER BY old - new DESC
 """
 
-_APPLY = _RECOUNT + """
-    WHERE old <> new
-    WITH m, new LIMIT $batch
-    SET m.evidence_count = new
+# Bound to the exported rows, with the exported old value as a guard: a
+# lesson a live capture touched between export and apply is left alone and
+# reported, so the export stays a complete rollback record (Codex F7).
+_APPLY = """
+    UNWIND $rows AS r
+    MATCH (m) WHERE elementId(m) = r.eid AND coalesce(m.evidence_count, 1) = r.old
+    SET m.evidence_count = r.new
     RETURN count(m) AS n
 """
 
@@ -121,17 +124,18 @@ async def main() -> int:
         print(f"exported {len(rows)} old/new pair(s) to {export}")
 
         written = 0
-        while True:
-            out = await graph.execute_write(_APPLY, {"batch": BATCH})
-            n = out[0]["n"] if out else 0
-            if not n:
-                break
-            written += n
-            print(f"  updated {written}/{row['changed']}", end="\r", flush=True)
-        print(f"updated {written} lesson(s)")
+        for i in range(0, len(rows), BATCH):
+            batch = [{"eid": r["eid"], "old": r["old"], "new": r["new"]} for r in rows[i:i + BATCH]]
+            out = await graph.execute_write(_APPLY, {"rows": batch})
+            written += out[0]["n"] if out else 0
+            print(f"  updated {written}/{len(rows)}", end="\r", flush=True)
+        drifted = len(rows) - written
+        print(f"updated {written} lesson(s); {drifted} changed under us since the export and were left alone")
         after = (await graph.execute_read(_SUMMARY, {}))[0]
         print(f"remaining to change: {after['changed']}; guardrails now {after['guardrails_new']}")
-        return 0 if after["changed"] == 0 else 1
+        if drifted:
+            print("re-run with a new --export path to pick those up")
+        return 0 if after["changed"] == 0 and not drifted else 1
     finally:
         await graph.close()
 

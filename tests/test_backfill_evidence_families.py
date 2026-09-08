@@ -34,7 +34,8 @@ class FakeGraph:
 
     async def execute_write(self, query, params=None):
         self.writes += 1
-        return [{"n": 0}]
+        self.applied = list(params["rows"])
+        return [{"n": len(params["rows"])}]
 
 
 async def test_apply_refuses_to_overwrite_an_existing_export(tmp_path, monkeypatch):
@@ -82,3 +83,26 @@ async def test_apply_writes_a_fresh_export_then_updates(tmp_path, monkeypatch):
     assert rc == 0
     assert graph.writes == 1
     assert len(export.read_text().splitlines()) == 2
+    # The update is bound to the exported rows and their old values (Codex F7).
+    assert [r["eid"] for r in graph.applied] == ["4:x:0", "4:x:1"]
+    assert all(r["old"] == 9 and r["new"] == 1 for r in graph.applied)
+
+
+async def test_rows_that_drifted_after_export_are_left_alone_and_reported(tmp_path, monkeypatch, capsys):
+    mod = _load_script()
+    export = tmp_path / "drift.jsonl"
+    graph = FakeGraph(changed=2)
+
+    async def write(query, params=None):
+        graph.writes += 1
+        return [{"n": len(params["rows"]) - 1}]  # one row no longer matches its exported old value
+
+    graph.execute_write = write
+    import neo4j_agent_memory.graph.client as gc
+    monkeypatch.setattr(gc, "Neo4jClient", lambda cfg: graph)
+    monkeypatch.setattr(sys, "argv", ["backfill", "--apply", "--export", str(export)])
+
+    rc = await mod.main()
+
+    assert rc == 1
+    assert "1 changed under us" in capsys.readouterr().out

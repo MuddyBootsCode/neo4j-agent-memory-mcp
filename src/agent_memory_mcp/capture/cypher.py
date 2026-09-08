@@ -162,7 +162,7 @@ def anchored_memory_write(
     acceptable in v1. ``props`` values must be primitives (str/int/float/
     bool); nested containers raise ``ValueError`` (Neo4j property
     constraint). Anchor edges come from ``anchor_paths`` (an empty list
-    creates the node with no ``ABOUT`` edges); the ``CONCERNS`` edge is only
+    creates the node with no ``ABOUT`` edges and still returns its eid); the ``CONCERNS`` edge is only
     built when ``task_key`` is given. MATCHes the session; if it does not
     exist the whole write is a silent no-op — run session_upsert first.
     ``ts`` is an ISO 8601 string.
@@ -219,12 +219,17 @@ def anchored_memory_write(
         MERGE (m)-[:CONCERNS]->(t)
         """
         params["task_key"] = task_key
+    # FOREACH, not UNWIND: an UNWIND over an empty anchor list yields no
+    # rows, so a lesson with no anchors came back without its eid and a
+    # SUPERSEDES verdict on it expired the old lesson with superseded_by
+    # null; the golden harness likewise never restored such a lesson's
+    # counters (MUD-435, Codex F8).
     query += """
         WITH m
-        UNWIND $anchor_paths AS path
-        MERGE (f:CodeFile {repo: $repo, path: path})
-        MERGE (m)-[:ABOUT]->(f)
-        RETURN DISTINCT elementId(m) AS eid
+        FOREACH (path IN $anchor_paths |
+            MERGE (f:CodeFile {repo: $repo, path: path})
+            MERGE (m)-[:ABOUT]->(f))
+        RETURN elementId(m) AS eid
     """
     return query, params
 
