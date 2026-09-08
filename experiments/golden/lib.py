@@ -258,11 +258,20 @@ def query_fingerprint(query: dict, protocol: str = "prompt") -> str:
     was judged under (GOLDEN_LABEL_RUBRIC), because "would this lesson
     help at this prompt" and "would it help with this failure" are
     different questions and their verdicts do not mix. Not the id, so
-    renumbering a set does not invalidate it, and not the file order.
+    renumbering a set does not invalidate it.
+
+    Files are taken in the order given and in full. Each consumer renders
+    its own slice — step4 shows the labeller ``files[:10]`` as given,
+    step3b shows four sorted basenames — so the order decides what is
+    actually seen once a query carries more than ten. Fingerprinting the
+    whole ordered list is a superset of every such slice: it can
+    invalidate a shade more than strictly necessary, which costs a
+    relabel, and it can never miss a change that mattered, which costs a
+    wrong number (MUD-460, Codex review).
     """
     payload = json.dumps({
         "prompt": query.get("prompt", ""),
-        "files": sorted(query.get("files") or []),
+        "files": list(query.get("files") or []),
         "tool": query.get("tool"),
         "attempt": query.get("attempt"),
         "protocol": protocol,
@@ -311,6 +320,25 @@ def unlabeled_pairs(labels: dict, queries: list[dict], pool: list[dict]) -> int:
         for lid in by_repo.get(q["repo"], ())
         if f"{q['query_id']}:{lid}" not in labels
     )
+
+
+def wholly_unlabelled(labels: dict, queries: list[dict], pool: list[dict]) -> set:
+    """Queries carrying no verdict at all against the lessons they owe.
+
+    Separate from the global unlabelled tolerance, and not reachable by
+    it: on the p4-live shape one query's 287 pairs is exactly 1.0000% of
+    28,700, so a single interrupted relabel lands precisely on a 1% bar.
+    Such a query scores as all-misses with its relevant lessons absent
+    from the denominator, which is a wrong number rather than a missing
+    one (MUD-460, Codex review).
+    """
+    by_repo = _pool_ids_by_repo(pool)
+    return {
+        q["query_id"]
+        for q in queries
+        if by_repo.get(q["repo"])
+        and not any(f"{q['query_id']}:{lid}" in labels for lid in by_repo[q["repo"]])
+    }
 
 
 def fingerprints_for_labelled(labels: dict, queries: list[dict],

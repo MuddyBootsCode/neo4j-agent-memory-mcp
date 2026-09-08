@@ -16,12 +16,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "exp
 
 class TestQueryFingerprint:
     def test_the_same_query_fingerprints_the_same(self):
+        """The id is not part of it, so renumbering a set does not
+        invalidate its labels."""
         from lib import query_fingerprint
 
         q = {"query_id": 1, "prompt": "boom", "files": ["b.py", "a.py"]}
         assert query_fingerprint(q) == query_fingerprint(
-            {"query_id": 99, "prompt": "boom", "files": ["a.py", "b.py"]}
+            {"query_id": 99, "prompt": "boom", "files": ["b.py", "a.py"]}
         )
+
+    def test_reordering_the_files_changes_it(self):
+        """step4 renders files[:10] in the order given, so the order
+        decides which files the labeller sees once there are more than
+        ten of them. Two of the 100 p4-live queries carry more than ten."""
+        from lib import query_fingerprint
+
+        files = [f"f{i}.py" for i in range(14)]
+        a = {"query_id": 1, "prompt": "p", "files": files}
+        b = {"query_id": 1, "prompt": "p", "files": files[-1:] + files[:-1]}
+
+        assert query_fingerprint(a) != query_fingerprint(b)
 
     def test_changed_text_changes_the_fingerprint(self):
         from lib import query_fingerprint
@@ -104,6 +118,38 @@ class TestLabelCompleteness:
         pool = [{"id": "a", "repo": "r"}, {"id": "z", "repo": "other"}]
 
         assert unlabeled_pairs({"1:a": True}, queries, pool) == 0
+
+
+class TestWhollyUnlabelledQueries:
+    def test_a_query_with_no_verdicts_at_all_is_named(self):
+        """A global tolerance cannot catch this: on the p4-live shape one
+        query's 287 pairs is exactly 1.0000% of 28,700, so a single
+        interrupted relabel sits precisely on the bar. Such a query scores
+        as all-misses with its relevant lessons out of the denominator."""
+        from lib import wholly_unlabelled
+
+        queries = [{"query_id": 1, "repo": "r"}, {"query_id": 2, "repo": "r"}]
+        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+
+        assert wholly_unlabelled({"1:a": True, "1:b": False}, queries, pool) == {2}
+
+    def test_a_partly_labelled_query_is_not_named(self):
+        """A labeller omitting an id is a hole, not an absence; the global
+        bar is what judges those."""
+        from lib import wholly_unlabelled
+
+        queries = [{"query_id": 1, "repo": "r"}]
+        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+
+        assert wholly_unlabelled({"1:a": True}, queries, pool) == set()
+
+    def test_a_query_whose_repo_has_no_lessons_owes_nothing(self):
+        from lib import wholly_unlabelled
+
+        queries = [{"query_id": 1, "repo": "empty"}]
+        pool = [{"id": "a", "repo": "other"}]
+
+        assert wholly_unlabelled({}, queries, pool) == set()
 
 
 class TestFingerprintsFollowTheLabels:
