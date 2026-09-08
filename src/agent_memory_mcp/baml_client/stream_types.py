@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (19)
+# Generated classes (20)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -91,6 +91,9 @@ class ExtractedReasoningStep(BaseModel):
     observation: typing.Optional[str] = Field(default=None, description='What was learned or observed from the action')
     alternatives_considered: typing.Optional[str] = Field(default=None, description='Other approaches that were weighed and rejected')
     confidence: typing.Optional[float] = Field(default=None, description='Confidence in the extraction, 0.0 to 1.0')
+
+class LessonTriggerSet(BaseModel):
+    triggers: typing.List[str] = Field(description='2 to 4 sentences, each a different situation in which the lesson applies')
 
 class ReasoningChainInput(BaseModel):
     task: typing.Optional[str] = Field(default=None, description='The task that was solved')

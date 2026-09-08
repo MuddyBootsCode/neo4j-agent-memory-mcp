@@ -360,15 +360,22 @@ def memory_embedding_input(
     *,
     repo: str | None = None,
     files: list[str] | None = None,
+    triggers: list[str] | None = None,
 ) -> str:
     """The string handed to the embedder for a lesson.
 
-    The canonical text by default. What varies here must never reach
-    ``memory_embedding_text``: that one identifies a lesson.
+    The canonical text by default, optionally between a context prefix
+    (MUD-456) and the lesson's trigger sentences (MUD-457). What varies
+    here must never reach ``memory_embedding_text``: that one identifies a
+    lesson, and a lesson that gains a prefix or a trigger is the same
+    lesson.
     """
     canonical = memory_embedding_text(kind, props)
     if not canonical.strip():
         return canonical
+    said = " ".join(t.strip() for t in (triggers or []) if t and t.strip())
+    if said:
+        canonical = f"{canonical} | {said}"
     parts: list[str] = []
     for part in CONTEXT_PREFIX:
         if part == "repo" and repo:
