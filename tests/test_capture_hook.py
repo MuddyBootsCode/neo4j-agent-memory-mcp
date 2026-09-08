@@ -268,6 +268,25 @@ class TestTouchedFilesAndErrorSteps:
         assert error_steps(str(path), "/repo", with_index=True)[0]["index"] == 3
         assert error_steps(str(path), "/repo", before_line=3) == []
 
+    def test_a_long_failure_keeps_its_last_line(self, tmp_path):
+        """A traceback's diagnosis is its last line. The error-keyed query
+        set (MUD-460) uses this text as the query, so the tail surviving is
+        the property it rests on, not an incidental."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        traceback = "Traceback (most recent call last): " + ("File x line y, in z " * 200) + "ValueError: theme has no attribute custom_css"
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "pytest"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": traceback}]),
+            ],
+        )
+
+        error = error_steps(path, "/repo")[0]["error"]
+        assert error.startswith("Traceback (most recent call last):")
+        assert error.endswith("ValueError: theme has no attribute custom_css")
+
     def test_error_steps_require_the_is_error_flag(self, tmp_path):
         """A successful `cat` of a file that mentions "Traceback" is not a
         dead end. Claude Code flags every failed tool result with is_error

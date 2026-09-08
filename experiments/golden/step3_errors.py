@@ -7,9 +7,12 @@ fires on a non-zero exit rather than on a prompt. Nothing published
 measures recall keyed by error text against stored symptoms.
 
 Harvested from the same query sessions as the prompt set, so the pool's
-holdout still holds. Query ids start at ERROR_ID_BASE, out of the prompt
-set's range, so a labels.json copied from the prompt run can never be
-mistaken for these.
+holdout still holds. The query text is the failure as ``error_steps``
+returns it — middle-truncated to 600 characters, head and tail, so a long
+traceback keeps the exception line that diagnoses it.
+
+Query ids start at ERROR_ID_BASE, out of the prompt set's range, so a
+labels.json copied from the prompt run can never be mistaken for these.
 
     GOLDEN_RUN=p5-e5 GOLDEN_SPLIT_FROM=results/p4-live/session_split.json \\
     uv run --no-sync --project ../.. python -u step3_errors.py
@@ -28,7 +31,6 @@ from lib import HERE, load_json, sample_evenly, save_json, touched_files
 
 MAX_QUERIES = int(os.environ.get("GOLDEN_MAX_QUERIES", "100"))
 ERROR_ID_BASE = 1000
-QUERY_CHARS = 300
 
 # Sandbox and harness noise: the tool never ran against the repo, so no
 # lesson could have helped. Anything matching is dropped before dedup.
@@ -77,8 +79,13 @@ def main() -> None:
                 continue
             seen.add(key)
             candidates.append({
+                # The whole failure as the reader gives it. error_steps has
+                # already middle-truncated to 600 characters, keeping head
+                # AND tail, because a traceback's diagnosis is its last
+                # line; cutting the head off again would throw away exactly
+                # what production preserved (Codex review, MUD-460).
                 "session": s["session"], "repo": s["repo"], "line": step["index"],
-                "prompt": error[:QUERY_CHARS],
+                "prompt": error,
                 "tool": step.get("tool"), "attempt": step.get("input"),
                 "path": s["path"], "repo_root": s.get("repo_root") or "",
             })
