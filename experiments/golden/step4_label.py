@@ -17,7 +17,7 @@ import os
 import sys
 import time
 
-from lib import (LABEL_MODEL, PRICE, complete_fingerprints, load_json, result_path,
+from lib import (LABEL_MODEL, PRICE, fingerprints_for_labelled, load_json, result_path,
                  save_json, stale_label_keys)
 
 CHUNK = int(os.environ.get("GOLDEN_LABEL_CHUNK", "50"))
@@ -172,11 +172,15 @@ async def main() -> None:
         save_json("labels.json", labels)
 
     def _record_provenance() -> None:
-        """Fingerprint the queries whose labels are complete, and only
-        those: the fingerprint's claim is that these labels judged this
-        text, so a run that dies mid-relabel must not leave a query marked
-        current with no verdicts behind it."""
-        fingerprints.update(complete_fingerprints(labels, queries, pool))
+        """Fingerprint every query that now has a verdict, at each save.
+
+        The claim is which text these labels judged, so it travels with
+        the first chunk: a run interrupted between chunks must leave its
+        partial labels tied to the prompt they were made against, or a
+        text change would let the next run keep them and top them up
+        against the new one. Whether a query is finished is a separate
+        question, and step5 answers it with unlabeled_pairs."""
+        fingerprints.update(fingerprints_for_labelled(labels, queries))
         save_json("query_fingerprints.json", fingerprints)
 
     _record_provenance()

@@ -27,8 +27,8 @@ import json
 import os
 import time
 
-from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family,
-                 stale_label_keys, unlabeled_pairs)
+from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, rewrite_lessons, save_json,
+                 session_family, stale_label_keys, stale_rewrites, unlabeled_pairs)
 from mem import open_client
 
 CAP = 5
@@ -226,10 +226,21 @@ async def main() -> None:
         path = HYDE_FROM if os.path.isabs(HYDE_FROM) else os.path.join(os.path.dirname(os.path.abspath(__file__)), HYDE_FROM)
         with open(path, encoding="utf-8") as fh:
             rewrites = json.load(fh)
+        mismatched = stale_rewrites(rewrites, queries)
+        if mismatched:
+            raise SystemExit(
+                f"{len(mismatched)} hyde rewrite(s) were generated for a different "
+                f"version of their query (q{', q'.join(sorted(mismatched)[:8])}"
+                f"{'...' if len(mismatched) > 8 else ''}); re-run step3b_hyde."
+            )
+        unverified = sum(1 for q in queries
+                         if not isinstance(rewrites.get(str(q["query_id"])), dict)
+                         and rewrites.get(str(q["query_id"])))
         for q in queries:
-            q["rewrites"] = rewrites.get(str(q["query_id"])) or []
+            q["rewrites"] = rewrite_lessons(rewrites.get(str(q["query_id"])))
         print(f"hyde: {sum(1 for q in queries if q['rewrites'])} of {len(queries)} queries carry rewrites, "
-              f"{sum(len(q['rewrites']) for q in queries) / len(queries):.1f} each")
+              f"{sum(len(q['rewrites']) for q in queries) / len(queries):.1f} each"
+              + (f"; {unverified} written before provenance existed and trusted" if unverified else ""))
     split = load_json("session_split.json")
     _expand_queries(queries, split)
     carded = _card_queries(queries, split)

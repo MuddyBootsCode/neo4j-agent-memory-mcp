@@ -21,7 +21,7 @@ import json
 import os
 import time
 
-from lib import HERE, load_json, result_path, save_json
+from lib import HERE, load_json, query_fingerprint, result_path, rewrite_lessons, save_json, stale_rewrites
 
 MAX_FILES = 4
 SAVE_EVERY = 10
@@ -43,7 +43,15 @@ async def main() -> None:
     if not queries:
         raise SystemExit("no queries: set GOLDEN_QUERIES_FROM=results/<run>/queries.json")
 
-    rewrites: dict[str, list[str]] = load_json("rewrites.json", {}) or {}
+    rewrites: dict = load_json("rewrites.json", {}) or {}
+    # Resume on the query's content, not its id: a regenerated query under
+    # its own id would otherwise keep the guesses written for the prompt
+    # it replaced, and step5 attaches them by id too (MUD-459, Codex).
+    stale = stale_rewrites(rewrites, queries)
+    for qid in stale:
+        del rewrites[qid]
+    if stale:
+        print(f"{len(stale)} query(ies) changed since their guesses were written; regenerating those")
     todo = [q for q in queries if str(q["query_id"]) not in rewrites]
     print(f"{len(queries)} queries, {len(rewrites)} already generated, {len(todo)} to go")
     if not todo:
@@ -69,14 +77,16 @@ async def main() -> None:
             print(f"  [q{q['query_id']}] failed: {e}")
             said = []
             failed += 1
-        rewrites[str(q["query_id"])] = said
+        rewrites[str(q["query_id"])] = {
+            "fingerprint": query_fingerprint(q), "lessons": said,
+        }
         if n % SAVE_EVERY == 0 or n == len(todo):
             save_json("rewrites.json", rewrites)
             rate = (time.time() - t0) / n
             print(f"  {n}/{len(todo)} queries, {rate:.1f}s each")
 
     save_json("rewrites.json", rewrites)
-    counts = [len(v) for v in rewrites.values()]
+    counts = [len(rewrite_lessons(v)) for v in rewrites.values()]
     print(f"\nrewrites for {len(rewrites)} queries in {(time.time() - t0) / 60:.0f} min; "
           f"{sum(counts) / len(counts):.1f} per query, {sum(1 for c in counts if c == 0)} with none "
           f"({failed} calls failed)")

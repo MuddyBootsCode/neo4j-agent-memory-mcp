@@ -107,16 +107,63 @@ class TestLabelCompleteness:
 
 
 class TestFingerprintsFollowTheLabels:
-    def test_only_completely_labelled_queries_are_fingerprinted(self):
-        """The fingerprint certifies that these labels judged this text, so
-        it may not be written before the judgments exist."""
-        from lib import complete_fingerprints, query_fingerprint
+    def test_the_first_saved_label_fingerprints_its_query(self):
+        """The fingerprint answers "which text were these judged against",
+        not "are we finished". Withholding it until a query is complete
+        leaves a half-labelled query unfingerprinted, and a text change
+        there would mix old verdicts with new ones under one certificate.
+        Completeness is checked separately, by unlabeled_pairs."""
+        from lib import fingerprints_for_labelled, query_fingerprint
 
-        done = {"query_id": 1, "repo": "r", "prompt": "p", "files": []}
-        half = {"query_id": 2, "repo": "r", "prompt": "q", "files": []}
-        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+        done = {"query_id": 1, "prompt": "p", "files": []}
+        half = {"query_id": 2, "prompt": "q", "files": []}
+        untouched = {"query_id": 3, "prompt": "r", "files": []}
         labels = {"1:a": True, "1:b": False, "2:a": True}
 
-        assert complete_fingerprints(labels, [done, half], pool) == {
-            "1": query_fingerprint(done)
+        assert fingerprints_for_labelled(labels, [done, half, untouched]) == {
+            "1": query_fingerprint(done),
+            "2": query_fingerprint(half),
         }
+
+    def test_a_query_changed_mid_labelling_is_caught_on_resume(self):
+        """The window the checkpoint rule opened: interrupt after one
+        chunk, change the query, resume. The partial labels must be found
+        stale rather than topped up against the new text."""
+        from lib import fingerprints_for_labelled, stale_label_keys
+
+        before = {"query_id": 1, "prompt": "old text", "files": []}
+        after = {"query_id": 1, "prompt": "new text", "files": []}
+        partial = {"1:a": True}
+        stored = fingerprints_for_labelled(partial, [before])
+
+        assert stale_label_keys(partial, [after], stored) == {"1:a"}
+
+
+class TestRewriteProvenance:
+    def test_a_rewrite_is_stale_when_its_query_changed(self):
+        """HyDE guesses are keyed by query_id and step5 attaches them the
+        same way, so a regenerated query silently inherits the guesses
+        written for the prompt it replaced."""
+        from lib import query_fingerprint, stale_rewrites
+
+        before = {"query_id": 1, "prompt": "the deploy fails", "files": []}
+        after = {"query_id": 1, "prompt": "the limiter returns 200", "files": []}
+        store = {"1": {"fingerprint": query_fingerprint(before), "lessons": ["guess"]}}
+
+        assert stale_rewrites(store, [before]) == set()
+        assert stale_rewrites(store, [after]) == {"1"}
+
+    def test_rewrites_written_before_fingerprints_are_reported_unverified(self):
+        from lib import rewrite_lessons, stale_rewrites
+
+        legacy = {"1": ["a guess", "another"]}
+
+        assert rewrite_lessons(legacy["1"]) == ["a guess", "another"]
+        assert stale_rewrites(legacy, [{"query_id": 1, "prompt": "p", "files": []}]) == set()
+
+    def test_the_lessons_read_the_same_from_either_shape(self):
+        from lib import rewrite_lessons
+
+        assert rewrite_lessons({"fingerprint": "abc", "lessons": ["x"]}) == ["x"]
+        assert rewrite_lessons(["x"]) == ["x"]
+        assert rewrite_lessons(None) == []
