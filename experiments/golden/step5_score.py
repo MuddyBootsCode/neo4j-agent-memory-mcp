@@ -67,6 +67,10 @@ HYDE_FROM = os.environ.get("GOLDEN_HYDE", "").strip()
 # 16,592, 0.16% — while a relabel that died leaves thousands. This tells
 # the two apart (MUD-460, Codex review).
 MAX_UNLABELED = float(os.environ.get("GOLDEN_MAX_UNLABELED", "0.01"))
+# The rubric the labels were made under; part of their fingerprint,
+# because a prompt verdict and an error verdict answer different
+# questions (MUD-460).
+LABEL_RUBRIC = os.environ.get("GOLDEN_LABEL_RUBRIC", "prompt").strip().lower()
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -214,11 +218,11 @@ async def main() -> None:
     if not fingerprints:
         print("note: no query_fingerprints.json — labels are trusted as "
               "pre-provenance evidence; a regenerated query would not be caught")
-    stale = stale_label_keys(labels, queries, fingerprints)
+    stale = stale_label_keys(labels, queries, fingerprints, LABEL_RUBRIC)
     if stale:
         changed = sorted({int(k.split(":", 1)[0]) for k in stale})
         raise SystemExit(
-            f"{len(changed)} query(ies) changed since they were labelled "
+            f"{len(changed)} query(ies) changed (text or rubric) since they were labelled "
             f"({', '.join(f'q{c}' for c in changed[:8])}{'...' if len(changed) > 8 else ''}); "
             f"{len(stale)} labels are stale. Re-run step4 to relabel them."
         )
@@ -359,7 +363,7 @@ async def main() -> None:
                "hyde": HYDE_FROM or None,
                "symptom_only": (load_json("corpus_stats.json") or {}).get("symptom_only"),
                "unlabeled_pairs": holes, "labelled_pairs_owed": owed,
-               "fingerprinted_queries": len(fingerprints)}
+               "fingerprinted_queries": len(fingerprints), "label_rubric": LABEL_RUBRIC}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")
