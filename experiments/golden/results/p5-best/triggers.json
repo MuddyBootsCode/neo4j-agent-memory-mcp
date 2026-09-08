@@ -1,0 +1,1439 @@
+{
+  "00621ca016e9": [
+    "You are investigating the GRA-499 regression and the daily report claims the plan cache is misconfigured.",
+    "You open the health check endpoint and see `force_custom_plan` is already active despite the report's diagnosis.",
+    "You query the warehouse pool directly and confirm the code evidence contradicts the reported setting."
+  ],
+  "028bbcf5722e": [
+    "You re-zip a file with the same name and the rejection message persists without a new event.",
+    "The file input shows the old filename in the value attribute after a successful upload.",
+    "Chrome fails to fire the change event when you select the identical file again."
+  ],
+  "031261faeaa4": [
+    "You are committing the Codex branch and notice the 20 documentation files cluttering the history.",
+    "You review the test lines and see the 9k new lines need trimming before finalizing the commit.",
+    "You open Linear to track the documentation updates separately from the code changes."
+  ],
+  "036318955d0b": [
+    "You are updating the fuzzy resolver in EPIC_BRIEF.md and notice the logic for org admins is correct but super-admins are breaking.",
+    "A ticket requires fixing the fuzzy resolver for org admins without touching the super-admin scope.",
+    "You realize that changing the super-admin behavior would expand the scope beyond the current ticket requirements."
+  ],
+  "037dc6d683cd": [
+    "You run the test suite and `test_program_breakdown_affiliates_keep_live_aggregate` fails because the assertion `0 == 74` raises an error.",
+    "You inspect the mocked `_get_affiliate_names` function and notice it returns a list that doesn't match the expected aggregate count.",
+    "You update the monkeypatch in the test file to return the correct aggregate count, but the test still fails until the assertion is corrected."
+  ],
+  "050c71dd1a87": [
+    "You run a query filtering by `cip4_code` and `cip4_method` on a cold database and watch the execution time spike due to heap fetches.",
+    "You inspect the query plan for the education lookup and see it performing sequential scans instead of an index-only scan.",
+    "You add a new composite index `idx_educations_cip4_cip_method_edu` to resolve the timeout caused by the existing single-column `cip4_code` index."
+  ],
+  "055e60b6dc45": [
+    "You are reviewing the Nursing program data and notice the coverage metrics look unusually thin.",
+    "The Drama department reports low profile maintenance despite active enrollment.",
+    "You realize the student body is heavily commuter and transfer-focused, explaining the sparse public data."
+  ],
+  "062e7d5300fe": [
+    "You run the import script and it crashes with a FileNotFoundError for skill.zip.",
+    "You check S3 and see that gradgraph-outcomes-guide.zip is missing from skills-internal/.",
+    "You open import_legacy_skills.py and notice the code fails to handle the missing zip file."
+  ],
+  "06832c16663b": [
+    "You unzip the archive and open the root directory, but SKILL.md is missing.",
+    "The legacy artifact rejects the ZIP file with an ArchiveRejected error.",
+    "You verify the file structure and find SKILL.md nested inside a subfolder instead of at the root."
+  ],
+  "074535ec9728": [
+    "You run `pnpm install` and notice unexpected changes in `pnpm-lock.yaml` due to Python 3.14 byte-stability issues.",
+    "You regenerate `consumer_manifest.json` locally and find the output differs from the CI environment.",
+    "You switch your local Python version to 3.14 and `sqlglot` produces inconsistent serialization results."
+  ],
+  "07b328b6d062": [
+    "You are verifying the server half of the MCP OAuth flow and expect to steal the local token.",
+    "The Grad Graph tools are active and routing through the claude.ai connector.",
+    "You check the local environment but find no token to steal because it is held on Anthropic's side."
+  ],
+  "08b3f3467d83": [
+    "You are testing the inline app on a mobile device and vertical scrolling moves the conversation history instead of the app container.",
+    "You are verifying the `ui/initialize` response for a local stdio connector and notice `containerDimensions.maxHeight` is missing.",
+    "You are checking `availableDisplayModes` in the initialization payload and the local connector lacks a stable origin for URL hashing."
+  ],
+  "095d32526193": [
+    "You are configuring the local MCP server and notice the renderer resource is missing from the tool list.",
+    "The client capabilities are not being detected, causing the server to always return accessible_tools.",
+    "You are inspecting server.py and see the renderer resource listed with an incorrect mime type."
+  ],
+  "096508f4f51c": [
+    "You are checking the daily report and `rollup_rows` shows no change while the underlying data has shifted.",
+    "A byte-identical count in `rollup_rows` leads you to incorrectly assume the rollup is fresh.",
+    "You are validating the rebuild detector and notice the row count is stable despite content updates."
+  ],
+  "0a76c0fdacbb": [
+    "You are passing parameters to `aws ssm send-command` via `drops_params.json` and the action is denied.",
+    "The classifier blocks file-based parameters for your destructive DDL actions.",
+    "You switch to using inline parameters in the `commands` array to resolve the denial."
+  ],
+  "0b9c7d581745": [
+    "You run the pre-commit hook and it fails with 'Stale suppressions' due to leftover `// fallow-ignore-next-line` comments.",
+    "The audit reports 'Unused exports' while you are reviewing `gradgraph_ledger.tsx` for types like `LedgerDisplay` that have no consumers.",
+    "You are modifying `host_bridge.ts` and need to ensure that removing unused types does not break the fallow audit."
+  ],
+  "0c2044f7fa84": [
+    "You are publishing the Brandon brief as an Artifact and the operation fails with a permission denied error.",
+    "The Claude Code auto mode classifier blocks the publishing action despite the correct file path.",
+    "Artifact publishing hangs or fails specifically when the permission classifier evaluates the request."
+  ],
+  "0dcbef82d38a": [
+    "You are deciding whether to ship a fix before Monday and see that the current metrics are already low enough.",
+    "You are evaluating the risk of building an apply path and notice that previous attempts failed without proof.",
+    "You are weighing the immediate call against the following week and find that the upside for the immediate fix is small."
+  ],
+  "12060676fade": [
+    "You are modifying the security group rules in EPIC_BRIEF.md and notice duplicate permission errors.",
+    "You run terraform plan and see that inline rules cannot be updated without importing existing resources.",
+    "You decide to defer the AlbSecurityGroup fix because the duplicate rule issue is not blocking the current deployment."
+  ],
+  "129b4ac48d90": [
+    "You query the MCP tool for Valencia's federal award volume and it throws a validation error for `ipeds_completions`.",
+    "You open the schema definition and see that `ipeds_data` is accessible via `run_read_query` while `ipeds_completions` fails.",
+    "You need to fetch federal award data and choose `ipeds_data` to avoid the unexpected keyword argument error."
+  ],
+  "14e54982356e": [
+    "You modify a function in `host_bridge.ts` and the audit reports 'Unused Code' despite the suppression comment.",
+    "You run `fallow audit` on `host_bridge.ts` and see 'Stale suppressions' for comments that no longer match the code.",
+    "You update a `fallow-ignore-next-line` comment in `host_bridge.ts` but forget to adjust the code it suppresses."
+  ],
+  "16e3bb935b96": [
+    "You run psql and the connection to database-1.cluster-cfqoy2w66qn8.us-east-2.rds.amazonaws.com times out on port 5432.",
+    "You verify the local IP address and find it is not listed in the security group sg-05c4ade6a8f12fa28.",
+    "You check your AWS credentials and realize the default profile points to a different account than gradgraph."
+  ],
+  "171d7c33cf5f": [
+    "You call the deployed create_video tool with the bg_music parameter and receive an unexpected keyword argument error.",
+    "You open golpo_client.py and params.py to verify the tool definition matches the call signature.",
+    "You check tool-catalog.json and tools.py to confirm the bg_music argument is not yet registered in the tool body."
+  ],
+  "1820e52eb739": [
+    "You run `deploy_frontend.sh qa --dry-run` in the main repository root.",
+    "The script reads `.sst/outputs.json` and displays the production allowlist instead of QA's.",
+    "You notice the target configuration in `EPIC_BRIEF.md` does not match the output."
+  ],
+  "184b89a6e2fa": [
+    "You run Vitest in a read-only environment and temporary-file writes cause unexpected failures.",
+    "You verify a generated ZIP in skillExport.test.ts and suspect the file system is blocking writes.",
+    "You switch to an in-memory probe in skillExport.ts to bypass the temporary-file write block."
+  ],
+  "1977dfc824bb": [
+    "You run EXPLAIN on a query and the direct MCP connector times out.",
+    "You open a terminal to probe the database but the port is blocked by the firewall.",
+    "You establish a TCP tunnel to port 15432 before executing live diagnostics."
+  ],
+  "19be2c480ff5": [
+    "You check the health endpoint and see version vb58e7ae but suspect the image tag has been re-pointed.",
+    "You compare the deployed image digest against the origin/main commit sha in server.py to verify the running revision.",
+    "A deployment pipeline updates the tag but the actual image digest in skills_management.py remains unchanged."
+  ],
+  "19d9f64caed6": [
+    "You run the host harness and it crashes with OSError: [Errno 48] Address already in use.",
+    "You check port 8765 and see it is bound by a previous instance.",
+    "You kill the existing processes on port 8765 and launch the host harness again."
+  ],
+  "1a96460d52ed": [
+    "You are reviewing the auto-coded policies and see exact-title matches with confidence 1.0 but no flags.",
+    "The policy logic strips the 'minor in ...' clause, causing false positives that slip through as perfect matches.",
+    "You attempt to apply the current matcher outputs to the database but encounter a handoff boundary error."
+  ],
+  "1ac219940d7b": [
+    "You update the source code to remove `bg_music` but the snapshot test fails with an AssertionError.",
+    "You open `tool-catalog.json` and see the old parameter list still present in the snapshot.",
+    "You run the test suite and notice the assertion error despite the source code being correct."
+  ],
+  "1b51195f0314": [
+    "You are querying the mv_program_breakdown_rollup view and receive a column does not exist error for cip4_title.",
+    "You inspect the definition of mv_program_breakdown_rollup and notice the cip4_title column is missing.",
+    "You run a direct query against the underlying tables to retrieve the program titles instead of using the view."
+  ],
+  "1b81600e51c4": [
+    "You are uploading a new skill definition and the assistant confirms the Postgres catalog is the sole runtime source of truth.",
+    "You verify the S3 bucket and notice the objects are being treated as retired audit material rather than active data.",
+    "You check SKILL.md and tools.py to ensure the Postgres catalog is being used as the source of truth instead of the S3 bucket."
+  ],
+  "1be983118dc2": [
+    "You are refactoring EPIC_BRIEF.md and notice the security group ingress rules are empty arrays.",
+    "You open sst-env.d.ts and see a VpcEndpointSg with separate rules despite an empty ingress block.",
+    "You are committing a batch of security group fixes and spot the VpcEndpointSg pattern again."
+  ],
+  "1dd2170cd9d3": [
+    "You are reviewing the migration logs and notice the new index build is taking longer than expected due to write amplification.",
+    "The database counters show that `idx_educations_cip4_education_id` and `idx_educations_cip4_edu_cip` are rarely used while the new index handles their prefixes.",
+    "You are optimizing the schema and see that the single-column `cip4_code` index is redundant alongside the composite key."
+  ],
+  "1e36cc2ac8f5": [
+    "You are reviewing the PR in the browser and see the green checkmark but hesitate to click 'Ready' because the review timestamp is older than the latest commit.",
+    "You run the CLI command to mark the PR ready and get an error about the review gate, realizing the cap is spent and a reset is too costly.",
+    "You glance at the test suite summary showing 220 passed tests and seven round-trips, confirming the evidence is sufficient to merge without a fresh review."
+  ],
+  "1f2e8e3f013f": [
+    "You are refactoring the test suite and notice the 180-line manual fixture duplicating dispatch logic.",
+    "You open skillsLibraryHostBridge.test.ts and see the shared helpers ready to absorb the fixture's responsibilities.",
+    "You run the test suite and confirm the trims are green with 75 passing tests before deleting the file."
+  ],
+  "1f4b3df4094f": [
+    "You push a commit and Codod reports it is up to date, but the code it sees is from the previous commit.",
+    "You are working in a shared repository where another agent has pushed changes that your local checkout has not yet pulled.",
+    "You open skillsLibraryHostBridge.test.ts and notice the test results do not match the latest code on the remote branch."
+  ],
+  "1f73a7e3c38b": [
+    "You are reviewing the client matrix in 2026-09-02-primary-mcp-skills-library-app-design.md and see Claude Code listed as a client.",
+    "You are editing DocsPage.tsx and assume Claude Code renders MCP Apps based on its build tool status.",
+    "You are checking OrgLibrary.tsx and notice the positive statement that Claude Code renders MCP Apps despite lacking widget support.",
+    "You are verifying the official docs and realize Claude Code only accepts http://localhost callbacks for tools, not widgets."
+  ],
+  "20aa0d7ae20a": [
+    "You chain a short `sleep 45` before `aws ssm send-command` and the command fails because the previous operation hasn't fully released.",
+    "You are waiting for a long-running index build via SSM and your script hangs due to a blocked state.",
+    "You run `aws ssm send-command` immediately after a sleep and see it return before the background task is actually ready."
+  ],
+  "212e046411bc": [
+    "You see nine collection errors in the terminal and open pyproject.toml to add prefab-ui.",
+    "You edit pyproject.toml to resolve the errors, but the agent later realizes the runtime deps are in requirements.txt.",
+    "You check the local venv and notice the errors persist despite the correct pyproject.toml configuration."
+  ],
+  "23427b7c293d": [
+    "You pass 'solo-female-3' to the voice parameter in golpo_client.py and the tool boundary rejects it.",
+    "You specify 'long' for the layout in params.py and the v2 API returns an error instead of accepting the v1 SDK name.",
+    "You are debugging a voice mismatch in golpo_client.py and see the error message listing valid options like 'female-1' and 'male-2'."
+  ],
+  "234bc657897f": [
+    "You run the linear issue list command and it fails with a sort error.",
+    "You check the environment variables and LINEAR_ISSUE_SORT is missing.",
+    "You edit the configuration file but forget to add the sort parameter."
+  ],
+  "240f2e323d02": [
+    "You are updating the disclosure wording in the MCP schema and notice the version is still at 1.22.0.",
+    "A tool schema change is made but `MCP_IMAGE_TAG` has not refreshed, leaving the old schema in place.",
+    "The RELEASE RULE is checked and confirms that a version bump is required for the current tool schema modifications."
+  ],
+  "28ed00a43106": [
+    "You are reviewing a PR where the agent modified source code but pnpm-lock.yaml has an 866-line diff that the agent did not create.",
+    "You notice pnpm-lock.yaml changed significantly in the diff, but the changes were made by a human or another tool, not the agent.",
+    "You are about to commit the agent's work and want to ensure the lock file changes are not incorrectly attributed to the agent."
+  ],
+  "29e42ab1474f": [
+    "You are reviewing the Skills Library component in libraryAccess.ts and notice the card content is being clipped.",
+    "You are adjusting the layout for the dashboard sidebar and see the cards are not expanding to fill the available space.",
+    "You are testing the fullscreen mode and observe that the cards are not resizing correctly to match the viewport."
+  ],
+  "2aaa722e65b8": [
+    "You are launching the local development server and need the database connection to match the QA environment.",
+    "You are debugging an entitlement failure in `library_app.py` that only appears when using the Cognito pool.",
+    "You are verifying that the local Docker Postgres instance is correctly configured via `.env.local`."
+  ],
+  "2ade1d704592": [
+    "You run `sst deploy` and the import fails because the ledger is missing.",
+    "You execute `deploy_mcp.sh` and encounter the same relation error.",
+    "You check `038_postgres_only_skill_catalog.sql` and notice the table creation is absent."
+  ],
+  "2bd3fe38d2d4": [
+    "You are running the OAuth flow in library_app.py and the browser redirects to localhost:23448/oauth/callback but the page stays blank.",
+    "You see repeated UnauthorizedError logs in skills_management.py while the browser address bar shows the code fragment.",
+    "You manually paste the localhost:23448/oauth/callback URL with the fragment into a new tab and the code is finally delivered."
+  ],
+  "2d56e3b0d416": [
+    "You are deleting a skill row in `skills_catalog.py` and the database throws an error because the `skill_versions_immutable` trigger prevents it.",
+    "You run a deletion query on managed skills and the `managed_skills_no_delete` trigger blocks the transaction from committing.",
+    "You execute `SET session_replication_role = replica` in your session to bypass the triggers and successfully remove the local Postgres rows."
+  ],
+  "2e27044b43a8": [
+    "You run the validation script and see the grad-graph-donor-pyramid zip size is 6029B but the manifest points to a 370751B file.",
+    "You inspect import_legacy_skills.py and notice the SHA mismatch between the S3 object and the index manifest.",
+    "The deployment fails because the code reads the old manifest hash instead of the current S3 zip body for grad-graph-donor-pyramid."
+  ],
+  "2ef248f9f93e": [
+    "You call get_tools on a FastMCP instance and hit an AttributeError.",
+    "You inspect the FastMCP object in the debugger and see only get_tool available.",
+    "You upgrade the FastMCP package and your tool list retrieval breaks."
+  ],
+  "2f6723a5c1ee": [
+    "You are reviewing `skillEditPayload.ts` and notice three messages in `validateZipFile` that appear unreachable during the create path.",
+    "You run `inspectSkillArchive` and see it enforces identical rules with mirrored vocabulary, confirming the branch is dead code.",
+    "You are editing replacement bundles for edit-mode and wonder if the unreachable messages should be removed or kept."
+  ],
+  "2fdbfea0fde7": [
+    "You are querying the CIP matcher and degree-only records return no results.",
+    "You inspect the matcher logic and see it filtering on e.field_of_study while ignoring the degree column.",
+    "You verify the query and notice norm_fos(e.field_of_study) is the only key being used."
+  ],
+  "307990ef2c59": [
+    "You are reviewing the alumni import logs and notice 563 records are matched but filed under the national taxonomy instead of Valencia's catalog.",
+    "You run the catalog-aware matching query and see the 50.04 alumni refiled correctly, confirming the GRA-715 design works as expected.",
+    "You decide to present the alumni fix as a separate, concrete example rather than including them in the current broad match."
+  ],
+  "314a1c802524": [
+    "You are editing host_bridge.ts and the catalog filter reduces the item count, but the inline size remains stuck at the initial 650.",
+    "You check styles.css and notice the root height has changed, causing the re-measurement to miss the expected 1400.",
+    "The test fails with expected [ 650 ] to include 1400 after the catalog is filtered down."
+  ],
+  "3275ab10fcd5": [
+    "You are regenerating the ETL-INFRA configuration and notice the new index annotation is missing.",
+    "A developer opens `consumer_manifest.json` to verify the schema before committing a change.",
+    "The build pipeline fails silently because the hand-maintained manifest does not reflect the latest index updates."
+  ],
+  "32a10b4c3fd1": [
+    "You are editing gradgraph_ledger.tsx and the expand control appears even when the host does not list fullscreen in availableDisplayModes.",
+    "A migration applied by hand left half the statements committed.",
+    "You toggle the expand control and the fullscreen class fails to update on the shell."
+  ],
+  "3346fbaa9360": [
+    "You run git status and see evidence/ listed as untracked files.",
+    "You stage all changes with git add -A and notice evidence/ is included.",
+    "You review the brief and see the explicit instruction to leave evidence/ uncommitted."
+  ],
+  "34759c3f122e": [
+    "You run the MCP container locally and see a ConnectionError about SSL upgrade rejection.",
+    "You inspect docker-compose.yml and notice the PostgreSQL service is exposed on host.docker.internal.",
+    "You check the network logs and realize host.docker.internal is not resolving to the loopback interface."
+  ],
+  "357a2a153cb6": [
+    "npm run build fails with TS2307 errors in skillContract.test.ts and skillEntitlement.test.ts.",
+    "The Dockerfile.frontend is open and the contracts directory is missing from the build context.",
+    "The production build succeeds after copying the contracts directory in Dockerfile.frontend."
+  ],
+  "372a84efed5f": [
+    "You are reviewing the Valencia 768 nursing data and notice the single point estimate looks suspiciously low.",
+    "A stakeholder questions the 7% figure, pointing out that the coarse occupation codes mask significant variation.",
+    "You are updating the report to reflect the true spread of the nursing workforce rather than a precise but misleading average."
+  ],
+  "38398be4261f": [
+    "You call `list_videos` and the result exceeds the maximum allowed tokens.",
+    "You open the truncated output file and see the JSON is cut off mid-stream.",
+    "You parse the full JSON in one go and get an error instead of the expected list."
+  ],
+  "38ce2ad1d8bc": [
+    "You open DocsPage.tsx and the MCP app fails to load because the URL uses HTTPS.",
+    "You check OrgLibrary.tsx and notice the app cannot render over a bare IPv6 literal address.",
+    "You verify the MCP app configuration and see it is pointing to a hostname instead of an IP literal."
+  ],
+  "391e60bafa3d": [
+    "You are reviewing the Valencia program classification and notice the records exist but lack a category.",
+    "Dale has not yet sent the 'four in five' figure to the client, leaving the data unclassified.",
+    "You are debating whether the issue stems from GradGraph's internal process or an external data provider."
+  ],
+  "3a0affdf3df8": [
+    "You tap the upload button twice in rapid succession and the wrong file appears as selected.",
+    "The `SkillUploadForm` displays a stale response after a quick double-click on the file picker.",
+    "A race condition causes the UI to update with data from an earlier pick request."
+  ],
+  "3a80c66c5ab6": [
+    "You are debugging a Streamable HTTP server and the client logs show no errors, but the proxy's stderr is full of warnings.",
+    "You open mcp-server-<name>.log to trace a failure and find the actual error message that the client missed.",
+    "You are reviewing DocsPage.tsx and OrgLibrary.tsx and notice the server stderr was ignored during the last deployment check."
+  ],
+  "3ce046c9fab7": [
+    "You are configuring the video player in params.py and the stream appears stretched vertically.",
+    "You pass `orientation: long` to the SDK in golpo_client.py and expect a landscape layout.",
+    "The v2 API documentation specifies `horizontal` but your code sends `long`."
+  ],
+  "41ba5c3b9bf0": [
+    "You are querying the mv_degree_completions view and receive a column does not exist error for 'completions'.",
+    "You inspect the mv_degree_completions view definition and notice the 'completions' column is missing.",
+    "You switch from querying the view to querying the underlying tables to retrieve nursing completion data."
+  ],
+  "43d0c2cfa39f": [
+    "You are POSTing to the endpoint and receive a JSON-RPC error with code -32600 and the message \"Session not found\".",
+    "You check `cache_middleware.py` and see the session object is still present locally while the remote server has expired it.",
+    "You are debugging `server.py` and notice the request fails immediately instead of retrying after the session is re-initialized."
+  ],
+  "43f86c55290b": [
+    "You query the graduate_school_destinations tool and see 'MS' listed as the most common degree for every destination.",
+    "You apply the bachelors filter and notice the result set shrinks to only 6 rows.",
+    "You inspect the mv_grad_school_destinations materialized view and observe the graduate-looking degree text filter applied at build time."
+  ],
+  "4636175f79d8": [
+    "You are reviewing the PR diff and notice the 'before' artifact was generated against a different commit than the current `origin/main`.",
+    "The rebase has shifted the baseline, making the existing evidence artifacts stale relative to the new test file count.",
+    "You are about to push the stale artifact and realize it does not reflect the exact commit the PR is merging into."
+  ],
+  "46829be23350": [
+    "You compare Dale's report showing 76,904 unassigned alumni against the system's 75,160 and see a discrepancy.",
+    "You calculate the unassigned count by subtracting 20,063 assigned from 95,223 total and get 75,160.",
+    "You verify that the 76,904 and 75,160 figures represent the same population despite the different cut."
+  ],
+  "46bd9e46e7b5": [
+    "You run ggcip propose and the data appears in the review queue instead of the serving table.",
+    "The apply path consumer is not yet built when you check the review queue for production data.",
+    "You verify the queue status and see that ggcip propose is writing to the review queue rather than directly to educations_cip4."
+  ],
+  "46c1880ddfb7": [
+    "You run the test suite and an AssertionError complains about a missing required argument.",
+    "You inspect server.py and see a parameter defined as `str | None = None` but the test expects it to be mandatory.",
+    "You modify test_gra742_cache_visibility.py and the test fails because it assumes a default value that isn't there."
+  ],
+  "46d777dfc28e": [
+    "You are rendering the Skills Library in the host conversation and need the Run button to invoke skills directly.",
+    "You are defining the URI scheme for the Skills Library renderer and want to preserve the initial MCP App visual design.",
+    "You are configuring the MIME type for the `ui://gradgraph/skills-library-v1.html` resource to ensure it is advertised correctly."
+  ],
+  "4825491ca462": [
+    "You run rg with multiple -g flags and it exits with code 2 because no files matched.",
+    "A review script fails silently when rg returns exit code 2 instead of 0.",
+    "You check skills-publishing.md and see the command failed due to an unhandled exit code."
+  ],
+  "488382ad25df": [
+    "You run the Linear CLI to create an issue and notice the git branch has switched to the new issue branch.",
+    "You commit code after creating a Linear issue but realize the changes are on the issue branch instead of the original task branch.",
+    "You check the MCP checkout directory and see the current branch is no longer the one you were working on."
+  ],
+  "49573fad6659": [
+    "You query a child institution like Penn State Harrisburg and the rollup collapses to itself instead of the family.",
+    "You narrow the root resolution to require two or more words in the type-stripped core and child queries incorrectly resolve to the root.",
+    "The family context is lost when a child query resolves to the root due to the narrowed type-stripped core logic."
+  ],
+  "49884725b706": [
+    "You run the database migration and see ERROR: column m.org_id does not exist.",
+    "You check docker-compose.yml and notice the init artifact for 039 is mounted but stale.",
+    "You probe the mid-sequence artifacts and realize the volume hasn't updated with the latest schema changes."
+  ],
+  "498f2495b569": [
+    "You are reviewing the CIP-SOC crosswalk and notice broad program-to-occupation mappings that seem too coarse.",
+    "A stakeholder points out that the crosswalk doesn't capture every nuance of the federal guidance as a flaw.",
+    "You are justifying the registrar's crosswalk design against the NCES and BLS standards in a technical document."
+  ],
+  "4a7c8c7243f5": [
+    "You are debugging GRA-499 and notice the generic plan is no longer the culprit.",
+    "The code confirms `force_custom_plan` is set, yet the timeout persists in the paged CTE query.",
+    "You reclassify the issue as a new defect because the root cause has been ruled out."
+  ],
+  "4b65047928c7": [
+    "You are debugging host_bridge.ts and an assertion fails with expected undefined to be 'inline'.",
+    "A host configuration omits the availableDisplayModes array entirely, causing the bridge to misclassify the display mode.",
+    "You inspect the bridge logic and notice it defaults incorrectly when the availableDisplayModes array is missing."
+  ],
+  "4b9fed745195": [
+    "You run a command in Claude Code auto mode and the action is denied by the classifier.",
+    "The default upload tool fails with a 'Blocked by classifier' error during an automated action.",
+    "You need to upload a file to S3 but the auto mode classifier is blocking the standard tool."
+  ],
+  "4d14721f856c": [
+    "You run `esbuild` in a fresh directory and it fails to resolve \"react\".",
+    "The build script throws a module resolution error for \"react-dom/client\".",
+    "You notice \"react/jsx-runtime\" is missing from the compiled output."
+  ],
+  "4e81c558e16d": [
+    "You run the deploy script from the main checkout while on the GRA-706 branch and it refuses to proceed.",
+    "The deploy script derives the image tag from HEAD and you see unmerged work included in the release.",
+    "You check the status of the main checkout and notice it is dirty, blocking the deployment process."
+  ],
+  "4ec8f3569618": [
+    "You run `codex-pr-gate` with the `--draft` flag and it incorrectly denies the PR despite CLAUDE.md allowing it.",
+    "You check the hook script and see five early `deny()` calls that do not account for the `--draft` flag.",
+    "You verify the PR creation logic and notice that drafts are allowed even when no review exists."
+  ],
+  "4f3cde983a0f": [
+    "You are in a worktree and have just rebased your feature branch.",
+    "You run `git push` and see a rejection because the remote branch has moved.",
+    "You want to update the remote PR branch without overwriting others' commits."
+  ],
+  "5168b658ab99": [
+    "You are drafting a reply to Dale and notice the thread is getting too long for his screen.",
+    "Dale asks a question and you see the previous detailed response causing confusion.",
+    "You are reviewing a comment thread and decide to strip out the quoted history to keep it concise."
+  ],
+  "5169c5d78f1c": [
+    "You run the affiliate query with a space-only separator and notice 'Indiana University-Indianapolis' is missing from the results.",
+    "You inspect server.py and see the ILIKE condition using ' %' instead of a pattern that preserves hyphens.",
+    "An AssertionError is raised because the space-only separator incorrectly filters out hyphenated campus names."
+  ],
+  "51a1ad660c98": [
+    "You are reviewing the GRA-666 ticket and see the caveat about the major client.",
+    "The mcp.version is stable and you want to avoid an unnecessary bump.",
+    "You verify that the client honors list_changed and benefits from the current mechanism."
+  ],
+  "52884923b560": [
+    "You are refactoring the `create_video` tool in `golpo_client.py` and notice `bg_music` is still being passed despite the 'never music' policy.",
+    "You run `test_video_golpo_async.py` and see the test passing because the parameter is accepted, but the skill is still asking for music unnecessarily.",
+    "You open `params.py` and see `bg_music` as a live public parameter with seven accepted values, complicating the strict policy enforcement."
+  ],
+  "53576dcd19bd": [
+    "You are defining the provenance label for an affiliate in `server.py` and want to avoid introducing a new term.",
+    "You are reviewing the `institution_system_overview` and notice the existing vocabulary covers your current use case.",
+    "You are refactoring the affiliate logic and see that 'formal' or 'name_match' already exist in the codebase."
+  ],
+  "539a7309ef74": [
+    "You are drafting a methodology document for Brandon and notice his email mentions President Plinske's quantitative background.",
+    "A stakeholder with a quantitative background is about to challenge the validity of your system's results.",
+    "You are deciding whether to send a brief summary or a detailed review to Brandon before Monday."
+  ],
+  "53f12221daf6": [
+    "You are comparing the sample coverage counts against the census completions and notice the numbers are lower than expected.",
+    "You are inspecting the questions field alignment for a program with thin coverage and see discrepancies.",
+    "You are reviewing the data for programs affected by SOC crosswalk exclusions and find the counts do not match the graduate totals."
+  ],
+  "54258a888190": [
+    "You are typing in the Name field and the slug updates unexpectedly.",
+    "The `mergeDraftPatch` function re-slugifies the value on every keystroke.",
+    "The `slugEdited` flag is not preventing premature locking of the slug."
+  ],
+  "54bab07b2e53": [
+    "You are inspecting the lineage graph in lineage.py and notice a gap in the provenance for a recent manual database rebuild.",
+    "A P3b rebuild runs through the ops window instead of the automated slow-flow, and the existing watchers fail to capture it.",
+    "You are debugging test_gra721_ops_lineage.py and see that OpenLineage events are missing for operations executed outside the standard load path."
+  ],
+  "54f4ac954e1a": [
+    "You run the test suite and see Mutation D survive while the others fail.",
+    "You inspect server.py and notice the drift guard only checks if the tool is wired.",
+    "You open test_gra742_zero_row_not_cached.py and see the zero-row case passes unexpectedly."
+  ],
+  "57193be473c6": [
+    "You call `current_setting('plan_cache_mode')` directly and receive an error about the function not being allowed.",
+    "You are verifying pool settings and need to bypass the system table restrictions blocking `pg_settings`.",
+    "You run a query that requires a plain SELECT to correctly retrieve the current setting value."
+  ],
+  "574b9ec8201f": [
+    "You are resolving the brand 'Harvard' and the count jumps to 74 members instead of 14.",
+    "The specific case for Harvard Business School fails silently while other sub-schools are dropped.",
+    "You widen the root resolution for one-word brands and notice the undercount of affiliated schools."
+  ],
+  "57628e6bb932": [
+    "You run `git stash` in `claudedocs/live-harness/` and see a dirty worktree error because untracked files remain.",
+    "You are stashing changes in `claudedocs/live-harness/` and want to ensure untracked files are included in the stash.",
+    "You execute `git stash` in `claudedocs/live-harness/` and notice untracked files are left behind in the working directory."
+  ],
+  "5863baf3034e": [
+    "You are reviewing PR #320 and see the multi-file skill bundles cluttering the import path.",
+    "You open import_legacy_skills.py and notice the skills are still scattered across multiple files.",
+    "You run the tool-catalog.json validation and see that most skills are missing from the Postgres store.",
+    "You are deciding whether to revert PR #320 or continue flattening the remaining seven bundles."
+  ],
+  "59638947edcd": [
+    "You are reviewing the provider-facing dashboard and notice the numbers reflect post-retirement values.",
+    "The user explicitly requests the after-retirement grain and rejects the as-delivered figures.",
+    "You are configuring the provider numbers and must choose between the two grains without showing both side-by-side."
+  ],
+  "59ea83dcb79a": [
+    "You are editing host_bridge.ts and the panel displays 'Connecting the Skills Library to this\u2026' instead of the expected count.",
+    "A tool result updates the status but the renderer fails to derive the count from the catalog in library_app.py.",
+    "You check skills_library.tsx and see the bridge is still forwarding the raw status string to the UI panel."
+  ],
+  "5aca13690e75": [
+    "You run `skills_guide_smoke.py` and it fails to connect despite valid credentials.",
+    "You inspect `EPIC_BRIEF.md` and notice the QA runbook defines `ASYNCPG_DSN` manually.",
+    "You verify the connection string and see it bypasses Secrets Manager."
+  ],
+  "5c4855f9b12b": [
+    "You are querying the profile-completeness counts and want to avoid adding load to the blue instance.",
+    "The green database is streaming at 0 lag with no open cycle, making it a safe read target.",
+    "You need to offload read traffic from the serving blue instance to the green database."
+  ],
+  "5de5275fff32": [
+    "You run the import script in auto mode and it fails with a permission denied error.",
+    "The Claude Code auto mode classifier blocks your production write while you are editing `.claude/settings.local.json`.",
+    "You try to commit a large batch of data and the classifier rejects it without switching to Ask mode."
+  ],
+  "5ef15fd39795": [
+    "You run the test suite and see an AssertionError in test_gra742_zero_row_not_cached.py.",
+    "You inspect server.py and notice the main tool function updates the cache telemetry while a helper function returns without doing so.",
+    "You debug a scenario where a delegated branch completes successfully but the cache telemetry remains unchanged."
+  ],
+  "5f78349aad91": [
+    "You check the release gate logs and see 82 errors despite a high precision score of 0.836.",
+    "You review the statistical report and notice the lower bound is 0.806, which falls short of the required 0.99.",
+    "You calculate the tolerance for 500 test fires and realize that only one error is acceptable for a pass."
+  ],
+  "5fd8eb1a278b": [
+    "You run a query filtering user_profiles by organization_id and get a column does not exist error.",
+    "You open the user_profiles schema definition and notice the organization_id column is missing.",
+    "You write a WHERE clause for organization_id in user_profiles and the database throws an error."
+  ],
+  "5ff05ab4815e": [
+    "You are editing cache_middleware.py and the constructor raises a TypeError about an unexpected keyword argument.",
+    "You add defaults_getter to the middleware class but requests still fail because the wiring in server.py is missing.",
+    "You verify the code compiles but the feature remains dead code until you explicitly connect it in server.py."
+  ],
+  "601f356863ad": [
+    "You are updating docker-compose.yml and the MCP container cannot reach the local Postgres via loopback.",
+    "You switch the MCP container to host networking and the loopback DSN starts resolving correctly.",
+    "You verify the network mode in docker-compose.yml and confirm the container shares the host's network stack."
+  ],
+  "6198fd38db32": [
+    "You are reviewing the layout of skills_library.tsx and notice the card spans the full width instead of shrinking to its content.",
+    "A designer points out that the inline card looks too large compared to the compact variant in the design system.",
+    "You are deciding whether to refactor the card component to match Claude's guidelines for a compact experience."
+  ],
+  "63cf53de1e1e": [
+    "You run the publish command and the skill appears in the active list but still shows a launch block.",
+    "You inspect the database row for a published skill and see launch_blocked_reason is not null.",
+    "You update _PUBLISH_SKILL_SQL to clear retired_at but the skill remains launch-blocked."
+  ],
+  "65409e10b717": [
+    "You are reviewing the diff for 028_video_jobs.sql and notice a comment that seems outdated compared to the current schema.",
+    "A colleague questions why the comment in the migration file still references the old column definition instead of the new one.",
+    "You query the database and see that historical rows still contain the data format described in the stale comment."
+  ],
+  "65878f3464f8": [
+    "You are adding a new operation to the worker and need to emit lineage events without changing the transport layer.",
+    "You set the `GG_LINEAGE_TARGET` environment variable and verify that the existing emitter in `lineage.py` routes the data correctly.",
+    "You open `cycle.py` and `lineage.py` to confirm that the new ops window events are handled by the already-wired production emitter."
+  ],
+  "67132b2a9361": [
+    "You are configuring the connector in cache_middleware.py and the local server fails to reach Claude Desktop.",
+    "You inspect server.py and notice the connection originates from Anthropic's cloud rather than your local machine.",
+    "You choose the mcp-remote stdio proxy path instead of a public HTTPS tunnel to resolve the localhost reachability issue."
+  ],
+  "677faa2ca794": [
+    "You are reviewing the BLS salary ranking query and notice NULL employment rows are being treated as neutral values.",
+    "A migration script fails to exclude NULLs, causing inflated rankings in thin markets where confidentiality counts are withheld.",
+    "You are debugging a materiality issue in the employment data and see that NULL rows are skewing the results despite not having significantly higher salaries."
+  ],
+  "6927d8828dc7": [
+    "You are debugging host_bridge.ts and the inline report height is unexpectedly large.",
+    "The host state is 'none' but the panel's ceiling is not being applied to the report.",
+    "The assertion fails with expected [ 1200 ] to deeply equal [ 7952 ] in the inline report."
+  ],
+  "6acbbf44c7cd": [
+    "You are adjusting the inline shell in host_bridge.ts and need it to shrink below its initial size after catalog filters apply.",
+    "The measured root width falls between 650 and 1200, but the host's ceiling is lower than the calculated max.",
+    "You are reviewing styles.css and notice the fixed height approach fails to respect the host's stated ceiling constraint."
+  ],
+  "6b3d3a362a19": [
+    "You run a query with a self-join on the educations table and wait past the 30-second MCP timeout.",
+    "The terminal displays a timeout error while counting Valencia alumni who also attended UCF.",
+    "You replace the heavy self-join with a semi-join on mv_person_institute_latest and see the count resolve to 23,762."
+  ],
+  "6b42c81f7eaf": [
+    "You run `psql` locally and see the connection refused error on port 15432.",
+    "You open a terminal to query the database but the SSM tunnel is not yet authenticated.",
+    "You execute a local SQL command while the SSM port-forwarding tunnel is inactive."
+  ],
+  "6c68c551cf88": [
+    "You review the diff and see the synthesized summary in derived values, but the notice claims it was read from SKILL.md.",
+    "You consider dropping the summary to clean up the output, but worry about leaving a prefilled box with no explanation.",
+    "You decide to keep the summary as a suggested value, treating it as a behavior decision outside the review scope."
+  ],
+  "6ce5147bb87a": [
+    "You run the `fallow` audit and it flags `LedgerDisplay` in `gradgraph_ledger.tsx` as an unused export.",
+    "You open `gradgraph_ledger.tsx` and see `LedgerDisplay` exported but never imported by other modules.",
+    "You un-export `LedgerDisplay` and the audit finding disappears without breaking any internal logic."
+  ],
+  "6d806db04c03": [
+    "You check the health probe status and see it failing with exit code 1 even though the deployment succeeded.",
+    "You open `.sst/outputs.json` and notice the `frontendMcpUrl` field is missing.",
+    "You run the deploy command without `--health-url` and the process exits with code 1."
+  ],
+  "6edc7848d41f": [
+    "You are testing the Skills Library and the existing Browser pane fails to negotiate the MCP Apps UI extension.",
+    "You need to verify tools and auth against the local rig, but the Browser pane cannot reach them.",
+    "You open DocsPage.tsx and realize inline widgets cannot hold the session or carry the necessary auth."
+  ],
+  "721ceb49bccb": [
+    "You are reviewing a test failure in test_gra742_zero_row_not_cached.py where the row count was recorded earlier in the block rather than immediately before the return.",
+    "You are editing server.py and the drift guard rule rejects a valid row count because it is not in the line directly preceding the return statement.",
+    "A tool like alumni_directory writes the row count at the start of a code block, causing the stricter 'immediately preceding' check to flag a false negative."
+  ],
+  "72c8d5bce97d": [
+    "You are debugging a tool that returns an empty list and suspect the payload shape heuristic is incorrectly caching the result.",
+    "You are wiring `record_row_count` into a new tool and want to avoid guessing whether the payload indicates zero rows.",
+    "You notice a tool blocking real results because the heuristic misinterpreted the payload shape as empty."
+  ],
+  "73c23a188da0": [
+    "You are reviewing the inline size report in host_bridge.ts and see the value 650 instead of the expected 1180.",
+    "The host reports no ceiling, but the report is incorrectly capped at the panel's own ceiling of 1200.",
+    "A deep equality check fails with expected [ 650 ] to deeply equal [ 1180 ] in the host bridge tests."
+  ],
+  "74453a230749": [
+    "You are verifying a review fix in EPIC_BRIEF.md and apply a stash to check the pre-fix state.",
+    "The stash is applied but the fix has already been committed, causing the 'before' check to run the fixed code silently.",
+    "You need to compare the current state of EPIC_BRIEF.md against the exact blob before the fix was applied."
+  ],
+  "747046193b91": [
+    "You run the verification script and see a drift detected error while the local ETL-INFRA checkout is on the GRA-718 branch.",
+    "You notice the consumer_manifest.json in verify/ does not match the producer because the local copy was taken from an older branch.",
+    "You switch the local ETL-INFRA checkout to origin/main and re-copy the manifest to resolve the mismatch."
+  ],
+  "77ce15b325de": [
+    "You are configuring the agent's permissions and see 'Claude' listed as a target application.",
+    "The permission dialog asks for computer-use access and you select the app named 'Claude'.",
+    "You request control over the window titled 'Claude' and the operation fails immediately."
+  ],
+  "7847130b8960": [
+    "You deploy the MCP SDK to production and notice that ttlMs fields are silently ignored.",
+    "You call subscriptions/listen and the server returns an error because it expects the older protocol version.",
+    "You check the LATEST_PROTOCOL_VERSION environment variable and see it is set to 2025-11-25 instead of 2026-07-28."
+  ],
+  "7a32cc3c3b6b": [
+    "You are reviewing the deployment logs and notice that some ingress rules are missing after the apply.",
+    "You open EPIC_BRIEF.md and see the inline ingress array definition that looks correct but behaves unexpectedly.",
+    "You check sst-env.d.ts and verify the type definitions match the current state of the ALB resources."
+  ],
+  "7ba1f729f734": [
+    "You are debugging the audio pipeline and notice the music track is consistently 10 dB quieter than the voice.",
+    "The agent proposes a fix for the volume discrepancy and you must decide whether to modify the normalization policy or adjust the sender's data.",
+    "You verify that the music file itself is correct and confirm the issue lies with how Golpo handles the incoming stream."
+  ],
+  "7f09a2e1fc20": [
+    "You are reviewing the fuzzy resolver in EPIC_BRIEF.md and notice it substitutes a same-org neighbour for org admins.",
+    "A cross-org read or write fails while the fuzzy resolver is active, but the ticket criterion remains satisfied.",
+    "You consider fixing the fuzzy resolver but realize the change would alter super-admin behavior, which is out of scope."
+  ],
+  "7f3b1b3203ae": [
+    "You are updating a skill's metadata and notice the manifest file is out of sync with the index.",
+    "You open EPIC_BRIEF.md and see the skill store is in a dirty state after a partial write.",
+    "You are debugging why a newly edited skill isn't appearing in the search results despite the index update."
+  ],
+  "7f4a0a0a0c40": [
+    "You restart the server and immediately see 401s on GET /mcp requests from old proxies.",
+    "The entitlement.py module is processing responses and you notice stale tokens causing unnecessary retries.",
+    "You are monitoring server.py logs and see repeated 401s that resolve without manual intervention."
+  ],
+  "7f8c79c961b7": [
+    "You see GRA-499 flagged as 'regressed' in the daily report while the code clearly shows the fix is deployed.",
+    "You verify `plan_cache_mode` is set to `force_custom_plan` on the warehouse pool and confirm the fix commit is an ancestor of the deployed image.",
+    "You are investigating a potential GRA-499 regression and need to rule out configuration drift in the warehouse pool."
+  ],
+  "804c9c289be6": [
+    "You are reviewing the library entries in tools.py and notice four sibling skills that could be merged.",
+    "A merge creates one large skill, but you see that the individual skills no longer fire correctly on their own.",
+    "You decide to keep the skills separate because they are independently useful and distinct."
+  ],
+  "8149ee1a1ba6": [
+    "You are reviewing a static report and need to verify if the reported symptom is currently active.",
+    "You are calling the `alumni_directory` tool and want to confirm the underlying mechanism is working correctly.",
+    "You are running `run_read_query` to check for warm versus cold cache states in real time."
+  ],
+  "816635b8df11": [
+    "You inspect the cache configuration and notice the `age_seconds` field is missing from the `cache` block.",
+    "A user from Tenant A retrieves a lookup result that was cached by Tenant B, revealing the shared state.",
+    "You review the cache key structure and see it lacks the principal identifier needed for tenant isolation."
+  ],
+  "82e5a8860fee": [
+    "You open EPIC_BRIEF.md and notice the secret-ARN key is missing from the production-stamped .sst/outputs.json.",
+    "You run a broad AWS lookup to find the secret ARN, worried about accidentally modifying the production environment.",
+    "You are guessing the secret-ARN value because the available .sst/outputs.json lacks the key and is marked production."
+  ],
+  "82ec3cee9067": [
+    "You run the MCP container with `--rm` and it exits immediately before you can read the logs.",
+    "The container fails to connect to the local Postgres with an SSL rejection because the default DSN points to `host.docker.internal`.",
+    "You are editing `docker-compose.yml` and need to ensure the container stays alive long enough to verify the database connection."
+  ],
+  "84b3a42a3463": [
+    "You are checking the production lineage bucket using the default `s3://gradgraph-lineage/lineage/` path and see a `NoSuchBucket` error.",
+    "You are debugging `lineage.py` and notice the S3 ListObjectsV2 operation fails because the bucket name is `gradgraph-lineage-production`.",
+    "You run a command against `s3://gradgraph-lineage/lineage/` and it returns `NoSuchBucket` instead of listing objects."
+  ],
+  "85f2a2803f90": [
+    "You are wiring 43 insertion points into mcp_server/server.py and need to ensure line numbers remain valid.",
+    "You choose a Python script over sed or awk to insert 48 lines into mcp_server/server.py for precise control.",
+    "You are editing mcp_server/server.py and want to avoid the complexity of multiple sed or awk commands."
+  ],
+  "876f0a9f760f": [
+    "You are resolving conflicts in PR #315 and see that both branches modified the same 19 regions of mcp_server/server.py.",
+    "You notice complementary changes in the consolidated builder and row-count call within mcp_server/server.py and want to preserve both contracts.",
+    "You decide to merge main forward into the branch instead of rebasing to keep the commit history structurally sound."
+  ],
+  "87a81a0a2599": [
+    "You are running a query in `run_read_query` that compares a text column to an integer literal.",
+    "The database throws an operator mismatch error when the query execution fails.",
+    "You notice the query works in the REPL but fails in the application code due to implicit type casting."
+  ],
+  "8829e4438e5e": [
+    "You run `linear issue comment GRA-667 --body-file evidence.md` and see the error about the unknown option.",
+    "You are editing `skills-publishing.md` and need to post a comment with a body file using the Linear CLI.",
+    "You verify the syntax in `skillExport.test.ts` and realize the CLI command structure is incorrect."
+  ],
+  "8a9981b4372d": [
+    "You run the script from a subdirectory and the output files appear in the wrong place.",
+    "The relative path in EPIC_BRIEF.md points to a non-existent directory after the script changes location.",
+    "You verify the generated artifacts and notice they are missing because the working directory shifted unexpectedly."
+  ],
+  "8e9b0259bdd7": [
+    "You drop the idx_educations_cip4_cip_method_edu index and the ETL gate immediately fails.",
+    "The ETL gate reports a failure while you are dropping the idx_educations_cip4_cip_method_edu index.",
+    "You monitor the ETL gate and see it reject the migration that drops idx_educations_cip4_cip_method_edu."
+  ],
+  "904ea35d5333": [
+    "You update `claude_desktop_config.json` and want the changes to take effect immediately.",
+    "You are tweaking settings in the Developer menu and want to avoid the delay of a full client restart.",
+    "You notice the configuration has changed but the server code itself remains untouched."
+  ],
+  "90fc7e6ddfe2": [
+    "You call the MCP `gradgraph_skills` list operation and notice the result size is approaching the token limit.",
+    "The response from `gradgraph_skills` contains a truncation warning indicating data was cut off.",
+    "You open the saved file at .../tool-results/...txt to inspect the full list of skills."
+  ],
+  "910e738db997": [
+    "You are adding display mode support to `SkillsLibraryHostBridge` and notice the SDK's `App` class handles it automatically.",
+    "You decide to keep the hand-rolled bridge and must manually wire up `availableDisplayModes` and `requestDisplayMode`.",
+    "You are debugging why `size-changed` and `host-context-changed` events are not propagating in the current bridge implementation."
+  ],
+  "914094ec1abf": [
+    "You are reviewing the active skill count in EPIC_BRIEF.md and notice it differs from the raw total.",
+    "You are reconciling the discrepancy between the 43 public skills and the 44 total count reported by GRA-689.",
+    "You are verifying why the active skills are 39 instead of 43 after accounting for the 5 retired entries."
+  ],
+  "924c297a1f40": [
+    "You are writing a heredoc in a shell script and the PR gate falsely triggers.",
+    "A quoted string containing 'gh pr create' in a config file causes an unexpected gate event.",
+    "You run a command that writes to a file and the prefilter matches the literal string inside the payload."
+  ],
+  "92992f298b61": [
+    "You are reviewing the flattened SKILL.md output and notice a heading that looks like a boundary but is actually a reference.",
+    "The test suite for skillExport.test.ts passes for the seven bodies verified against S3 but fails for the unverified ones.",
+    "You open skillExport.ts and see the logic deciding whether to flatten a file or ship it whole based on manifest presence."
+  ],
+  "96874da74ffa": [
+    "You type the slash command in the chat but the Codex gate blocks the PR creation.",
+    "The adversarial review is incomplete and the disable-model-invocation flag is active.",
+    "You need to record evidence on a Linear ticket instead of opening a GitHub PR."
+  ],
+  "97da2561aba0": [
+    "You run the test suite and see a failure in test_gra574_manifest_freshness.py complaining about a manifest drift.",
+    "You open verify/consumer_manifest.json and notice it does not match the MCP-INFRA checkout currently checked out on GRA-706.",
+    "You switch your MCP-INFRA checkout to origin/main and the test passes without changing any code."
+  ],
+  "9818c8c685c7": [
+    "You annotate a ToolResult in place and the JSON text channel shows the old content while structuredContent updates.",
+    "You inspect the ToolResult object after mutation and notice the content list is frozen at its initial state.",
+    "You call a tool that modifies its result object and see a discrepancy between the serialized JSON and the structured data."
+  ],
+  "9824c0f3a48d": [
+    "You are editing server.py and a helper function throws a NameError because it cannot find _rollup.",
+    "You pass inst_names to a helper in server.py but forget to pass the tier, causing the NameError.",
+    "You are debugging server.py and notice _rollup is missing in scope within a function that accepts inst_names."
+  ],
+  "98f69fe97cb3": [
+    "You see 'deferred' in the Codex Adversarial Review for tmp_path and embedding-replay tests and assume CI will catch them.",
+    "CI is billing-blocked, so the deferred tests never run in the pipeline despite the green status.",
+    "You run the tmp_path and embedding-replay tests locally to verify correctness while CI is paused."
+  ],
+  "9aa13f861fa4": [
+    "You run `skills_guide_smoke.py` using the QA runbook's `ASYNCPG_DSN` and the connection fails.",
+    "You check `.sst/outputs.json` and notice the secret-ARN key is missing.",
+    "You verify that the DSN bypasses Secrets Manager while the smoke script expects a different auth path."
+  ],
+  "9d05c509fd98": [
+    "You run the test suite and see an AssertionError with 'Left contains 4 more items' in test_every_answering_return_records_a_row_count.",
+    "You open test_gra742_zero_row_not_cached.py and notice the drift guard is too loose, allowing tools to be counted as 'wired' even when they have gaps.",
+    "You inspect server.py and realize the initial wiring check missed several gaps that the stronger guard now exposes."
+  ],
+  "9d1e0eaf980c": [
+    "You are reviewing the schema after adding a composite index and notice three older indexes on the same columns.",
+    "The query plan shows the new composite index is being used, but the single-column `cip4_code` index is still taking up space.",
+    "You run `EXPLAIN` and see that the primary key and `edu_cip` columns are already covered by the new index prefix."
+  ],
+  "9e13e5cec6fc": [
+    "You check golpo_client.py and see the run completed instantly with no video output.",
+    "The settings file contains an invalid parameter and the process exits without incurring a render charge.",
+    "You verify the logs and confirm the rejection occurred before the video was enqueued for processing."
+  ],
+  "9e770b993f50": [
+    "You run import_legacy_skills.py and the launch_blocked status remains despite the import completing.",
+    "You check skills_management.py and see a BackfillConflict raised for a skill that already has a published version.",
+    "You verify the database and find that current_version_id is not NULL for the skill you just imported."
+  ],
+  "9fdf6c162c21": [
+    "You run `apply_036_038_prod.sh` in the terminal and watch it hang while the auto-mode classifier blocks the write.",
+    "You authorize the migration in the chat but the agent refuses to execute the Bash command.",
+    "You open the terminal to run `apply_036_038_prod.sh` directly to bypass the agent's blocking behavior."
+  ],
+  "a0d8589adf0a": [
+    "You are testing the Desktop widget and need to verify loopback DCR against the auth server without setting up an HTTPS tunnel.",
+    "You open claude_desktop_config.json and notice the Custom Connectors are rejecting the http://localhost:8001/mcp endpoint.",
+    "You run the Inspector 2.5.0 and want a deterministic pass/fail result for the mcp-remote transport with --allow-http."
+  ],
+  "a0f6f6554dc5": [
+    "You are debugging golpo_client.py and see an HTTP 422 error with the message 'Input should be a valid string'.",
+    "You POST a payload to the API where the prompt field is an object instead of a string, triggering a validation error.",
+    "You verify the API call by POSTing a payload with an object prompt to check for other errors, but the test only proves payload validity."
+  ],
+  "a1bee8ef5827": [
+    "You run the export command and the resulting ZIP file throws an unterminated-string SyntaxError.",
+    "You inspect skillExport.ts and notice the global section regex is matching headings inside bundled Python code blocks.",
+    "You open the generated overview files and see that script content has been truncated unexpectedly."
+  ],
+  "a225efc2e479": [
+    "You are reviewing EPIC_BRIEF.md and the rig transcript claims success for an org admin creating a skill.",
+    "QA reports zero org-owned skills despite the transcript showing a successful creation event.",
+    "The MCP fails to create a skill, revealing the rig was only observing the admin's own actions rather than verifying real HTTP responses."
+  ],
+  "a244e02e9549": [
+    "You run the full test suite after a rebase and see all green checks.",
+    "You inspect the test logs and notice a higher-than-expected skip count.",
+    "You open EPIC_BRIEF.md to verify which DB-backed tests were skipped rather than passed."
+  ],
+  "a2b5421282bb": [
+    "You are debugging a 2025-era client that fails to receive list_changed notifications despite supporting the protocol revision.",
+    "You check the server configuration and see that stateless_http is set to true, preventing the GET stream from being offered.",
+    "A client with a newer protocol version connects but receives no updates because the server is not offering the GET stream."
+  ],
+  "a2d2ee73e8b9": [
+    "You are editing golpo_client.py and the job fails immediately without appearing in the queue.",
+    "A validation error occurs before the job is enqueued, so the run fails without being queued.",
+    "You retry a job with valid settings after a previous failure caused by bad configuration."
+  ],
+  "a31e8e4362da": [
+    "You are finalizing the Continuous Data Improvement project and need to decide where to post your findings.",
+    "You open the GRA-715 epic board and see it is the active container for this project's work.",
+    "You are linking your new findings to existing tickets and want to keep them within the current epic."
+  ],
+  "a362e5e28d05": [
+    "You click the Run button in the library_app.py interface and receive a host error about skill instructions.",
+    "You inspect tools.py and notice the host implementation lacks the updateModelContext method.",
+    "You verify the host supports serverTools and message but still fail to add skill instructions during the test."
+  ],
+  "a3c1ca20f9be": [
+    "You run the build script and esbuild throws a 'Could not resolve react' error.",
+    "You check the build directory and notice node_modules is missing or not symlinked.",
+    "You open skills_library.tsx and see imports for react-dom/client failing to resolve."
+  ],
+  "a3ec8f2a66f2": [
+    "You are reviewing the upgrade strategy for FastMCP 4 and notice it is still in beta.",
+    "You see the migration involves replacing httpx and handling auth changes for the mcp 2.0 major update.",
+    "You are waiting to see if claude.ai honors the new signals before committing to the upgrade."
+  ],
+  "a5b9788b57e0": [
+    "You run `psql` locally and it hangs waiting for a connection to the database-1 instance.",
+    "The auto-mode classifier rejects the standard `migrate.sh` execution path from your local environment.",
+    "You open `sst.config.ts` to verify the security group settings for the database-1 resource."
+  ],
+  "a6bccd04deed": [
+    "You are verifying the retired 50.04 code count and see the discrepancy between 567 and 563.",
+    "You open the file containing the retired code metrics and notice the count is listed as 567.",
+    "You run the verification script and it reports 563 as the live count for the retired 50.04 code."
+  ],
+  "a76352fbda0a": [
+    "You query pg_stat_user_tables in the MCP connector and receive an access error.",
+    "The MCP connector blocks writes to pg_stat_user_tables while you are monitoring index usage.",
+    "You switch to pg_stat_user_indexes to bypass the restriction on pg_stat_user_tables."
+  ],
+  "a796a98100d1": [
+    "You run the rig and the outputs point to production despite the AWS credentials expiring.",
+    "You open .sst/outputs.json and see the production endpoint while the rig is configured for QA.",
+    "You restart the rig against QA outputs to resolve the credential expiration mismatch."
+  ],
+  "a87f8d74e942": [
+    "You are checking the authorization logic in EPIC_BRIEF.md and a member role is incorrectly passing the check.",
+    "You are debugging why a standard member can access an admin-only endpoint while a super admin is also granted access.",
+    "You are reviewing the role definitions in EPIC_BRIEF.md and notice that only admin and super admin roles are explicitly allowed."
+  ],
+  "aa63efd69679": [
+    "You run `docker build` in the repo root and the frontend build fails with a missing module error.",
+    "You open `Dockerfile.frontend` and notice the `COPY` instructions are placed after the `RUN npm run build` step.",
+    "You verify the file structure and see `contracts/skills/conformance-fixtures.json` sitting at the repository root rather than inside the frontend directory."
+  ],
+  "ab0dd6557233": [
+    "You are querying the green standby and receive a conflict error with a 30-second delay.",
+    "A long-running query on the standby is interrupted by recovery conflicts.",
+    "You retry a query after seeing the 'canceling statement due to conflict with recovery' message."
+  ],
+  "ab406d62fe4a": [
+    "You are reviewing the Dockerfile.frontend and notice two new commits landed after the last Codex run.",
+    "skillExport.test.ts is failing intermittently while skillExport.ts shows a splitter edge case.",
+    "You see the hit rate of findings across three runs is high and hesitate to merge immediately."
+  ],
+  "b1c9fa6f3b96": [
+    "You are exporting a skill from the frontend and the resulting file has a `.md` extension instead of `.zip`.",
+    "You try to install the exported skill in ChatGPT or Claude, but the HTML comment header prevents recognition.",
+    "You open `skillExport.ts` and see the download logic still returning raw markdown content."
+  ],
+  "b4ff93643bd9": [
+    "You unzip the corrected file from ~/Downloads/ainativevideo-fixed.zip to verify the changes.",
+    "You compare the output against the temp scratchpad path and realize it is inaccessible.",
+    "You open params.py and notice the fix is ready for delivery to the user's visible directory."
+  ],
+  "b50157917796": [
+    "You are reviewing the diff for `unsafePathMessage` and notice the single quotes do not match Python's `repr()` output.",
+    "The drift guard fails to flag the discrepancy because it only checks the plain case where the quotes align.",
+    "You decide to keep the hardcoded single quotes to avoid adding unnecessary complexity to the codebase."
+  ],
+  "b55c68d5af36": [
+    "You are working in the `codex/gra-731-732-ledger-ui` branch and need to add a UI tweak without creating a new ticket.",
+    "The transcript confirms the current branch is in-flight and ready for the change.",
+    "You decide to commit the fix directly to the existing branch instead of opening a new ticket."
+  ],
+  "b6b21ed7a71e": [
+    "You re-run the import and see insertedSkills: 0, insertedVersions: 0 in the logs.",
+    "You check the Postgres catalog and find the skill is missing entirely.",
+    "You inspect the zip-of-zips and notice the SKILL.md file is absent."
+  ],
+  "b85ad41090d2": [
+    "You are defining a schema for a tool and set `additionalProperties` to `false`.",
+    "A skill sends a request through an MCP client with only the declared arguments.",
+    "You notice the `_meta` field is missing from the incoming payload despite being valid."
+  ],
+  "b85ca67d1f1e": [
+    "You are attaching a skill bundle in an E2E test and the assertion passes even though the value is not yet set.",
+    "The derived slug is present in the DOM but still empty, causing a flaky test result.",
+    "You check the element's existence with `toHaveElement` but it fails to reflect the actual data state."
+  ],
+  "b88538cdab6f": [
+    "You are updating EPIC_BRIEF.md and notice a redundant .env file cluttering the directory.",
+    "You check .gitignore and realize it is managed by a different team or tool.",
+    "You verify the runbook and confirm it already documents the environment variables."
+  ],
+  "b8cb57172448": [
+    "You are restoring a skill record where the field was originally absent and the value is an empty string.",
+    "The `_validate_field` function raises an error while processing the empty string during restoration.",
+    "You attempt to write the restored value back through `edit_skill` and it fails due to the validation rule."
+  ],
+  "b8dd410a4aa9": [
+    "You build the container image from the current worktree and the agent fails to start because `stateless_http_enabled()` is missing.",
+    "You inspect EPIC_BRIEF.md and notice the flag definition is present but the running container does not reflect it.",
+    "You deploy the latest image and the HTTP handler behaves as if the feature flag is disabled despite the code changes."
+  ],
+  "b952b16f04b5": [
+    "You are editing host_bridge.ts and the display mode stays 'fullscreen' even after the container resizes.",
+    "A rapid sequence of display-mode replies arrives out of order, causing the state to lock prematurely.",
+    "You check the host state in the debugger and see 'fullscreen' persisting despite newer 'inline' updates."
+  ],
+  "bac136698fa8": [
+    "You are running the same lineage job twice and the second run's data disappears in S3.",
+    "You open lineage.py and notice multiple events mapping to the identical S3 object key.",
+    "You check the S3 bucket and see that repeated job executions are overwriting each other's records."
+  ],
+  "bb333fc25f35": [
+    "You invoke the skill library and the host returns an alert that it cannot render the library inline.",
+    "You are editing skills_management.py and need to verify the state of the spoken tools catalog.",
+    "You run a command in skills_runtime.py and see the list, describe, or edit tools responding via text instead of a visual panel."
+  ],
+  "bbe028fb8614": [
+    "You run a cip4_method call on a warm page and see fast results, but the cold-state acceptance fails.",
+    "A rebuild window completes and you need to verify that the cip4_method call accepts the cold state.",
+    "After a restart, you re-run the cip4_method call to confirm the cold-state acceptance is correct."
+  ],
+  "bc7de8cd48c3": [
+    "You are debugging lineage.py and the OpenLineage emitter raises a ValueError about a badly formed hexadecimal UUID.",
+    "You pass a non-hexadecimal string as run_id to the OpenLineage emitter and it fails during a manual operation.",
+    "You generate a run_id using uuid5 with a namespace in lineage.py to ensure it remains a valid hexadecimal UUID string."
+  ],
+  "bcda230034ee": [
+    "You are reviewing the uploaded bundle in `golpo_client.py` and notice the transcription is correct but validation fails.",
+    "You inspect `params.py` and see the stale v1 SDK values `solo-female-3` and `long` in the `voice` and `orientation` fields.",
+    "You decide to patch only the `voice` and `orientation` fields in the bundle rather than rewriting the entire skill definition."
+  ],
+  "bce56874eb1c": [
+    "You are appending a new test function to test_gra742_zero_row_not_cached.py to verify delegated branches record a row count.",
+    "You decide to use cat >> to add the test definition directly to the existing file instead of creating a new one.",
+    "You need to verify the delegated branches record a row count without editing the file in place."
+  ],
+  "c078ac76e922": [
+    "You query the `mv_grad_school_destinations` view and see only Master's and Doctorate degrees listed.",
+    "You notice transfer students with bachelor's degrees are missing from the view results.",
+    "You inspect the `mv_grad_school_destinations` materialized view definition and see the graduate credential filter applied at build time."
+  ],
+  "c0f72ae4ba06": [
+    "You update the tool definitions in the config file and notice the descriptions in the UI remain unchanged.",
+    "The connector is hosted on claude.ai and the tool list changes, but the UI does not re-render immediately.",
+    "You are debugging a stale description issue specifically for users on the claude.ai-hosted connector path."
+  ],
+  "c1a113411fc1": [
+    "You are running test_gra742_zero_row_not_cached.py and the test_delegated_branches_record_a_row_count_too test fails with an assertion error.",
+    "You are editing server.py and notice the helper return value is slipping past the guard logic.",
+    "You are wiring the tool function in server.py and the guard only reads the tool function while missing the helper return."
+  ],
+  "c1ba5e37b095": [
+    "You are running the local rig and the client capabilities are not being detected.",
+    "The MCP_STATELESS_HTTP flag is set to true and the response always lists accessible_tools.",
+    "You are editing server.py and need the inline app render to work correctly."
+  ],
+  "c2010b329a28": [
+    "You are editing styles.css and the inline shell does not respect the viewport height.",
+    "A test fails because the expected max-height constraint is not matched in the inline shell.",
+    "You set max-height: 100vh in styles.css but the style is not applied correctly to the inline shell."
+  ],
+  "c356f90e3f6b": [
+    "You run git revert on PR #320 but notice the skills are already being ported to Postgres.",
+    "The contracts/skills/tool-catalog.json file shows conflicts that suggest a port rather than a revert.",
+    "You decide to flatten the bundles and keep the Postgres migration instead of undoing the merge."
+  ],
+  "c3c850c2f269": [
+    "You are reviewing the stateless-HTTP negotiation logic in EPIC_BRIEF.md and notice the gap matches the documented scenario.",
+    "A developer argues for a code patch to fix the negotiation gap, but the ticket brief explicitly lists it as an anticipated finding.",
+    "You are deciding whether to modify the code or accept the current behavior, and the brief confirms the gap is expected."
+  ],
+  "c55e9379892b": [
+    "You are testing the MCP integration and the remote server returns an UnauthorizedError.",
+    "You check the deployed QA dashboard and notice the callback origin is missing from the allowlist.",
+    "You verify the configuration and see that `http://localhost:8001/authorize` is not listed as an allowed origin."
+  ],
+  "c5720fc99440": [
+    "You run a query against user_profiles in the local Docker database and get a column does not exist error for org_id.",
+    "You open library_app.py to inspect the user_profiles table and notice the org_id column is missing from the local schema.",
+    "You select all columns from user_profiles in the local Docker database and see the org_id field causing a failure."
+  ],
+  "c5cc841fcfde": [
+    "You run the test suite for economic_calculator_projections and an AssertionError flags a missing provenance field.",
+    "You inspect the code in economic_calculator_projections and notice an early return statement bypassing the provenance logic.",
+    "You debug a failing test case where the projection result is correct but lacks the expected metadata context."
+  ],
+  "c7e472af6202": [
+    "You are inspecting the panel's status line and it displays a long spoken narration instead of a short count.",
+    "You are debugging the bridge and notice the `status` field from tool results is being forwarded to the renderer.",
+    "You are reviewing the renderer's logic and see it using the forwarded `status` field instead of deriving the count from the catalog data."
+  ],
+  "c8cd029ea93b": [
+    "You are reviewing the `degree_salary_geography` metrics and notice it lacks a specific floor impact measurement.",
+    "A bug in `salary_by_career_geography` is resolved, but you pause to check if `degree_salary_geography` shares the same underlying issue.",
+    "You are verifying that `degree_salary_geography` has its own ticket before assuming it is covered by the existing fix."
+  ],
+  "c935bd10c5e0": [
+    "You open host_bridge.ts and see the UI height assertion failing because the document is stuck at 650px.",
+    "You inspect styles.css and notice the layout is clipped because the CSS forces a fixed 100vh instead of allowing growth.",
+    "You send the ui/notifications/size-changed event but the host ignores it because the preferred inline height was not set after initialization."
+  ],
+  "c9827fc09481": [
+    "You are editing host_bridge.ts and the first size report arrives before the handshake completes.",
+    "You run skillsLibraryHostBridge.test.ts and see expected -1 to be greater than -1.",
+    "You check the logs and notice the initial size report is sent immediately upon startup."
+  ],
+  "caa3cead5922": [
+    "You are reviewing the `create_video` tool and notice the `bg_music` parameter is still present despite the policy.",
+    "You are editing the `ai-native-video` skill and see Step 2 still asking about music preferences.",
+    "You run the tool with `bg_music` set to true and the output contradicts the 'never music' rule."
+  ],
+  "cd437058dde7": [
+    "You are configuring the Custom Connector in Settings and the connection fails immediately.",
+    "You inspect the error log and see the hostname resolving to a loopback address.",
+    "You verify the URL is http://localhost:8001/mcp and realize it originates from Anthropic's cloud infrastructure."
+  ],
+  "cd86b669c59a": [
+    "You are debugging the Grad Graph connector and notice the schema copy is held on the server side.",
+    "A local token is missing or invalid, but the server is still serving the correct description.",
+    "You mint a proxy JWT using the user's real Cognito sub to verify the server's response independently of local state."
+  ],
+  "cdb25bcdb3d8": [
+    "You are editing EPIC_BRIEF.md in the main checkout and the paths look correct.",
+    "You switch to the worktree and notice the file paths have shifted by the `.claude/worktrees/GRA-665/` infix.",
+    "You run a command in the worktree and the absolute paths no longer resolve to the expected files."
+  ],
+  "cdcbfcd7ae29": [
+    "You are reviewing the Music field-alignment metrics and notice the '3%' figure seems unexpectedly low.",
+    "You inspect the SOC crosswalk and see Audio/Video and Broadcast Technicians mapped to 10.02.",
+    "You count the alumni records and realize ten in-field candidates are scoring out of field due to the current mapping."
+  ],
+  "ce624455eac5": [
+    "You are uploading a new SKILL.md to an S3 bucket that lacks versioning.",
+    "You run the manifest update script and see the old catalog.json still serving stale data.",
+    "You open the session scratchpad to verify that the previous backup of manifest.json is intact before overwriting."
+  ],
+  "cfa0592bfd72": [
+    "The Docker build for the frontend fails with a module not found error for conformance-fixtures.json.",
+    "You are running the frontend Docker container and the application crashes because entitlement-fixtures.json is missing.",
+    "TypeScript compilation inside the Dockerfile.frontend step complains about missing type declarations for the contracts."
+  ],
+  "cfb334a632a2": [
+    "You update the metadata in manifest.json and index.json but the skill serves stale content because the live path reads skill.body from Postgres.",
+    "You verify the zip's artifact.sha256 and sizeBytes in the uploaded files, yet validation fails because the serving logic ignores these fields.",
+    "You check skills/index.json for the latest tools configuration, but the service continues to use the data stored in the database."
+  ],
+  "cfd573777447": [
+    "You are debugging a persistent 504 error and suspect the frontend image is outdated.",
+    "You check EPIC_BRIEF.md and sst-env.d.ts to verify the SST pinning configuration.",
+    "You realize the ECS security group has zero ingress rules causing the replay-and-drop behavior."
+  ],
+  "d03608c05f73": [
+    "You are debugging test_video_golpo_async.py and an AssertionError complains that 'background_track' is unexpectedly present in the set.",
+    "You inspect golpo_client.py and notice the JSON payload includes 'background_track' with a legacy value instead of omitting it entirely.",
+    "You send a request to the Golpo v2 API and the server rejects it because the client forwarded a non-null 'bg_music' value."
+  ],
+  "d1203f51b810": [
+    "You are debugging the OAuth flow in server.py and the callback endpoint returns an UnauthorizedError.",
+    "You check cache_middleware.py and notice the code is missing despite the manual OAuth step completing.",
+    "The deployed QA bundle is running but the hidden-iframe handoff from McpAuthSuccessPage.tsx is not present."
+  ],
+  "d134c40a4ab3": [
+    "You run psql locally with the correct AWS profile but the connection to database-1.cluster-cfqoy2w66qn8.us-east-2.rds.amazonaws.com times out.",
+    "You verify your local IP 66.68.147.182 is missing from the database-1 security group while other static IPs like NordVPN are allowed.",
+    "You confirm the security group only permits port 5432 from ECS/Lambda SGs and specific static IPs, excluding your current local network."
+  ],
+  "d19fc9bba2a4": [
+    "You are generating filenames in skillExport.ts and notice case-insensitive collisions on a Windows or macOS filesystem.",
+    "A validation step fails because skill.md and SKILL.md are treated as the same entrypoint during ZIP construction.",
+    "You are inspecting the archive paths and see that generated names overlap with reserved ones without proper collision checks."
+  ],
+  "d3901ca9bae6": [
+    "You are mapping the `solo-female-3` voice option in `SkillDetailPage.tsx` and see the wrong gender label.",
+    "You are debugging the `params.py` file and the REST API returns `female-2` instead of the expected default.",
+    "You are verifying the SDK documentation and notice the discrepancy between `solo-female-3` and the v2 API's `female-1`."
+  ],
+  "d3ff9bdeb636": [
+    "You run scripts/import_legacy_skills.py and see ModuleNotFoundError: No module named 'asyncpg'.",
+    "You execute the script using the system python3 instead of the virtual environment and it fails to import asyncpg.",
+    "You are in the project root and the virtual environment is not activated when you invoke the legacy skills import script."
+  ],
+  "d404e5da927e": [
+    "You are reviewing `CLAUDE.md` and notice a row that only partially addresses the rules in `libraryAccess.ts`.",
+    "You see a reviewer's edit in `CLAUDE.md` that isn't listed in the active file list.",
+    "You are deciding whether to keep a change in `CLAUDE.md` despite it being outside the designated file list."
+  ],
+  "d48ebeb4c211": [
+    "You are debugging the employment tool and notice the SQL query ignores the employment column despite it being present.",
+    "You consider deleting incorrect data rows but hesitate because other legitimate use cases depend on them.",
+    "You verify the data rows are factually correct and decide to fix the tool's sorting logic instead."
+  ],
+  "d54a8e457caa": [
+    "You are editing EPIC_BRIEF.md and notice the skill upload tool behaves inconsistently after a recent refactor.",
+    "A migration applied by hand left the tool registration in a state where the schema and annotations no longer match the original definition.",
+    "You are debugging a drift issue where the remove_tool operation swapped the registration but failed to preserve the initial annotations."
+  ],
+  "d6a11b2270b3": [
+    "You toggle the shell class in gradgraph_ledger.tsx but the button text remains unchanged.",
+    "The test in skills_library.tsx expects 'Expand to full screen' but receives null.",
+    "You add the expand control and update the class but forget to update the button label."
+  ],
+  "d75c1466662e": [
+    "You run `git commit` and the pre-commit hook reports ruff-format failed despite no visible changes.",
+    "You reformat server.py locally with `uvx ruff` and the file looks correct, but the CI pipeline fails on the same file.",
+    "You notice the line length in your local ruff output differs from the one reported by the git hook in server.py."
+  ],
+  "d7e713ff91fe": [
+    "You run `aws sts get-session-token` in a terminal configured with an SSO profile and it throws an error.",
+    "You are debugging a script that assumes a role and the session token command fails unexpectedly.",
+    "You switch from a long-lived IAM user profile to an SSO profile and the token retrieval breaks."
+  ],
+  "d982ff87bc1e": [
+    "You are running a query on `cycle.py` that returns correct results but suffers from slow performance due to heap fetches.",
+    "You inspect `lineage.py` and see that `force_custom_plan` is active, yet the execution plan still shows inefficient access paths.",
+    "You run `test_gra721_ops_lineage.py` and notice the test passes but the underlying index structure is redundant and bloated."
+  ],
+  "daaf787f23ff": [
+    "You are editing golpo_client.py and the test_video_golpo_async.py test fails with an AssertionError about background_track.",
+    "You inspect the JSON payload sent to Golpo and see background_track present even though bg_music was removed.",
+    "You run the async video tests and notice legacy code is still carrying the background_track parameter."
+  ],
+  "dac99f095773": [
+    "You run the deployment script and need to ensure the task definition resolves to the current PRIMARY version.",
+    "You are configuring the AWS profile and want to use the standard gradgraph credentials for the production stage.",
+    "You verify the dry run output confirms the deployment target before committing the changes."
+  ],
+  "dcc9786cc58d": [
+    "You invoke the skills handlers in production and receive a PostgresError about the missing managed_skills relation.",
+    "You check the production database-1 and notice that migrations 036 through 038 have not yet been applied.",
+    "You run the skills handlers immediately after deployment and the code fails because the expected table does not exist."
+  ],
+  "dced25b8ffc8": [
+    "You are editing golpo_client.py and setting background_track to 'engaging', but music still plays in the video.",
+    "You check params.py and see background_track is present, yet the Golpo API returns silence only when the field is omitted.",
+    "You inspect tool-catalog.json and notice the create_video tool definition includes background_track, causing unwanted audio scoring."
+  ],
+  "ddbc2512750e": [
+    "You are updating the skill package and notice that changes to manifest.json and index.json are not reflected in the live service.",
+    "You delete SKILL.md to clean up the repository and want to ensure the serving path remains unaffected.",
+    "You verify the artifact.sha256 hash and see it passes validation even though it is not recomputed against the zip bytes."
+  ],
+  "de389ed7e24b": [
+    "You run `skills_guide_smoke.py` and it hangs indefinitely at the final head.",
+    "The lead revokes the verify lease while the smoke test is still running.",
+    "You wait for the lead to grant a fresh verify lease to unblock the script."
+  ],
+  "dea70188df7a": [
+    "You are editing SKILL.md and notice the 'if installed' branch is redundant.",
+    "The fallback text is already present in the body, so you decide to inline it.",
+    "You delete the raw SQL fallback to keep the inlined method using named tools."
+  ],
+  "e06ad8df1f44": [
+    "You are presenting the 3% field alignment figure for Music and the audience questions its validity.",
+    "You notice the SOC crosswalk excludes Audio/Video and Broadcast Technicians, skewing the alumni data.",
+    "You are validating the Music program's alignment before the crosswalk widening takes effect."
+  ],
+  "e06ced8d40c6": [
+    "You are configuring the security group for database-1 and need to decide whether to open the local IP or rely on the existing NordVPN rule.",
+    "The user confirms they will connect to database-1 via NordVPN, so you update the connection settings to use the static IP 93.152.3.189.",
+    "You verify the security group rules and see that the NordVPN IP is already allowed, so you skip adding a new ingress rule for the local IP."
+  ],
+  "e17377b5b55d": [
+    "You are monitoring the ALB logs and notice duplicate notifications for the same digest change.",
+    "A client hits one of the two production tasks and receives a notification while the other task is still processing.",
+    "You check the _last_seen TTLCache and see it is not shared across the two running task instances."
+  ],
+  "e18005b8a92a": [
+    "You run the SQL cleanup for the 1,042 leaked test users and notice orphaned organizations remain.",
+    "You inspect the pnpm-lock.yaml file after a failed dependency resolution.",
+    "You query the organizations table and find records with no corresponding users."
+  ],
+  "e2330b1fb2cf": [
+    "You query the graduate school view and see six records with `degree_type` as BS/BA/BFA despite their LinkedIn text indicating a Master's or Doctorate.",
+    "You update the raw degree text in the source system but notice the `degree_type` column in the view remains unchanged.",
+    "You inspect the ETL logs and confirm the classifier skipped re-evaluation because it treats the label as write-once."
+  ],
+  "e35f77aeda9c": [
+    "You run the lineage script on your laptop and the data lands in the wrong S3 bucket.",
+    "You open lineage.py and notice the S3 client is initialized without an explicit profile.",
+    "The emit_for_cycle function calls the default boto3 client instead of the one passed through aws_lib."
+  ],
+  "e442bc8e1a36": [
+    "You are tailing the deploy script's output file and see no new lines while the process is still running.",
+    "The deploy log file exists but remains at 0 bytes despite the deployment steps completing.",
+    "You are watching the deploy script's stdout via a pipe and the output appears to hang indefinitely."
+  ],
+  "e7cad2c68b62": [
+    "You are building the container image from the worktree and notice `stateless_http_enabled()` is missing.",
+    "The probe fails to serve because the container was built from the PR base tree instead of the agent's module tree.",
+    "You are deciding whether to rebase onto the PR base before EVIDENCE to ensure the rig can serve the probe."
+  ],
+  "e7dd6d0b882f": [
+    "You are reviewing the publish gate in EPIC_BRIEF.md and consider removing the `principal is not None` prefix.",
+    "The Docket worker fails in its steady state after the token snapshot expires despite the check appearing redundant.",
+    "You are editing the publish gate logic and want to ensure the Docket worker remains stable during token expiration."
+  ],
+  "e7f859b72c08": [
+    "You are reviewing the cache middleware and notice zero-row responses are being cached despite having no data.",
+    "You check call_telemetry and see that only 6 of the 27 tools are recording row counts correctly.",
+    "You verify resolver_shadow and confirm the resolver mode is not set to \"off\" for the current requests."
+  ],
+  "e853f3103ff3": [
+    "You push commits to a branch managed by another agent and the push hangs.",
+    "You check the auto-mode classifier status while waiting for a push to complete.",
+    "Codex's branch is blocked and you suspect the auto-mode classifier is the cause."
+  ],
+  "eb413c5f3d68": [
+    "You are mapping `solo-female-3` to `female-1` in `params.py` based on the SDK documentation table.",
+    "The reference video voice differs from the standard, but the mapping relies on the documentation inference rather than audio verification.",
+    "You verify the mapping in `params.py` and notice it is not an audio-verified fact."
+  ],
+  "ebccd16bf8e5": [
+    "You are refactoring skillsLibraryHostBridge.test.ts and see 4,124 lines of test code that could be merged.",
+    "You consider trimming the test bulk in test_skills_library_app.py but worry about losing coverage.",
+    "You decide to leave the test cases alone because dropping coverage is a user decision, not a simple trim."
+  ],
+  "ec0d8aaec149": [
+    "You are inspecting the host client's `initialize` response and notice the `io.modelcontextprotocol/ui` extension is missing from capabilities.",
+    "The Skills Library panel renders as a truncated block instead of appearing inline in the conversation.",
+    "The server falls back to spoken tools because the host client did not advertise the UI extension."
+  ],
+  "ec4c9dba949a": [
+    "You run the test suite for test_cache_middleware.py and see an AssertionError comparing the cached payload structure.",
+    "You open test_gra666_tool_digest.py and notice the assertions expect the old raw blob format instead of the new envelope.",
+    "You update the cache middleware and the pre-existing tests fail because they assert exact response dicts that no longer match."
+  ],
+  "ecd74e6b3c02": [
+    "You are about to rebase the PR but notice the base branch GRA-665 is still local.",
+    "The lead has issued a sequencing hold and you are waiting for the word to proceed.",
+    "You check origin and see that the base branch has not been pushed yet."
+  ],
+  "ed156caf4199": [
+    "You call host.bridge.requestDisplayMode() and the console throws a TypeError.",
+    "You inspect the SkillsLibraryHostBridge class and notice the method is missing.",
+    "The JSON-RPC notification ui/request-display-mode fails to send from the bridge."
+  ],
+  "ef232bb1ae9d": [
+    "You are reviewing the client matrix for MCP Apps and notice Claude Code is missing.",
+    "You see a callback to http://localhost in the logs but no widget confirmation.",
+    "You are editing DocsPage.tsx and OrgLibrary.tsx to decide if the app is confirmed."
+  ],
+  "f11fa97eccc6": [
+    "You are debugging server.py and an AssertionError fires at line 657 because institutions_included lacks affiliate_tier.",
+    "You check the provenance label in server.py and notice it drifts from the institutions_included list.",
+    "You verify that all 26 emit sites in server.py are setting affiliate_tier alongside institutions_included."
+  ],
+  "f12711b63402": [
+    "You check EPIC_BRIEF.md and see the flag set to true, but the container logs show the old transport line.",
+    "A stateless container reports success in the dashboard while the underlying transport line is actually stale.",
+    "You are debugging a deployment and the log output contradicts the configuration flag for the transport line."
+  ],
+  "f164b8eb8a37": [
+    "You run an MCP query and the terminal hangs for 30 seconds before returning an error.",
+    "You inspect a large per-institution query that exceeds the 30s timeout limit.",
+    "You simplify the query logic and the timeout disappears."
+  ],
+  "f1f2c4b9a80c": [
+    "You deploy PR #327 and the application logs show 42P01 errors because the `managed_skills` table is missing.",
+    "You check the `schema_migrations` table and see it ends at 035 while the code expects tables from 036\u2013038.",
+    "You run `migrate.sh` to apply the pending migrations 036\u2013038 to the production database-1."
+  ],
+  "f2ef808d7c86": [
+    "You are updating skillExport.ts and need to ensure the published bytes match the hash in the export note.",
+    "You open skills-publishing.md to verify the contents of the ZIP archive before deployment.",
+    "You are debugging a mismatch between the exported skill and its published state."
+  ],
+  "f30b2f40f73d": [
+    "You are calling `attachSkillBundle` and the slug remains stale despite a new inspection.",
+    "The derived slug value in the database does not match the current inspection data.",
+    "Re-attaching a skill bundle results in an incorrect slug because the old value was not cleared."
+  ],
+  "f4562d875261": [
+    "You are checking the result of `ui/initialize` and `availableDisplayModes` is undefined.",
+    "The host bridge defaults to 'inline' because `hostContext` is missing or empty.",
+    "An assertion fails expecting `[ 'inline', 'fullscreen' ]` but receives undefined."
+  ],
+  "f551c42ecc24": [
+    "You open skills_library.tsx and see 'Run unavailable' displayed as a long text string in the launch_blocked_reason column.",
+    "You inspect the UI for the GRA-738 contract and notice the status message despite the steps being present.",
+    "You verify the GRA-725 import data and realize the displayed text is legacy metadata rather than a current error."
+  ],
+  "f5854f366ed0": [
+    "You download a skill and receive an HTTP 409 with the message \"Skill unavailable for export\" despite the file existing in S3.",
+    "You inspect the `download` handler in `functions/admin/skills.ts` and see it returning 409 because the skill's status is not \"active\".",
+    "You query Postgres and find the skill's status is blocked, explaining why the export failed even though the artifact is correct."
+  ],
+  "f5a95eeecbf4": [
+    "You are reviewing the lineage layer and notice that manual maintenance windows are missing from the graph.",
+    "You open cycle.py and see that the `ggops cycle close` hook is configured to emit lineage automatically.",
+    "You run a command that triggers a maintenance window and verify that the lineage data is captured without any extra operator steps."
+  ],
+  "f695deda467e": [
+    "You are running the application inside a Docker container and it rejects the local Postgres connection with an SSL error.",
+    "You check docker-compose.yml and notice the database service is exposed but the host networking does not publish the port back correctly.",
+    "You verify that host.docker.internal resolves to the host IP rather than loopback, causing the server to force RDS-CA SSL."
+  ],
+  "f8f2ce777ec3": [
+    "You call current_setting('plan_cache_mode') in a stored procedure and receive an error about allowed functions.",
+    "The MCP connector blocks function calls while you are debugging pool settings.",
+    "You switch to a plain SELECT statement to verify the cache mode without triggering the restriction."
+  ],
+  "fb0ab8e02b16": [
+    "You query pg_stat_user_tables and receive an access denied error while pg_settings works fine.",
+    "You verify cold-cache behavior on a different mega-school and see the planner flip to the bad plan.",
+    "You run a test right after a rebuild and notice warm-cache evidence masking the planner's coin-flip."
+  ],
+  "fbc37946a702": [
+    "You run the deploy script and it aborts with a dirty worktree error.",
+    "The image tag in the registry doesn't match the commit you just pushed.",
+    "You have uncommitted changes in the working directory when invoking the build."
+  ],
+  "fd3244a6cd17": [
+    "You are viewing the Skills Library UI in Claude Desktop and the content looks severely cut off.",
+    "You check the local rig configuration and find `MCP_STATELESS_HTTP` is set to `true`.",
+    "You open `library_app.py` to debug the display truncation issue."
+  ],
+  "fd43acdef770": [
+    "You download a .md skill file and Claude Code fails to recognize it as a valid skill.",
+    "You open the downloaded skill file in your editor and see an HTML comment block above the YAML frontmatter.",
+    "You run a command to load the skill and it ignores the file because the first line is not '---'."
+  ],
+  "fd45ade048d2": [
+    "You are editing host_bridge.ts and the expand control toggles unexpectedly while the host is deciding the display mode.",
+    "The test fails with expected false to be true because the control is still active during the mode decision.",
+    "You reflect the granted mode but the UI state is out of sync because the expand control was not disabled."
+  ],
+  "fe161694f0ea": [
+    "You are running a git rebase and the terminal hangs waiting for input.",
+    "The lead developer is reviewing the commit history and hasn't typed 'ACK' yet.",
+    "You press Enter to continue the rebase but realize the lead hasn't confirmed the restack."
+  ],
+  "feaba75d9054": [
+    "You refresh the Coresignal source and the degree text updates to 'Master' while the degree_type column remains 'BS'.",
+    "You query the database and see a record with degree_text 'Master' but degree_type 'BA' that has not been reclassified.",
+    "You update the degree text in the UI but notice the underlying degree_type label stays stale after the source refresh."
+  ],
+  "fec62b6f90a3": [
+    "You are annotating the cache hit flag in cache_middleware.py and notice the flag reflects the state after the cache operation.",
+    "A mutation check in cache_middleware.py shows multiple failures when the flag is updated after the cache is stored.",
+    "You are reviewing the cache logic in cache_middleware.py and see the flag being set after the cache write, risking stale data."
+  ],
+  "fedf679017c1": [
+    "You are debugging a 'managed_skills' missing error in production and notice the relation does not exist despite the code being present.",
+    "You check the migration history in the codebase and see migrations 036\u2013038 are there, but the production database (database-1) has not applied them.",
+    "You call the 'open_skill_library' tool and receive an error indicating the 'managed_skills' relation is absent."
+  ],
+  "fef4bd4b1386": [
+    "You are running the local harness and want to skip the full Cognito authentication flow.",
+    "The harness mints a proxy JWT for the local super-admin sub during testing.",
+    "You are verifying local endpoints and need the super-admin sub without the overhead of Cognito."
+  ],
+  "ff005c4f6594": [
+    "You are reviewing the QA deployment checklist and notice the Cognito client secret is approaching its deletion date.",
+    "The CI pipeline fails during the QA deploy phase because the CognitoMcpClientSecret is already scheduled for deletion.",
+    "You open EPIC_BRIEF.md to verify the secret's status before initiating the deployment to QA."
+  ]
+}

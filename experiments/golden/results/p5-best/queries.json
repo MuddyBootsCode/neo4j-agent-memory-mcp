@@ -1,0 +1,1250 @@
+[
+  {
+    "query_id": 0,
+    "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+    "repo": "gradgraph-auth-platform",
+    "line": 1098,
+    "prompt": "There are a ton of failed CI issues we'll need to take care of at end of this. Might start looking",
+    "files": [
+      ".claude/epic-squad/GRA-444.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 1,
+    "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+    "repo": "gradgraph-auth-platform",
+    "line": 1314,
+    "prompt": "These are all reviewed correct?",
+    "files": [
+      ".claude/epic-squad/GRA-444.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 2,
+    "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+    "repo": "gradgraph-auth-platform",
+    "line": 1382,
+    "prompt": "That are we able to peoples actual queries or are we just capturing tool use?",
+    "files": [
+      ".claude/epic-squad/GRA-444.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 3,
+    "session": "01dd33b2-8e25-49e3-9059-8a3eea4ea8de",
+    "repo": "gradgraph-auth-platform",
+    "line": 1515,
+    "prompt": "Ok. Run the migration on database-1. We're also  going to have to set some kind of reminder to check this output and logs",
+    "files": [
+      ".claude/epic-squad/GRA-444.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 4,
+    "session": "1284711c-e50a-477a-ac50-e93a710536b2",
+    "repo": "gradgraph-auth-platform",
+    "line": 8,
+    "prompt": "https://github.com/Grad-Graph/ETL-INFRA/pull/178 make sure you add the reviews to the branch /code-review --fix",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 5,
+    "session": "1e150b97-ab82-47c4-9210-83cb9ae2cd07",
+    "repo": "gradgraph-auth-platform",
+    "line": 118,
+    "prompt": "Go ahead and publish it.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 6,
+    "session": "2ba6f060-3ec9-41d0-a175-1f64145f507a",
+    "repo": "gradgraph-auth-platform",
+    "line": 48,
+    "prompt": "Yes commit and push to PR branch",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 7,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read .claude/epic-squad/GRA-664-LEAD.md and follow it.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 8,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 1514,
+    "prompt": "what's q1 and q2",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 9,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 1539,
+    "prompt": "eli How these tickets interact? Q1 seems like O1 is best. Still not tracking what's holding up 668",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 10,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 2381,
+    "prompt": "Ok. What's happening? ELI",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 11,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 2472,
+    "prompt": "Build it and include 668 all pointed at QA. At the end we should have a grad-graph-mcp-test container that we can attach to locally to test all of this",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 12,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 3021,
+    "prompt": "What's our status here?",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 13,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 3112,
+    "prompt": "tear down and deploy qa",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 14,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 3750,
+    "prompt": "295 is merged. So how do we add the qa mcp to our local config and test it?",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md",
+      "sst.config.ts"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 15,
+    "session": "340968ea-9a45-4f9a-84a7-6ee617922784",
+    "repo": "gradgraph-auth-platform",
+    "line": 3822,
+    "prompt": "http://localhost:8001/authorize?response_type=code&client_id=https%3A%2F%2Fclaude.ai%2Foauth%2Fclaude-code-client-metadata&code_challenge=vHefH84AwvblkBhYNB9gV3vB7ACu53nwXe-KMXk7NzA&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A3118%2Fcallback&state=jV59NbFIPG_eeSvU5mxPBkTdMLpmYbzNSm0lhgAdNus&scope=openid&resource=http%3A%2F%2Flocalhost%3A8001%2Fmcp\n\nI don't see qa-mcp I see qa-dales in the list\n\nWhen I hit that URL above I got an internal server error message",
+    "files": [
+      ".claude/epic-squad/GRA-664.json",
+      "EPIC_BRIEF.md",
+      "sst.config.ts"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 16,
+    "session": "35ead25a-98f2-49bd-8013-4e5314280371",
+    "repo": "gradgraph-auth-platform",
+    "line": 12,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 17,
+    "session": "3b50673f-b6b2-4e02-82a1-84b6a421f726",
+    "repo": "gradgraph-auth-platform",
+    "line": 696,
+    "prompt": "Yes let's try it at .75",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 18,
+    "session": "3b50673f-b6b2-4e02-82a1-84b6a421f726",
+    "repo": "gradgraph-auth-platform",
+    "line": 868,
+    "prompt": "Ok so we have an eval step before full deployment?",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 19,
+    "session": "3b50673f-b6b2-4e02-82a1-84b6a421f726",
+    "repo": "gradgraph-auth-platform",
+    "line": 1032,
+    "prompt": "what is the adjudication item? eli",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 20,
+    "session": "3b50673f-b6b2-4e02-82a1-84b6a421f726",
+    "repo": "gradgraph-auth-platform",
+    "line": 1041,
+    "prompt": "Not fine. We need to try to tune this to get a better answer or be honest when it does not match",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 21,
+    "session": "470f3a61-720b-4d1f-b011-e4e0cceab6e3",
+    "repo": "gradgraph-auth-platform",
+    "line": 95,
+    "prompt": "So we have the correct credentials set up? [Image #1] we are clearly capturing memories in sessions. What location can I check to make sure we're connected in the two grad graph repos?",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 22,
+    "session": "470f3a61-720b-4d1f-b011-e4e0cceab6e3",
+    "repo": "gradgraph-auth-platform",
+    "line": 119,
+    "prompt": "[Image #2] it's capturing our converstations for sure.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 23,
+    "session": "47357376-9a0e-4f48-8f84-26fb5f8a4148",
+    "repo": "gradgraph-auth-platform",
+    "line": 12,
+    "prompt": "I've just downloaded on my desktop a new grad graph skill, career exploration. We need to replace existing skill in both the grad graph skills library and any istitutions that might have it. In our production skills. Look first at the just downloaded skill and the ones it will replace. It has a too long description we need shorten that first. Save the correct length description locally and then push it.",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 24,
+    "session": "53859128-f679-476e-b147-9e4c49973095",
+    "repo": "gradgraph-auth-platform",
+    "line": 12,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 25,
+    "session": "6a0a17c0-854d-4e30-810e-e148930d64aa",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 26,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 165,
+    "prompt": "I don't understand what you mean here?",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 27,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 172,
+    "prompt": "That note doesn't matter we don't have enough users to justify the change. I need break down of the rest, what do we mean internally inconsistent?",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 28,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 181,
+    "prompt": "This work has already been merged on the updated database and tools",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 29,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 282,
+    "prompt": "Can we amend the body and include your fixes in a follow on PR?",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 30,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 312,
+    "prompt": "I just told you there's no need to add the disclosure",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 31,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 338,
+    "prompt": "git me the linear link for 588",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 32,
+    "session": "736c4ce0-d642-48a3-8c36-aad7414ca387",
+    "repo": "gradgraph-auth-platform",
+    "line": 349,
+    "prompt": "so is 588 done or still open?",
+    "files": [
+      "mcp_server/server.py",
+      "frontend/src/pages/DocsPage.tsx"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 33,
+    "session": "77658783-f772-4b98-a9e5-276e9fbaf055",
+    "repo": "gradgraph-auth-platform",
+    "line": 10,
+    "prompt": "Did we recently update the MCP and it's tools to have their changes picked up without refreshing the tools in the desktop ui?",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 34,
+    "session": "77658783-f772-4b98-a9e5-276e9fbaf055",
+    "repo": "gradgraph-auth-platform",
+    "line": 129,
+    "prompt": "Ok we need to find a way to verify that this works. brain storm with me. Can't we just call a tool, note it's description, then add a change to that description, deploy the mcp server, and call the tool again and see if it works?",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 35,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 17,
+    "prompt": "Ok. We've just connected to the qa-mcp for grad graph. It's supposed to have UI apps. Can you find the tickets for the work and I'll need to be able to test it locally on claude desktop. Please help with that.",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 36,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 743,
+    "prompt": "[Image #7] Let me clearly express my expectation. My expectation is that this UI portion will look exactly like the skills section of the gradgraph.com dashboard. [Image #8] It should be as close to a copy of this as possible.",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 37,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1011,
+    "prompt": "We should show the preview org pill to super-admins who are logged in",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 38,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1428,
+    "prompt": "[Image #10] [Image #11] Ok. this still looks very wrong. Also, I'd expect when I change to merrimack I'd see soemthign [Image #12] like I do in qa library with the skills and their pills for selection. /design",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 39,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1688,
+    "prompt": "[Image #13] Ok. Things are working better. But come on, why can't you make this look like the already created UI?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 40,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 2169,
+    "prompt": "[Image #18] I quit claude and re-opened it. I see zero changes. [Image #19] are you sure we made those available?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 41,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 2291,
+    "prompt": "I opend the UI panel in an entirely new chat with claude and there are no changes. Maybe we disconnect the mcp and try again?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 42,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 2487,
+    "prompt": "[Image #21] Ok. Go ahead and commit your existing work. See if we can reduce the size of this card. It looks like we're included a secondary description there. You have successfully removed the bottom text",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 43,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 3262,
+    "prompt": "One thing worth considering while you're testing: when the wrapper does supply an institution, the school in the finished report traces back to the connector rather than to something the person said out loud. That's fine given it's your connector and the value comes from their session. But since this deliverable goes in front of a dean with real earnings figures on it, I'd still read the school name back before building rather than silently inheriting it. Cheap for a signed-in user, and it catches a mis-scoped session before it becomes a PDF.\n\nLet's take this into account. If we create a PR for this work. It won't end up in production yet correct?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 44,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 3515,
+    "prompt": "can you do that?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 45,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 3567,
+    "prompt": "[Image #25] I want the skill to upload via a file picker or something of that nature vs. line in the chat",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 46,
+    "session": "8d43e27f-c3e3-4e54-9de4-7c2f443c2eb8",
+    "repo": "gradgraph-auth-platform",
+    "line": 4135,
+    "prompt": "Can we cherry pick the things that fixes CI/CD out of this and merge it?",
+    "files": [
+      "mcp_server/skills_guide/dashboard_theme.py",
+      "tests/test_dashboard_theme.py",
+      "mcp_server/skills_guide/library_app.py",
+      "tests/test_skills_library_app.py"
+    ],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 47,
+    "session": "90c86e31-16ce-4493-ba85-01c5550e9373",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 48,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 102,
+    "prompt": "give me the PR link",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 49,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 179,
+    "prompt": "[Request interrupted by user]",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 50,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 433,
+    "prompt": "WE have a lot of work inflight. I need to be aware of what order to deploy this work. Communicate with our other active agents and let's get a work order figured out.",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 51,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 663,
+    "prompt": "Yes walk the verifications. Send the job to a sub-agent.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 52,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 719,
+    "prompt": "I want you to hand the task off to a sub-agent. Then monitor it from here. Start with D1",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 53,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 847,
+    "prompt": "ok let's move on to D2",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 54,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 882,
+    "prompt": "why do you keep flagging no scripted path? If we need to do more research or create a scripted path dispatch sub-agents to do that",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 55,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 978,
+    "prompt": "Why didn't you take care of these issues:\nTwo things I pre-empted from earlier in this session. The service roll takes minutes, so it has a 10-minute timeout and instructions to check describe-services rather than re-run blindly if the shell dies mid-wait. And if the permission classifier blocks it, it stops and reports \u2014 explicitly forbidden from decomposing the script into raw register-task-definition calls, since that would skip exactly the guards and verification the script exists to provide.\n\nIt also can't roll back on its own judgement. If something looks wrong it reports with evidence and stops; the un-flip is enable_live_tools.sh production \"\" and that call is yours.\n\nIf this is something you flag as a bug for your work then ensure it's rolled up in a commit for the work. Do not leave \"unresolved\" future issues.",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 56,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1070,
+    "prompt": "We're going to wait to deal with that work.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 57,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1239,
+    "prompt": "I'm about to move and lose internet. capture anything we need to before I do",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 58,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1321,
+    "prompt": "Ok so what failed or was not measured? Also, dispatch a sub-agent and change the ports that the postgres container uses to avoid this in the future",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 59,
+    "session": "92406106-f77c-41a0-835b-39c5ede5f6c8",
+    "repo": "gradgraph-auth-platform",
+    "line": 1339,
+    "prompt": "So what's our next step? deploy is verified correct? What issue did we fix?",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 60,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 52,
+    "prompt": "I can confirm that dev mode is enabled. I disconnected and re-connected the MCP server the tool still does not show up. Can we shorten the tool description? If it's too verbose?",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 61,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 219,
+    "prompt": "[Request interrupted by user]",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 62,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 222,
+    "prompt": "it's the same. it's just registered under different names. I'm an admin on the site.",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 63,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 229,
+    "prompt": "I deleted the connection in my workspace and added it again now I cannot connect?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 64,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 238,
+    "prompt": "Ok. I re-added it. In my personal settings I got the refresh button. Not the work place settings and then when I refreshed it. The re-fresh button just disappeared?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 65,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 258,
+    "prompt": "It's not a benign behavior, it's just gone.",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 66,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 266,
+    "prompt": "I want to run a quick experiment. You shortened the create video description correct? If so let's go ahead and build and push the new mcp container and see it picks up the changes and allows us to refresh",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 67,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 300,
+    "prompt": "Ok let me know when the build is complete and live please",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 68,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 325,
+    "prompt": "Ok I went back and refreshed the page I see this. I disconnected and re-connected and do not see the refresh",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 69,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 333,
+    "prompt": "I've already looked in the internal admin side and nothing is there to refresh. This is terrible UX if the admin has to delete our tool and re-add it everytime we publish a new tool. Please do some research and see if open AI has published any info on how this is supposed to be handled",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 70,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 375,
+    "prompt": "Here's what I see",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 71,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 390,
+    "prompt": "Ok do we need to annotate the tools as read only?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 72,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 475,
+    "prompt": "Open a PR too when you're done",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 73,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 512,
+    "prompt": "OK. Can you draft a quick email with instructions for a work place admin to delete and re-add the server?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 74,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 518,
+    "prompt": "Ok is the new server fully deployed?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 75,
+    "session": "9cc57b61-d917-48b6-a769-9b5d1efb017b",
+    "repo": "gradgraph-auth-platform",
+    "line": 530,
+    "prompt": "Did you test the other tools?",
+    "files": [
+      "mcp_server/video/tools.py",
+      "mcp_server/server.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 76,
+    "session": "a4650052-f32b-460f-9ee0-4003ae0a3b27",
+    "repo": "gradgraph-auth-platform",
+    "line": 60,
+    "prompt": "Does this work point at blue or green? or database-1",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 77,
+    "session": "a4650052-f32b-460f-9ee0-4003ae0a3b27",
+    "repo": "gradgraph-auth-platform",
+    "line": 66,
+    "prompt": "Is this an epic or part of one?",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 78,
+    "session": "a7080636-33db-4594-8cc5-72c1f07dfebf",
+    "repo": "gradgraph-auth-platform",
+    "line": 459,
+    "prompt": "Ok so what Pr does all of this work fall under?",
+    "files": [
+      "mcp_server/call_telemetry.py",
+      "mcp_server/telemetry_middleware.py",
+      "tests/test_call_telemetry.py",
+      "mcp_server/cache_middleware.py",
+      "mcp_server/server.py",
+      "mcp_server/jwt_claims.py",
+      "mcp_server/tool_logging_middleware.py",
+      "mcp_server/tool_logger.py",
+      "db/migrations/034_tool_call_logs_telemetry.sql",
+      "docker-compose.yml",
+      "tests/test_tool_logger_redaction.py",
+      "tests/test_tool_logging_telemetry.py",
+      "tests/test_tool_metrics_emf.py",
+      "tests/test_cache_middleware.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 79,
+    "session": "a7080636-33db-4594-8cc5-72c1f07dfebf",
+    "repo": "gradgraph-auth-platform",
+    "line": 543,
+    "prompt": "Let's ensure the linear tickets for this issues capture these issues. Let me know what it will take to get this to production",
+    "files": [
+      "mcp_server/call_telemetry.py",
+      "mcp_server/telemetry_middleware.py",
+      "tests/test_call_telemetry.py",
+      "mcp_server/cache_middleware.py",
+      "mcp_server/server.py",
+      "mcp_server/jwt_claims.py",
+      "mcp_server/tool_logging_middleware.py",
+      "mcp_server/tool_logger.py",
+      "db/migrations/034_tool_call_logs_telemetry.sql",
+      "docker-compose.yml",
+      "tests/test_tool_logger_redaction.py",
+      "tests/test_tool_logging_telemetry.py",
+      "tests/test_tool_metrics_emf.py",
+      "tests/test_cache_middleware.py"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 80,
+    "session": "a9da8ee1-8c4c-4adc-b3ac-c2a50526e04c",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 81,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 10,
+    "prompt": "I need a summary of the work we've accomplished over the last two weeks upto today.",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 82,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 77,
+    "prompt": "Verify that migration 35 is complete. It should have already been completed",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 83,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 300,
+    "prompt": "[Request interrupted by user]",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 84,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 458,
+    "prompt": "What state is the repo in now?",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 85,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 473,
+    "prompt": "264 is a docs only change? Have we reviewed it?",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 86,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 539,
+    "prompt": "Ok. Was that the last hanging PR?",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 87,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 563,
+    "prompt": "yes clean that up",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 88,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 588,
+    "prompt": "165 is a draft? Can we verify if we need it?",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 89,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 647,
+    "prompt": "We're working on assumptions here. Blue has been downsized. Green has caught up. Remove the banner.",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": false
+  },
+  {
+    "query_id": 90,
+    "session": "b06e5342-6adb-47e9-821e-2236bdf1c69a",
+    "repo": "gradgraph-auth-platform",
+    "line": 725,
+    "prompt": "Keep the lineage doc",
+    "files": [
+      "db/migrations/077_gra629_drop_mv_usage_stats.sql",
+      "slow_flow/migrations.py",
+      "tests/test_mv_index_rebuild_coverage.py",
+      "tests/test_slow_flow_migrations.py",
+      "CLAUDE.md"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 91,
+    "session": "bc5b9fad-dc04-4581-9084-5c6103537514",
+    "repo": "gradgraph-auth-platform",
+    "line": 59,
+    "prompt": "Ok. We need to copy those two skills over to Merrimack's library and put them under the Career and Experiential Learning tab",
+    "files": [],
+    "anchorable": false,
+    "short": false
+  },
+  {
+    "query_id": 92,
+    "session": "bc5b9fad-dc04-4581-9084-5c6103537514",
+    "repo": "gradgraph-auth-platform",
+    "line": 156,
+    "prompt": "[Image #2] This is what I see",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 93,
+    "session": "bc5b9fad-dc04-4581-9084-5c6103537514",
+    "repo": "gradgraph-auth-platform",
+    "line": 297,
+    "prompt": "PR is merged deploy the changes",
+    "files": [
+      "frontend/src/pages/skills/libraryDepartments.ts"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 94,
+    "session": "bea3b8ea-e2e9-4a5d-b2ae-825be1dc5f5f",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read ./SWARM_BRIEF.md in this directory and follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 95,
+    "session": "c1af0ca6-5fbe-41dc-9199-37b539f44a9d",
+    "repo": "gradgraph-auth-platform",
+    "line": 11,
+    "prompt": "Read ./EPIC_BRIEF.md in this directory, then begin. Follow it exactly.",
+    "files": [],
+    "anchorable": false,
+    "short": true
+  },
+  {
+    "query_id": 96,
+    "session": "eae864ce-c6ee-4802-94e5-20af9e51eb92",
+    "repo": "gradgraph-auth-platform",
+    "line": 290,
+    "prompt": "Does this need to be deployed after merge?",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 97,
+    "session": "eae864ce-c6ee-4802-94e5-20af9e51eb92",
+    "repo": "gradgraph-auth-platform",
+    "line": 302,
+    "prompt": "Let me merge it, then we'll deploy. Ok merged",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 98,
+    "session": "eae864ce-c6ee-4802-94e5-20af9e51eb92",
+    "repo": "gradgraph-auth-platform",
+    "line": 342,
+    "prompt": "Remember that we don't use sst to deploy",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "anchorable": true,
+    "short": true
+  },
+  {
+    "query_id": 99,
+    "session": "eae864ce-c6ee-4802-94e5-20af9e51eb92",
+    "repo": "gradgraph-auth-platform",
+    "line": 395,
+    "prompt": "check more than the health tool",
+    "files": [
+      "mcp_server/server.py",
+      "tests/test_cip4_tools_sql.py"
+    ],
+    "anchorable": true,
+    "short": true
+  }
+]

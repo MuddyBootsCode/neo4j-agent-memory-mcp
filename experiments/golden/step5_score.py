@@ -23,19 +23,55 @@ p50/p95 over queries.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 
-from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family
+from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, rewrite_lessons, save_json,
+                 session_family, stale_label_keys, stale_rewrites, unlabeled_pairs,
+                 wholly_unlabelled)
 from mem import open_client
 
 CAP = 5
+# An error-time injection is one or two lines, so MUD-460 reads the top of
+# the list rather than P@5. Reported for every run; comparable across them.
+CAP3 = 3
+# Which configs to score. The gate (E) is a local model call per query and
+# ran at its 6 s timeout throughout p4-live, so an index-side experiment
+# that only needs the ceiling and the ranking asks for "cosine20,D" and
+# skips ten minutes of timeouts (MUD-456).
+CONFIGS = [c.strip() for c in os.environ.get("GOLDEN_CONFIGS", "cosine20,D,E").split(",") if c.strip()]
 # Query expansion (MUD-406): prepend the previous N human prompts and the
 # last assistant text from the same session, so a short follow-up like
 # "Keep the lineage doc" carries the conversation it belongs to. 0 = the
 # prompt alone (what the hook sends today).
 QUERY_CONTEXT = int(os.environ.get("GOLDEN_QUERY_CONTEXT", "0"))
 QUERY_CONTEXT_CHARS = int(os.environ.get("GOLDEN_QUERY_CONTEXT_CHARS", "800"))
+# Situation card (MUD-458, P5 E3). p3-ctx showed raw prior turns dilute the
+# embedding; this is the structured alternative — what the session was
+# touching and what had just failed, not a transcript window.
+#   full  files + last error + prompt
+#   card  files + last error, no prompt
+QUERY_CARD = os.environ.get("GOLDEN_QUERY_CARD", "").strip().lower()
+# How far back a failing tool result still counts as "just failed". 25 of
+# the 100 p4-live queries have one inside 60 records.
+CARD_ERROR_WINDOW = int(os.environ.get("GOLDEN_CARD_ERROR_WINDOW", "60"))
+CARD_ERROR_WORDS = 25
+CARD_FILES = 4
+# HyDE (MUD-459, P5 E4): a path to a step3b rewrites.json. Each rewrite is
+# embedded and fused as its own vector leg beside the prompt's, so a bad
+# guess costs a leg's worth of rank and never the prompt itself.
+HYDE_FROM = os.environ.get("GOLDEN_HYDE", "").strip()
+# An unlabelled (query, lesson) pair never counts as a hit and is absent
+# from the recall denominator, so holes shift the scores instead of
+# failing. A labeller sometimes omits an id — p5-e5 has 27 such pairs in
+# 16,592, 0.16% — while a relabel that died leaves thousands. This tells
+# the two apart (MUD-460, Codex review).
+MAX_UNLABELED = float(os.environ.get("GOLDEN_MAX_UNLABELED", "0.01"))
+# The rubric the labels were made under; part of their fingerprint,
+# because a prompt verdict and an error verdict answer different
+# questions (MUD-460).
+LABEL_RUBRIC = os.environ.get("GOLDEN_LABEL_RUBRIC", "prompt").strip().lower()
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -45,26 +81,48 @@ def _pct(xs: list[float], p: float) -> float | None:
     return xs[min(len(xs) - 1, int(round(p * (len(xs) - 1))))]
 
 
+async def _hyde_embeddings(client, q: dict) -> list[list[float]]:
+    """Embed this query's hypothetical lessons, or [] when there are none."""
+    from agent_memory_mcp.mcp._coding_tools import _embed
+
+    out = []
+    for text in q.get("rewrites") or []:
+        vector = await _embed(client, text)
+        if vector is not None:
+            out.append(vector)
+    return out
+
+
 async def _retrieve(client, q: dict, *, config: str, limit: int, embedding=None) -> tuple[list[dict], dict]:
     """Rows for one config, ids attached, with per-stage timing.
 
-    cosine20: the vector leg alone, no threshold.  D: production
-    retrieve_candidates (vector + BM25 fused with RRF) at GATE_DEPTH.
+    cosine20: the vector leg alone, no threshold — with HyDE, the prompt's
+    leg fused by RRF with one leg per hypothetical lesson, which is the
+    ceiling of the fused query side.  D: production retrieve_candidates
+    (vector + BM25, plus any extra legs) at GATE_DEPTH.
     """
-    from agent_memory_mcp.mcp._coding_tools import _embed, _render_memory, retrieve_candidates, vector_leg
+    from agent_memory_mcp.mcp._coding_tools import (
+        _embed, _render_memory, retrieve_candidates, rrf_fuse, vector_leg,
+    )
 
     timing = {}
     if embedding is None:
         t0 = time.perf_counter()
         embedding = await _embed(client, q["prompt"])
         timing["embed_ms"] = (time.perf_counter() - t0) * 1000
+    extra = await _hyde_embeddings(client, q) if HYDE_FROM else []
     t0 = time.perf_counter()
     if config == "cosine20":
-        rows = await vector_leg(client, embedding, repo=q["repo"], files=q["files"], task_key=None,
-                                limit=limit, threshold=0.0) if embedding is not None else []
+        if embedding is None:
+            rows = []
+        else:
+            legs = [await vector_leg(client, e, repo=q["repo"], files=q["files"], task_key=None,
+                                     limit=limit, threshold=0.0) for e in [embedding] + extra]
+            rows = legs[0] if len(legs) == 1 else rrf_fuse(legs)[:limit]
     else:
         rows, _strategy = await retrieve_candidates(client, prompt=q["prompt"], repo=q["repo"], files=q["files"],
-                                                    task_key=None, limit=limit, embedding=embedding)
+                                                    task_key=None, limit=limit, embedding=embedding,
+                                                    extra_embeddings=extra)
     timing["vector_ms"] = (time.perf_counter() - t0) * 1000
     items = []
     for row in rows:
@@ -107,15 +165,92 @@ def _expand_queries(queries: list[dict], split: dict | None) -> None:
         q["prompt"] = f"{context[-QUERY_CONTEXT_CHARS:]} {q['prompt']}".strip()
 
 
+def _card_queries(queries: list[dict], split: dict | None) -> int:
+    """Rewrite q["prompt"] as a situation card. Returns how many carry an
+    error line.
+
+    The prompt goes in whole: the baseline embeds all of it, and a card
+    that truncated it would be measuring the truncation. Only the error
+    and the file list are capped, which is where the 60-word budget in
+    MUD-458 was aimed.
+    """
+    if QUERY_CARD not in ("full", "card") or not split:
+        return 0
+    from agent_memory_mcp.hook.capture_hook import error_steps
+
+    sessions = {s["session"]: s for s in split.get("query_sessions", [])}
+    with_error = 0
+    for q in queries:
+        parts = []
+        names = sorted({os.path.basename(f) for f in (q.get("files") or []) if f})
+        if names:
+            parts.append("files: " + ", ".join(names[:CARD_FILES]))
+        source = sessions.get(q["session"])
+        if source:
+            steps = error_steps(
+                source["path"], source.get("repo_root") or "",
+                before_line=q["line"], since_line=max(0, q["line"] - CARD_ERROR_WINDOW),
+            )
+            if steps:
+                line = " ".join(steps[-1]["error"].split()[:CARD_ERROR_WORDS])
+                parts.append(f"last error: {line}")
+                with_error += 1
+        if QUERY_CARD == "full":
+            parts.append("prompt: " + q["prompt"])
+        q["original_prompt"] = q["prompt"]
+        q["prompt"] = " | ".join(parts) or q["prompt"]
+    return with_error
+
+
 async def main() -> None:
-    from agent_memory_mcp.mcp._coding_tools import ANCHOR_BOOST, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories  # noqa: F401
+    from agent_memory_mcp.mcp._coding_tools import (  # noqa: F401
+        ANCHOR_BOOST, ANCHOR_LEG_ENABLED, ANCHOR_SLOTS, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories,
+    )
 
     queries = load_json("queries.json")
     pool = load_json("pool.json")
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
-    _expand_queries(queries, load_json("session_split.json"))
+    # A query regenerated under its old id would be scored against labels
+    # made for its old text, silently (MUD-460, Codex review). Runs
+    # labelled before fingerprints existed have no file and are trusted.
+    fingerprints = load_json("query_fingerprints.json", {}) or {}
+    if not fingerprints:
+        print("note: no query_fingerprints.json — labels are trusted as "
+              "pre-provenance evidence; a regenerated query would not be caught")
+    stale = stale_label_keys(labels, queries, fingerprints, LABEL_RUBRIC)
+    if stale:
+        changed = sorted({int(k.split(":", 1)[0]) for k in stale})
+        raise SystemExit(
+            f"{len(changed)} query(ies) changed (text or rubric) since they were labelled "
+            f"({', '.join(f'q{c}' for c in changed[:8])}{'...' if len(changed) > 8 else ''}); "
+            f"{len(stale)} labels are stale. Re-run step4 to relabel them."
+        )
+    if HYDE_FROM:
+        path = HYDE_FROM if os.path.isabs(HYDE_FROM) else os.path.join(os.path.dirname(os.path.abspath(__file__)), HYDE_FROM)
+        with open(path, encoding="utf-8") as fh:
+            rewrites = json.load(fh)
+        mismatched = stale_rewrites(rewrites, queries)
+        if mismatched:
+            raise SystemExit(
+                f"{len(mismatched)} hyde rewrite(s) were generated for a different "
+                f"version of their query (q{', q'.join(sorted(mismatched)[:8])}"
+                f"{'...' if len(mismatched) > 8 else ''}); re-run step3b_hyde."
+            )
+        unverified = sum(1 for q in queries
+                         if not isinstance(rewrites.get(str(q["query_id"])), dict)
+                         and rewrites.get(str(q["query_id"])))
+        for q in queries:
+            q["rewrites"] = rewrite_lessons(rewrites.get(str(q["query_id"])))
+        print(f"hyde: {sum(1 for q in queries if q['rewrites'])} of {len(queries)} queries carry rewrites, "
+              f"{sum(len(q['rewrites']) for q in queries) / len(queries):.1f} each"
+              + (f"; {unverified} written before provenance existed and trusted" if unverified else ""))
+    split = load_json("session_split.json")
+    _expand_queries(queries, split)
+    carded = _card_queries(queries, split)
+    if QUERY_CARD:
+        print(f"query card: {QUERY_CARD}, {carded} of {len(queries)} carry an error line")
     pool_by_repo: dict[str, set[str]] = {}
     for it in pool:
         pool_by_repo.setdefault(it["repo"], set()).add(it["id"])
@@ -124,12 +259,43 @@ async def main() -> None:
     if leaked:
         raise SystemExit(f"{len(leaked)} pool lesson(s) come from query-session families; rebuild the pool (step1b drops them)")
 
+    # A query with no verdicts at all, before the global tolerance: one
+    # such query is exactly 1.0000% of the p4-live shape, so it would sit
+    # precisely on the bar and score as all-misses with its relevant
+    # lessons out of the denominator.
+    empty = wholly_unlabelled(labels, queries, pool)
+    if empty:
+        named = ", ".join(f"q{q}" for q in sorted(empty)[:8])
+        raise SystemExit(
+            f"{len(empty)} query(ies) carry no verdict at all ({named}"
+            f"{'...' if len(empty) > 8 else ''}); a relabel did not finish. Re-run step4."
+        )
+    holes = unlabeled_pairs(labels, queries, pool)
+    owed = sum(len(pool_by_repo.get(q["repo"], ())) for q in queries)
+    if owed and holes / owed > MAX_UNLABELED:
+        raise SystemExit(
+            f"{holes} of {owed} (query, lesson) pairs carry no verdict "
+            f"({holes / owed:.1%} > {MAX_UNLABELED:.0%}); a relabel did not finish. "
+            f"Re-run step4, or raise GOLDEN_MAX_UNLABELED if this is deliberate."
+        )
+    if holes:
+        print(f"note: {holes} of {owed} pairs unlabelled ({holes / owed:.2%}), "
+              f"under the {MAX_UNLABELED:.0%} bar")
+
     def rel(qid: int, lid: str) -> bool | None:
         return labels.get(f"{qid}:{lid}")
 
     db = os.environ.get("GOLDEN_REUSE_DB") or GOLDEN_DB
-    configs = ["cosine20", "D", "E"]
-    agg = {c: {"injected": 0, "relevant": 0, "unlabeled": 0, "covered": 0, "top5_injected": 0, "top5_relevant": 0, "recall_num": 0} for c in configs}
+    unknown = [c for c in CONFIGS if c not in ("cosine20", "D", "E")]
+    if unknown:
+        raise SystemExit(f"unknown GOLDEN_CONFIGS entries: {unknown}")
+    configs = [c for c in ("cosine20", "D", "E") if c in CONFIGS]
+    if not configs:
+        raise SystemExit("GOLDEN_CONFIGS selected nothing to score")
+    need_d = "D" in configs or "E" in configs
+    agg = {c: {"injected": 0, "relevant": 0, "unlabeled": 0, "covered": 0, "top5_injected": 0,
+               "top5_relevant": 0, "top3_injected": 0, "top3_relevant": 0, "recall_num": 0}
+           for c in configs}
     relevant_total = 0
     timings: dict[str, list[float]] = {"embed_ms": [], "vector_ms": [], "gate_ms": []}
     per_query = []
@@ -142,16 +308,27 @@ async def main() -> None:
             relevant_ids = {lid for lid in pool_by_repo.get(q["repo"], set()) if rel(qid, lid)}
             relevant_total += len(relevant_ids)
 
-            cos, t1, emb = await _retrieve(client, q, config="cosine20", limit=20)
-            d, t2, _ = await _retrieve(client, q, config="D", limit=GATE_DEPTH, embedding=emb)
-            timings["embed_ms"].append(t1["embed_ms"])
-            timings["vector_ms"].append(t2.get("vector_ms", 0.0))
-            t0 = time.perf_counter()
-            e = await screen_memories(q["prompt"], list(d)) if d else []
-            timings["gate_ms"].append((time.perf_counter() - t0) * 1000)
+            cos: list[dict] = []
+            d: list[dict] = []
+            e: list[dict] = []
+            emb = None
+            if "cosine20" in configs:
+                cos, t1, emb = await _retrieve(client, q, config="cosine20", limit=20)
+                timings["embed_ms"].append(t1["embed_ms"])
+            if need_d:
+                d, t2, emb = await _retrieve(client, q, config="D", limit=GATE_DEPTH, embedding=emb)
+                if "embed_ms" in t2:
+                    timings["embed_ms"].append(t2["embed_ms"])
+                timings["vector_ms"].append(t2.get("vector_ms", 0.0))
+            if "E" in configs:
+                t0 = time.perf_counter()
+                e = await screen_memories(q["prompt"], list(d)) if d else []
+                timings["gate_ms"].append((time.perf_counter() - t0) * 1000)
 
             row = {"query_id": qid, "anchorable": q["anchorable"], "short": q["short"], "relevant_in_pool": len(relevant_ids)}
             for name, items in (("cosine20", cos), ("D", d), ("E", e)):
+                if name not in configs:
+                    continue
                 got = [it["id"] for it in items]
                 hits = [lid for lid in got if rel(qid, lid)]
                 a = agg[name]
@@ -162,9 +339,13 @@ async def main() -> None:
                 a["recall_num"] += len(set(hits) & relevant_ids)
                 a["top5_injected"] += len(got[:CAP])
                 a["top5_relevant"] += sum(1 for lid in got[:CAP] if rel(qid, lid))
+                a["top3_injected"] += len(got[:CAP3])
+                a["top3_relevant"] += sum(1 for lid in got[:CAP3] if rel(qid, lid))
                 row[name] = {"ids": got, "hits": len(hits)}
             per_query.append(row)
-            print(f"q{qid:<3} pool_rel={len(relevant_ids):<2} cos20={row['cosine20']['hits']}/{len(cos)} D={row['D']['hits']}/{len(d)} E={row['E']['hits']}/{len(e)}  gate {timings['gate_ms'][-1]:.0f}ms")
+            scored = " ".join(f"{n}={row[n]['hits']}/{len(row[n]['ids'])}" for n in configs)
+            gate = f"  gate {timings['gate_ms'][-1]:.0f}ms" if "E" in configs else ""
+            print(f"q{qid:<3} pool_rel={len(relevant_ids):<2} {scored}{gate}")
 
     n = len(queries)
     table = {}
@@ -175,22 +356,34 @@ async def main() -> None:
             "coverage": a["covered"] / n,
             "items_per_query": a["injected"] / n,
             "p_at_5": a["top5_relevant"] / a["top5_injected"] if a["top5_injected"] else None,
+            "p_at_3": a["top3_relevant"] / a["top3_injected"] if a["top3_injected"] else None,
             "unlabeled_injected": a["unlabeled"],
             **{k: a[k] for k in ("injected", "relevant")},
         }
-    latency = {k: {"p50_ms": _pct(v, 0.5), "p95_ms": _pct(v, 0.95)} for k, v in timings.items()}
+    latency = {k: {"p50_ms": _pct(v, 0.5), "p95_ms": _pct(v, 0.95)} for k, v in timings.items() if v}
     summary = {"queries": n, "pool": len(pool), "relevant_pairs": relevant_total,
                "relevant_per_query": relevant_total / n, "configs": table, "latency": latency,
                "gate_depth": GATE_DEPTH, "threshold": HYBRID_THRESHOLD, "anchor_boost": ANCHOR_BOOST,
                "embedding_model": os.environ.get("NAM_EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
-               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
+               # What the index was built with, from the run that built it --
+               # not this process's env, which never embeds a lesson.
+               "context_prefix": (load_json("corpus_stats.json") or {}).get("context_prefix"),
+               "scored_configs": configs,
+               "anchor_leg": ANCHOR_LEG_ENABLED, "anchor_slots": ANCHOR_SLOTS,
+               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT,
+               "query_card": QUERY_CARD or None, "queries_with_error_line": carded,
+               "hyde": HYDE_FROM or None,
+               "symptom_only": (load_json("corpus_stats.json") or {}).get("symptom_only"),
+               "unlabeled_pairs": holes, "labelled_pairs_owed": owed,
+               "fingerprinted_queries": len(fingerprints), "label_rubric": LABEL_RUBRIC}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")
-    print(f"{'config':<10}{'precision':>10}{'recall':>8}{'P@5':>7}{'coverage':>10}{'items/q':>9}")
+    print(f"{'config':<10}{'precision':>10}{'recall':>8}{'P@3':>7}{'P@5':>7}{'coverage':>10}{'items/q':>9}")
     for name, t in table.items():
         f = lambda x: "n/a" if x is None else f"{x:.0%}"  # noqa: E731
-        print(f"{name:<10}{f(t['precision']):>10}{f(t['recall']):>8}{f(t['p_at_5']):>7}{f(t['coverage']):>10}{t['items_per_query']:>9.2f}")
+        print(f"{name:<10}{f(t['precision']):>10}{f(t['recall']):>8}{f(t['p_at_3']):>7}{f(t['p_at_5']):>7}"
+              f"{f(t['coverage']):>10}{t['items_per_query']:>9.2f}")
     print("latency p50/p95 ms: " + ", ".join(f"{k} {v['p50_ms']:.0f}/{v['p95_ms']:.0f}" for k, v in latency.items()))
 
 
