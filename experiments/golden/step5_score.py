@@ -26,7 +26,7 @@ import asyncio
 import os
 import time
 
-from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json
+from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family
 from mem import open_client
 
 CAP = 5
@@ -119,6 +119,10 @@ async def main() -> None:
     pool_by_repo: dict[str, set[str]] = {}
     for it in pool:
         pool_by_repo.setdefault(it["repo"], set()).add(it["id"])
+    leaked = [it["id"] for it in pool
+              if session_family(it["session"]) in {session_family(q["session"]) for q in queries}]
+    if leaked:
+        raise SystemExit(f"{len(leaked)} pool lesson(s) come from query-session families; rebuild the pool (step1b drops them)")
 
     def rel(qid: int, lid: str) -> bool | None:
         return labels.get(f"{qid}:{lid}")
