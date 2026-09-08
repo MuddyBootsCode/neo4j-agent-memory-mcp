@@ -268,6 +268,13 @@ def context_prefix() -> list[str]:
     return list(CONTEXT_PREFIX)
 
 
+def symptom_only() -> bool:
+    """Whether this process embeds symptoms alone (MUD-460)."""
+    from agent_memory_mcp.mcp._coding_tools import SYMPTOM_ONLY
+
+    return SYMPTOM_ONLY
+
+
 async def drop_database(name: str) -> None:
     from neo4j import AsyncGraphDatabase
 

@@ -22,6 +22,10 @@ from lib import LABEL_MODEL, PRICE, load_json, result_path, save_json
 CHUNK = int(os.environ.get("GOLDEN_LABEL_CHUNK", "50"))
 EFFORT = os.environ.get("GOLDEN_LABEL_EFFORT", "medium")
 CONCURRENCY = int(os.environ.get("GOLDEN_LABEL_CONCURRENCY", "4"))
+# "error" labels an error-keyed query set (MUD-460): the query is a failing
+# tool result, not a human prompt, and the question is what would help the
+# assistant that just saw it.
+RUBRIC_KIND = os.environ.get("GOLDEN_LABEL_RUBRIC", "prompt").strip().lower()
 
 RUBRIC = """\
 You are building a relevance benchmark for a coding assistant's memory. The \
@@ -40,6 +44,29 @@ if the prompt touches the behaviour the lesson describes.
 
 Be strict. Most lessons are irrelevant to most prompts. Return a verdict for \
 every lesson id, including the irrelevant ones.
+
+STORED LESSONS (repository: {repo}):
+{lessons}
+"""
+
+ERROR_RUBRIC = """\
+You are building a relevance benchmark for a coding assistant's memory. The \
+assistant stores short lessons learned in earlier work sessions on a \
+repository: decisions (what was chosen and why), gotchas (constraints that \
+cost time to discover), and dead ends (attempts that failed and why).
+
+You will be shown a tool call that just FAILED during a later session, the \
+error it returned, the files that session had edited before it, and a \
+numbered list of stored lessons. The assistant is about to react to this \
+failure. For each lesson decide whether injecting it right now would \
+materially help: it explains this failure, gives the fix or the workaround, \
+or says that this approach was already tried and why it does not work. \
+Sharing vocabulary, the same tool, the same subsystem, or the same file is \
+not enough on its own — the lesson has to bear on THIS failure.
+
+Be strict. Most lessons are irrelevant to most failures, and many failures \
+are ordinary mistakes no stored lesson could have prevented. Return a \
+verdict for every lesson id, including the irrelevant ones.
 
 STORED LESSONS (repository: {repo}):
 {lessons}
@@ -81,13 +108,25 @@ def _cost(usage) -> float:
     ) / 1_000_000
 
 
-async def _label_one(client, system, q: dict, ids: list[str]) -> tuple[dict | None, object, float]:
+def _user_message(q: dict, ids: list[str]) -> str:
     files = ", ".join(q["files"][:10]) or "(none)"
-    user = (
+    if RUBRIC_KIND == "error":
+        attempt = f"{q.get('tool') or 'tool'}: {q.get('attempt') or ''}".strip(": ")
+        return (
+            f"Files edited in this session before the failure: {files}\n\n"
+            f"THE CALL THAT FAILED:\n{attempt}\n\n"
+            f"THE ERROR IT RETURNED:\n{q['prompt']}\n\n"
+            f"Return one verdict per lesson id ({len(ids)} ids)."
+        )
+    return (
         f"Files edited in this session before the prompt: {files}\n\n"
         f"DEVELOPER PROMPT:\n{q['prompt']}\n\n"
         f"Return one verdict per lesson id ({len(ids)} ids)."
     )
+
+
+async def _label_one(client, system, q: dict, ids: list[str]) -> tuple[dict | None, object, float]:
+    user = _user_message(q, ids)
     t0 = time.time()
     response = await client.messages.create(
         model=LABEL_MODEL,
@@ -139,7 +178,7 @@ async def main() -> None:
             "query_id": q["query_id"], "repo": repo, "chunk": ci, "model": LABEL_MODEL, "effort": EFFORT,
             "input": u.input_tokens, "output": u.output_tokens,
             "cache_write": u.cache_creation_input_tokens, "cache_read": u.cache_read_input_tokens,
-            "cost_usd": round(cost, 5), "elapsed_s": round(elapsed, 1),
+            "cost_usd": round(cost, 5), "elapsed_s": round(elapsed, 1), "rubric": RUBRIC_KIND,
             "missing": len(missing), "relevant": sum(verdicts.values()),
         })
         if state["calls"] % 10 == 0:
@@ -162,7 +201,8 @@ async def main() -> None:
             ids = [it["id"] for it in chunk]
             system = [{
                 "type": "text",
-                "text": RUBRIC.format(repo=repo, lessons="\n".join(_lesson_line(it) for it in chunk)),
+                "text": (ERROR_RUBRIC if RUBRIC_KIND == "error" else RUBRIC).format(
+                    repo=repo, lessons="\n".join(_lesson_line(it) for it in chunk)),
                 "cache_control": {"type": "ephemeral"},
             }]
             todo = [q for q in repo_queries if any(f"{q['query_id']}:{lid}" not in labels for lid in ids)]
