@@ -60,6 +60,27 @@ recall, 20.7% → 23.4% precision, +27 relevant hits per 1,000 injected.
 One file signal, two disjoint query populations, and the boost that was
 supposed to serve both served neither.
 
+## Codex review, and why the numbers did not move
+
+The adversarial review found the cap could discard a lesson the vector or
+BM25 leg had independently retrieved: the same lesson is several nodes
+with distinct eids, `dedupe_fused` may keep the anchor leg's copy of one
+(a better outcome prior can outrank a two-leg twin), and the surviving
+row's ranks then read anchor-only. Reproduced, fixed — the cap now spares
+any lesson whose canonical text appeared in a non-anchor leg — and
+covered by a regression.
+
+Every number above is unchanged after the fix, to the decimal. The golden
+pool cannot trigger it: `step2_pool` collapses duplicates by canonical
+text, so step1b writes exactly one node per lesson and there is no twin to
+split across legs. The defect is real in the live store, where the same
+lesson captured in several sessions is several nodes, and that is where it
+would have bitten.
+
+The leg runs also carry `cosine20` now, and it comes back identical to the
+same index without the leg (30.0% bare, 35.8% with the filename prefix) —
+the "unchanged by construction" claim, measured.
+
 Same artifact policy as p5-e1: `pool.json`, `queries.json`, `labels.json`
 and `session_split.json` in each run directory are byte-identical copies
 of p4-live's, so only what each run produced is committed.

@@ -11,6 +11,7 @@
         "coverage": 0.81,
         "items_per_query": 20.0,
         "p_at_5": 0.304,
+        "p_at_3": 0.33666666666666667,
         "unlabeled_injected": 0,
         "injected": 2000,
         "relevant": 358
@@ -21,6 +22,7 @@
         "coverage": 0.79,
         "items_per_query": 10.0,
         "p_at_5": 0.314,
+        "p_at_3": 0.3433333333333333,
         "unlabeled_injected": 0,
         "injected": 1000,
         "relevant": 247
@@ -28,12 +30,12 @@
     },
     "latency": {
       "embed_ms": {
-        "p50_ms": 3.6562919849529862,
-        "p95_ms": 5.2964999922551215
+        "p50_ms": 21.558500011451542,
+        "p95_ms": 106.0169999836944
       },
       "vector_ms": {
-        "p50_ms": 47.426541976165026,
-        "p95_ms": 78.45616599661298
+        "p50_ms": 176.31387498113327,
+        "p95_ms": 893.5124170093331
       }
     },
     "gate_depth": 10,
@@ -48,7 +50,11 @@
     "anchor_leg": true,
     "anchor_slots": 2,
     "code": null,
-    "query_context": 0
+    "query_context": 0,
+    "query_card": null,
+    "queries_with_error_line": 0,
+    "hyde": null,
+    "symptom_only": false
   },
   "per_query": [
     {

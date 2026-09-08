@@ -46,6 +46,25 @@ class TestAnchorSlots:
 
         assert [r["eid"] for r in kept] == ["a", "b", "c", "e"]
 
+    def test_a_lesson_a_primary_leg_also_found_is_never_capped(self):
+        """The same lesson is several nodes with distinct eids, and
+        dedupe_fused keeps whichever ranked highest — which can be the
+        anchor leg's copy. Capping on that row's ranks alone throws away a
+        lesson the vector or BM25 leg had independently retrieved."""
+        from agent_memory_mcp.mcp._coding_tools import cap_anchor_slots
+
+        rows = [
+            {"eid": "anchor-twin", "ranks": {2: 0},
+             "labels": ["Gotcha"], "props": {"text": "pin the version"}},
+            {"eid": "anchor-only", "ranks": {2: 1},
+             "labels": ["Gotcha"], "props": {"text": "something else"}},
+        ]
+
+        kept = cap_anchor_slots(rows, limit=10, anchor_leg=2, slots=0,
+                                primary_keys={"pin the version"})
+
+        assert [r["eid"] for r in kept] == ["anchor-twin"]
+
     def test_the_cap_still_truncates_to_the_limit(self):
         from agent_memory_mcp.mcp._coding_tools import cap_anchor_slots
 

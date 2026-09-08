@@ -161,15 +161,24 @@ def _tool_result_line(block: dict, tool_name: str | None) -> str | None:
     return f"[{name} ok] {text[:MAX_OK_RESULT_CHARS]}"
 
 
-def _iter_records(path: str):
+def _iter_records(path: str, *, with_line: bool = False):
+    """Parsed JSON objects from a transcript.
+
+    ``with_line`` yields ``(physical line index, record)``. Blank and
+    malformed lines still consume an index, because every other reader of
+    these files counts physical lines (``lib.iter_transcript_lines`` in the
+    golden set, and the query positions derived from it). Counting parsed
+    records instead would drift after the first skipped line and let a
+    failure that happened later land before an earlier prompt.
+    """
     with open(path, encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
+        for index, raw in enumerate(fh):
             try:
                 record = json.loads(raw)
             except Exception:
                 continue
             if isinstance(record, dict):
-                yield record
+                yield (index, record) if with_line else record
 
 
 def _render_lines(path: str) -> list[str]:
@@ -341,7 +350,7 @@ def error_steps(
     calls: dict[str, dict] = {}
     steps: list[dict] = []
     try:
-        for index, record in enumerate(_iter_records(path)):
+        for index, record in _iter_records(path, with_line=True):
             content = (record.get("message") or {}).get("content")
             if not isinstance(content, list):
                 continue

@@ -11,6 +11,7 @@
         "coverage": 0.86,
         "items_per_query": 20.0,
         "p_at_5": 0.33,
+        "p_at_3": 0.38666666666666666,
         "unlabeled_injected": 0,
         "injected": 2000,
         "relevant": 397
@@ -21,6 +22,7 @@
         "coverage": 0.8,
         "items_per_query": 10.0,
         "p_at_5": 0.358,
+        "p_at_3": 0.4,
         "unlabeled_injected": 0,
         "injected": 1000,
         "relevant": 272
@@ -28,12 +30,12 @@
     },
     "latency": {
       "embed_ms": {
-        "p50_ms": 4.021208005724475,
-        "p95_ms": 6.157166993943974
+        "p50_ms": 12.851000006776303,
+        "p95_ms": 61.572874983539805
       },
       "vector_ms": {
-        "p50_ms": 122.04233300872147,
-        "p95_ms": 181.65174999739975
+        "p50_ms": 303.0614170129411,
+        "p95_ms": 1643.1089580000844
       }
     },
     "gate_depth": 10,
@@ -51,7 +53,8 @@
     "query_context": 0,
     "query_card": null,
     "queries_with_error_line": 0,
-    "hyde": "results/p5-e4/rewrites.json"
+    "hyde": "results/p5-e4/rewrites.json",
+    "symptom_only": false
   },
   "per_query": [
     {

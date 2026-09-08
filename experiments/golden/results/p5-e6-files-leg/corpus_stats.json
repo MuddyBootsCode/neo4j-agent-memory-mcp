@@ -11,6 +11,7 @@
   "context_prefix": [
     "files"
   ],
-  "triggers_from": null,
+  "symptom_only": false,
+  "triggers_from": "",
   "triggers_used": 0
 }

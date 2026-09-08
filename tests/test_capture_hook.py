@@ -247,6 +247,27 @@ class TestTouchedFilesAndErrorSteps:
         ]
         assert "index" not in error_steps(path, "/repo")[0]
 
+    def test_error_step_indices_are_physical_lines(self, tmp_path):
+        """The golden set's query line comes from a physical-line count
+        (lib.iter_transcript_lines), so a blank or malformed line must move
+        the error's index with it. Counting parsed records instead lets a
+        failure that happened AFTER a prompt land before it."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = tmp_path / "t.jsonl"
+        path.write_text(
+            "\n"
+            "not json\n"
+            + json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make"}}]}}) + "\n"
+            + json.dumps({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "boom"}]}}) + "\n",
+            encoding="utf-8",
+        )
+
+        assert error_steps(str(path), "/repo", with_index=True)[0]["index"] == 3
+        assert error_steps(str(path), "/repo", before_line=3) == []
+
     def test_error_steps_require_the_is_error_flag(self, tmp_path):
         """A successful `cat` of a file that mentions "Traceback" is not a
         dead end. Claude Code flags every failed tool result with is_error
