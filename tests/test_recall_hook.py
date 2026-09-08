@@ -586,6 +586,15 @@ class TestLookbackSinceIso:
         assert _lookback_since_iso(NOW) == (NOW - timedelta(hours=2.5)).isoformat()
 
 
+def _no_timing(text: str) -> str:
+    """The header reports how long recall took, so two runs of the same
+    input differ whenever they land on different milliseconds. Every
+    comparison of one rendered payload against another scrubs it; without
+    that these tests fail a few times in a hundred, on a loaded machine.
+    """
+    return re.sub(r"in \d+ ms", "in N ms", text)
+
+
 class TestRunCodingPath:
     def _ctx_text(self, out):
         return json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -648,7 +657,7 @@ class TestRunCodingPath:
             coding_recall=lambda p, c: None,
             gather=lambda pl: dict(CTX),
         )
-        assert (code, out) == (ref_code, ref_out)
+        assert (code, _no_timing(out)) == (ref_code, _no_timing(ref_out))
 
     def test_coding_recall_raises_matches_path_a(self):
         def boom(p, c):
@@ -663,7 +672,7 @@ class TestRunCodingPath:
             gather=lambda pl: dict(CTX),
         )
         assert code == 0
-        assert out == ref_out
+        assert _no_timing(out) == _no_timing(ref_out)
 
     def test_gather_none_skips_coding_recall(self):
         calls = []
@@ -721,8 +730,7 @@ class TestRunCodingPath:
             gather=lambda pl: dict(CTX),
         )
         assert code == 0
-        norm = lambda text: re.sub(r"in \d+ ms", "in N ms", text)  # noqa: E731
-        assert norm(out) == norm(ref_out)
+        assert _no_timing(out) == _no_timing(ref_out)
         assert "(no memory matches for this prompt)" in out
 
     def test_empty_memories_failing_search_no_overlaps_emit_nothing(self):
@@ -768,7 +776,7 @@ class TestRunCodingPath:
             gather=lambda pl: dict(CTX),
         )
         assert code == 0
-        assert out == ref_out
+        assert _no_timing(out) == _no_timing(ref_out)
 
     def test_char_cap_applies_to_memory_section_only(self, monkeypatch):
         monkeypatch.setenv("NAM_HOOK_MAX_CHARS", "40")
