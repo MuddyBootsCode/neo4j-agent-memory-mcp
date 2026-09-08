@@ -28,7 +28,7 @@ import os
 import time
 
 from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family,
-                 stale_label_keys)
+                 stale_label_keys, unlabeled_pairs)
 from mem import open_client
 
 CAP = 5
@@ -61,6 +61,12 @@ CARD_FILES = 4
 # embedded and fused as its own vector leg beside the prompt's, so a bad
 # guess costs a leg's worth of rank and never the prompt itself.
 HYDE_FROM = os.environ.get("GOLDEN_HYDE", "").strip()
+# An unlabelled (query, lesson) pair never counts as a hit and is absent
+# from the recall denominator, so holes shift the scores instead of
+# failing. A labeller sometimes omits an id — p5-e5 has 27 such pairs in
+# 16,592, 0.16% — while a relabel that died leaves thousands. This tells
+# the two apart (MUD-460, Codex review).
+MAX_UNLABELED = float(os.environ.get("GOLDEN_MAX_UNLABELED", "0.01"))
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -204,7 +210,11 @@ async def main() -> None:
     # A query regenerated under its old id would be scored against labels
     # made for its old text, silently (MUD-460, Codex review). Runs
     # labelled before fingerprints existed have no file and are trusted.
-    stale = stale_label_keys(labels, queries, load_json("query_fingerprints.json", {}) or {})
+    fingerprints = load_json("query_fingerprints.json", {}) or {}
+    if not fingerprints:
+        print("note: no query_fingerprints.json — labels are trusted as "
+              "pre-provenance evidence; a regenerated query would not be caught")
+    stale = stale_label_keys(labels, queries, fingerprints)
     if stale:
         changed = sorted({int(k.split(":", 1)[0]) for k in stale})
         raise SystemExit(
@@ -232,6 +242,18 @@ async def main() -> None:
               if session_family(it["session"]) in {session_family(q["session"]) for q in queries}]
     if leaked:
         raise SystemExit(f"{len(leaked)} pool lesson(s) come from query-session families; rebuild the pool (step1b drops them)")
+
+    holes = unlabeled_pairs(labels, queries, pool)
+    owed = sum(len(pool_by_repo.get(q["repo"], ())) for q in queries)
+    if owed and holes / owed > MAX_UNLABELED:
+        raise SystemExit(
+            f"{holes} of {owed} (query, lesson) pairs carry no verdict "
+            f"({holes / owed:.1%} > {MAX_UNLABELED:.0%}); a relabel did not finish. "
+            f"Re-run step4, or raise GOLDEN_MAX_UNLABELED if this is deliberate."
+        )
+    if holes:
+        print(f"note: {holes} of {owed} pairs unlabelled ({holes / owed:.2%}), "
+              f"under the {MAX_UNLABELED:.0%} bar")
 
     def rel(qid: int, lid: str) -> bool | None:
         return labels.get(f"{qid}:{lid}")
@@ -324,7 +346,9 @@ async def main() -> None:
                "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT,
                "query_card": QUERY_CARD or None, "queries_with_error_line": carded,
                "hyde": HYDE_FROM or None,
-               "symptom_only": (load_json("corpus_stats.json") or {}).get("symptom_only")}
+               "symptom_only": (load_json("corpus_stats.json") or {}).get("symptom_only"),
+               "unlabeled_pairs": holes, "labelled_pairs_owed": owed,
+               "fingerprinted_queries": len(fingerprints)}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")

@@ -104,7 +104,12 @@ another ~$13 of Opus. The evidence above says that rerun would sharpen the
 set without changing its verdict, so it is recorded here as an open option
 rather than taken.
 
-**That option is now safe to take.** The review's next pass found the trap
+**27 of the set's 16,592 pairs carry no verdict** — 0.16%, where the
+labeller omitted an id from a chunk. At the set's 0.43% base rate that is
+an expected 0.1 relevant pairs missed, immaterial to anything above, and
+step5 now reports the number on every run and refuses to score past 1%.
+
+**Regenerating is now safe to do.** The review's next pass found the trap
 it would have sprung: step4 resumes on `"<query_id>:<lesson_id>"`, so
 regenerating a query under its own id is skipped as already labelled and
 then scored against ground truth built for the old text — silently, 34 of

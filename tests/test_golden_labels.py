@@ -73,3 +73,50 @@ class TestStaleLabels:
         stored = {"1": query_fingerprint(known)}
 
         assert stale_label_keys({"1:aaa": True}, [known, fresh], stored) == set()
+
+
+class TestLabelCompleteness:
+    def test_a_fully_labelled_run_reports_nothing_missing(self):
+        from lib import unlabeled_pairs
+
+        queries = [{"query_id": 1, "repo": "r"}, {"query_id": 2, "repo": "r"}]
+        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+        labels = {f"{q}:{lid}": True for q in (1, 2) for lid in ("a", "b")}
+
+        assert unlabeled_pairs(labels, queries, pool) == 0
+
+    def test_an_interrupted_relabel_is_counted(self):
+        """step4 deletes a changed query's labels before calling the API.
+        A failure there leaves the query with no judgments at all, and
+        step5 would quietly shrink its recall denominator instead."""
+        from lib import unlabeled_pairs
+
+        queries = [{"query_id": 1, "repo": "r"}, {"query_id": 2, "repo": "r"}]
+        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+        labels = {"1:a": True, "1:b": False}
+
+        assert unlabeled_pairs(labels, queries, pool) == 2
+
+    def test_lessons_from_another_repo_are_not_owed_a_label(self):
+        from lib import unlabeled_pairs
+
+        queries = [{"query_id": 1, "repo": "r"}]
+        pool = [{"id": "a", "repo": "r"}, {"id": "z", "repo": "other"}]
+
+        assert unlabeled_pairs({"1:a": True}, queries, pool) == 0
+
+
+class TestFingerprintsFollowTheLabels:
+    def test_only_completely_labelled_queries_are_fingerprinted(self):
+        """The fingerprint certifies that these labels judged this text, so
+        it may not be written before the judgments exist."""
+        from lib import complete_fingerprints, query_fingerprint
+
+        done = {"query_id": 1, "repo": "r", "prompt": "p", "files": []}
+        half = {"query_id": 2, "repo": "r", "prompt": "q", "files": []}
+        pool = [{"id": "a", "repo": "r"}, {"id": "b", "repo": "r"}]
+        labels = {"1:a": True, "1:b": False, "2:a": True}
+
+        assert complete_fingerprints(labels, [done, half], pool) == {
+            "1": query_fingerprint(done)
+        }

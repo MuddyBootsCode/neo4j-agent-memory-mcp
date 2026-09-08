@@ -41,6 +41,12 @@ from step1_corpus import _create_database
 # them would measure a ranker with no history to read.
 _COUNTERS = ("evidence_count", "served_count", "helpful", "harmful", "outcome_weight")
 
+# Artifacts a rematerialized run inherits from the pool it was built from.
+# Labels and the fingerprints that certify them must move together.
+COPIED_ARTIFACTS = (
+    "queries.json", "labels.json", "session_split.json", "query_fingerprints.json",
+)
+
 
 def _counters_from(item: dict) -> dict:
     props = item.get("props") or {}
@@ -78,7 +84,10 @@ async def main() -> None:
     src_dir = os.path.dirname(src)
     with open(src, encoding="utf-8") as fh:
         pool = json.load(fh)
-    for name in ("queries.json", "labels.json", "session_split.json"):
+    # query_fingerprints.json travels with labels.json or the guard it
+    # feeds is defeated by a copy: step5 treats a run with no fingerprint
+    # file as pre-fingerprint evidence and trusts it (MUD-460, Codex).
+    for name in COPIED_ARTIFACTS:
         if os.path.exists(os.path.join(src_dir, name)):
             shutil.copy(os.path.join(src_dir, name), result_path(name))
 

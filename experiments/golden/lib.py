@@ -283,6 +283,47 @@ def stale_label_keys(labels: dict, queries: list[dict], stored: dict) -> set[str
     return {key for key in labels if key.split(":", 1)[0] in changed}
 
 
+def _pool_ids_by_repo(pool: list[dict]) -> dict[str, set[str]]:
+    by_repo: dict[str, set[str]] = {}
+    for item in pool:
+        by_repo.setdefault(item["repo"], set()).add(item["id"])
+    return by_repo
+
+
+def unlabeled_pairs(labels: dict, queries: list[dict], pool: list[dict]) -> int:
+    """(query, lesson) pairs in the same repo that carry no verdict.
+
+    A labeller that omits an id, or a relabel that died between deleting
+    the old verdicts and writing the new ones, leaves holes here. step5
+    would not notice: an unlabelled pair is simply absent from the recall
+    denominator and never counts as a hit, so the scores shift quietly
+    rather than failing (MUD-460, Codex review).
+    """
+    by_repo = _pool_ids_by_repo(pool)
+    return sum(
+        1
+        for q in queries
+        for lid in by_repo.get(q["repo"], ())
+        if f"{q['query_id']}:{lid}" not in labels
+    )
+
+
+def complete_fingerprints(labels: dict, queries: list[dict], pool: list[dict]) -> dict:
+    """Fingerprints for the queries whose labels are complete.
+
+    The fingerprint's claim is "these labels judged this text", so writing
+    one for a query still being labelled would certify judgments that do
+    not exist yet — and an interrupted run would leave the query marked
+    current and unlabelled.
+    """
+    by_repo = _pool_ids_by_repo(pool)
+    return {
+        str(q["query_id"]): query_fingerprint(q)
+        for q in queries
+        if all(f"{q['query_id']}:{lid}" in labels for lid in by_repo.get(q["repo"], ()))
+    }
+
+
 def lesson_text(kind: str, props: dict) -> str:
     """The canonical lesson text: what identifies a lesson."""
     from agent_memory_mcp.mcp._coding_tools import memory_embedding_text

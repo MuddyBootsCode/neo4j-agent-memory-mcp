@@ -17,7 +17,7 @@ import os
 import sys
 import time
 
-from lib import (LABEL_MODEL, PRICE, load_json, query_fingerprint, result_path,
+from lib import (LABEL_MODEL, PRICE, complete_fingerprints, load_json, result_path,
                  save_json, stale_label_keys)
 
 CHUNK = int(os.environ.get("GOLDEN_LABEL_CHUNK", "50"))
@@ -170,8 +170,16 @@ async def main() -> None:
               f"{'...' if len(changed) > 8 else ''}); dropped {len(stale)} stale labels, "
               f"they will be relabelled")
         save_json("labels.json", labels)
-    fingerprints.update({str(q["query_id"]): query_fingerprint(q) for q in queries})
-    save_json("query_fingerprints.json", fingerprints)
+
+    def _record_provenance() -> None:
+        """Fingerprint the queries whose labels are complete, and only
+        those: the fingerprint's claim is that these labels judged this
+        text, so a run that dies mid-relabel must not leave a query marked
+        current with no verdicts behind it."""
+        fingerprints.update(complete_fingerprints(labels, queries, pool))
+        save_json("query_fingerprints.json", fingerprints)
+
+    _record_provenance()
 
     client = anthropic.AsyncAnthropic()
     sem = asyncio.Semaphore(CONCURRENCY)
@@ -203,6 +211,7 @@ async def main() -> None:
         if state["calls"] % 10 == 0:
             save_json("labels.json", labels)
             save_json("label_usage.json", usage_log)
+            _record_provenance()
         print(
             f"  q{q['query_id']:<3} chunk {ci}: {sum(verdicts.values()):>2} relevant"
             f"{' missing=' + str(len(missing)) if missing else ''}"
@@ -241,6 +250,7 @@ async def main() -> None:
 
     save_json("labels.json", labels)
     save_json("label_usage.json", usage_log)
+    _record_provenance()
     relevant = sum(1 for v in labels.values() if v)
     print(f"\nlabels: {len(labels)} pairs, {relevant} relevant ({relevant / max(len(labels), 1):.1%}); "
           f"{state['calls']} calls this run; total cost ${state['cost']:.2f} -> {result_path('labels.json')}")
