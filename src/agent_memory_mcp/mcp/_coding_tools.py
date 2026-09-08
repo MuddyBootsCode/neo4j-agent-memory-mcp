@@ -540,17 +540,26 @@ async def anchor_leg(
 
 def cap_anchor_slots(
     rows: list[dict[str, Any]], *, limit: int, anchor_leg: int, slots: int,
+    primary_keys: set[str] | frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Truncate to ``limit``, letting at most ``slots`` rows through that
     only the anchor leg found.
 
     A row the vector or BM25 leg also ranked is not anchor-only and is
     never capped: the anchor raised it, which is the point.
+
+    ``primary_keys`` are the normalized lesson texts those legs returned,
+    and they are what makes that check correct. The same lesson is several
+    nodes with distinct eids, so ``dedupe_fused`` may have kept the anchor
+    leg's copy and dropped the vector leg's; the surviving row's ``ranks``
+    then say anchor-only about a lesson another leg had independently
+    retrieved, and capping it would discard the lesson entirely.
     """
     kept: list[dict[str, Any]] = []
     anchor_only = 0
     for row in rows:
-        if set(row.get("ranks") or {}) == {anchor_leg}:
+        if (set(row.get("ranks") or {}) == {anchor_leg}
+                and _lesson_dedup_key(row) not in primary_keys):
             if anchor_only >= slots:
                 continue
             anchor_only += 1
@@ -678,6 +687,10 @@ async def retrieve_candidates(
             legs.append(text_rows)
             names.append("fulltext")
     anchor_index = None
+    # Keyed on lesson text, not eid: dedupe_fused collapses duplicate nodes
+    # and may keep the anchor leg's copy of a lesson these legs also found.
+    primary_keys = {key for leg in legs for row in leg
+                    if (key := _lesson_dedup_key(row))}
     if ANCHOR_LEG_ENABLED and embedding is not None:
         anchor_rows = await anchor_leg(client, embedding, repo=repo, files=files, task_key=task_key)
         if anchor_rows:
@@ -692,7 +705,8 @@ async def retrieve_candidates(
     if anchor_index is None:
         fused = fused[:limit]
     else:
-        fused = cap_anchor_slots(fused, limit=limit, anchor_leg=anchor_index, slots=ANCHOR_SLOTS)
+        fused = cap_anchor_slots(fused, limit=limit, anchor_leg=anchor_index,
+                                 slots=ANCHOR_SLOTS, primary_keys=primary_keys)
     # The strategy names the two retrieval kinds. The anchor and
     # hypothetical legs are modifiers on top of them, not strategies of
     # their own, and several hypothetical legs are still one kind.
