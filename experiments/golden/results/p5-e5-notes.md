@@ -104,5 +104,16 @@ another ~$13 of Opus. The evidence above says that rerun would sharpen the
 set without changing its verdict, so it is recorded here as an open option
 rather than taken.
 
+**That option is now safe to take.** The review's next pass found the trap
+it would have sprung: step4 resumes on `"<query_id>:<lesson_id>"`, so
+regenerating a query under its own id is skipped as already labelled and
+then scored against ground truth built for the old text — silently, 34 of
+68 queries, no error and wrong numbers. Queries are fingerprinted now
+(`query_fingerprints.json`, content hash of the prompt, files and failing
+call). step4 drops the labels of any query whose fingerprint moved and
+relabels it; step5 refuses to score at all while any label is stale. The
+existing p5-e5 labels are fingerprinted against the queries they were
+actually made for, so the regeneration is caught the moment it happens.
+
 Same artifact policy as the other P5 runs; `queries.json`, `labels.json`
 and `label_usage.json` for the error set live once, under `p5-e5/`.

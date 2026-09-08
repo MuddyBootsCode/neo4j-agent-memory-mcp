@@ -17,7 +17,8 @@ import os
 import sys
 import time
 
-from lib import LABEL_MODEL, PRICE, load_json, result_path, save_json
+from lib import (LABEL_MODEL, PRICE, load_json, query_fingerprint, result_path,
+                 save_json, stale_label_keys)
 
 CHUNK = int(os.environ.get("GOLDEN_LABEL_CHUNK", "50"))
 EFFORT = os.environ.get("GOLDEN_LABEL_EFFORT", "medium")
@@ -153,6 +154,24 @@ async def main() -> None:
         raise SystemExit("run steps 1-3 first")
     labels: dict[str, bool] = load_json("labels.json", {})
     usage_log: list[dict] = load_json("label_usage.json", [])
+
+    # Resume is keyed on "<query_id>:<lesson_id>", so a regenerated query
+    # under the same id would be skipped as already labelled and scored
+    # against ground truth built for its old text. Drop those labels here;
+    # the calls below relabel them (MUD-460, Codex review).
+    fingerprints: dict[str, str] = load_json("query_fingerprints.json", {}) or {}
+    stale = stale_label_keys(labels, queries, fingerprints)
+    if stale:
+        changed = sorted({int(k.split(":", 1)[0]) for k in stale})
+        for key in stale:
+            del labels[key]
+        print(f"{len(changed)} query(ies) changed since they were labelled "
+              f"({', '.join(f'q{c}' for c in changed[:8])}"
+              f"{'...' if len(changed) > 8 else ''}); dropped {len(stale)} stale labels, "
+              f"they will be relabelled")
+        save_json("labels.json", labels)
+    fingerprints.update({str(q["query_id"]): query_fingerprint(q) for q in queries})
+    save_json("query_fingerprints.json", fingerprints)
 
     client = anthropic.AsyncAnthropic()
     sem = asyncio.Semaphore(CONCURRENCY)
