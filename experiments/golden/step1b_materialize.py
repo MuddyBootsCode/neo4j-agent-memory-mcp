@@ -11,6 +11,10 @@ both indexes.
     NAM_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5 NAM_EMBEDDING_DIMENSIONS=768 \\
     uv run --no-sync --project ../.. python step1b_materialize.py
 
+NAM_EMBED_CONTEXT_PREFIX (MUD-456) changes what is embedded without
+changing what identifies a lesson, so the labels still apply. The parts
+that were used land in corpus_stats.json.
+
 Copies pool.json, queries.json and labels.json from the source run into the
 new run directory so steps 5 and 6 work unchanged.
 """
@@ -23,7 +27,8 @@ import os
 import shutil
 import time
 
-from lib import GOLDEN_DB, HERE, drop_database, lesson_text, load_json, result_path, save_json, session_family
+from lib import (GOLDEN_DB, HERE, context_prefix, drop_database, embedding_input, lesson_text,
+                 load_json, result_path, save_json, session_family)
 from mem import LOCAL_EMBEDDING_CONFIG, open_client
 from step1_corpus import _create_database
 
@@ -109,7 +114,10 @@ async def main() -> None:
             text = lesson_text(it["kind"], props)
             if text != it["text"]:
                 mismatched += 1
-            vector = await _embed(client, text)
+            # Canonical text keys the id and the labels; the embedder sees
+            # whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456).
+            vector = await _embed(client, embedding_input(
+                it["kind"], props, it["repo"], it["files"]))
             if first:
                 ok = await ensure_coding_memory_index(client)
                 print(f"indexes ensured: {ok}")
@@ -128,7 +136,8 @@ async def main() -> None:
     save_json("pool.json", pool)
     save_json("corpus_stats.json", {"materialized_from": src, "lessons": len(pool),
                                     "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched,
-                                    "counters_restored": restored})
+                                    "counters_restored": restored,
+                                    "context_prefix": context_prefix()})
     print(f"materialized {len(pool)} lessons in {time.time() - t0:.0f}s; "
           f"{mismatched} whose rebuilt text differs from the pool (labels for those are approximate); "
           f"{restored} with lifecycle counters restored")

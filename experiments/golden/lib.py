@@ -231,17 +231,39 @@ def sample_evenly(items: list, k: int) -> list:
     return [items[i] for i in idxs[:k]]
 
 
-def lesson_id(repo: str, kind: str, embedding_text: str) -> str:
+def lesson_id(repo: str, kind: str, canonical_text: str) -> str:
     """Stable pool id: the same lesson text in the same repo gets the same id
-    across corpus rebuilds, so labels survive a rebuild that reproduces it."""
-    h = hashlib.sha1(f"{repo}|{kind}|{embedding_text.strip()}".encode("utf-8"))
+    across corpus rebuilds, so labels survive a rebuild that reproduces it.
+
+    Keyed on the canonical text (``lesson_text``), never on what was
+    embedded (``embedding_input``) — index-side experiments change the
+    latter, and an id that moved with it would detach every label
+    (MUD-456).
+    """
+    h = hashlib.sha1(f"{repo}|{kind}|{canonical_text.strip()}".encode("utf-8"))
     return h.hexdigest()[:12]
 
 
 def lesson_text(kind: str, props: dict) -> str:
+    """The canonical lesson text: what identifies a lesson."""
     from agent_memory_mcp.mcp._coding_tools import memory_embedding_text
 
     return memory_embedding_text(kind, props)
+
+
+def embedding_input(kind: str, props: dict, repo: str, files: list[str]) -> str:
+    """What the embedder is given for a lesson: the canonical text, plus
+    whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456)."""
+    from agent_memory_mcp.mcp._coding_tools import memory_embedding_input
+
+    return memory_embedding_input(kind, props, repo=repo, files=files)
+
+
+def context_prefix() -> list[str]:
+    """The prefix parts this process would embed with, for the run record."""
+    from agent_memory_mcp.mcp._coding_tools import CONTEXT_PREFIX
+
+    return list(CONTEXT_PREFIX)
 
 
 async def drop_database(name: str) -> None:

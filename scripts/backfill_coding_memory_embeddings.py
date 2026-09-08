@@ -36,16 +36,26 @@ from agent_memory_mcp.mcp._bootstrap import bootstrap_upstream_patches  # noqa: 
 from agent_memory_mcp.mcp._coding_tools import (  # noqa: E402
     _embed,
     ensure_coding_memory_index,
-    memory_embedding_text,
+    memory_embedding_input,
 )
 
 # elementId() is stable for the life of the node, which is all this needs --
 # it never outlives the run.
+#
+# The repo and the anchored files come back with each lesson because the
+# embedding input may carry them (MUD-456): a backfill that embedded the
+# bare text into a store whose capture path prefixes it would leave two
+# vector spaces under one index, and nothing would say so.
 _SELECT = """
     MATCH (m)
     WHERE (__KINDS__)
       AND ($force OR m.embedding IS NULL)
-    RETURN elementId(m) AS eid, labels(m) AS labels, properties(m) AS props
+    OPTIONAL MATCH (m)-[:MADE_IN]->(s:CodingSession)
+    OPTIONAL MATCH (m)-[:ABOUT]->(f:CodeFile)
+    WITH m, [r IN collect(DISTINCT s.repo) WHERE r IS NOT NULL] AS repos,
+         [p IN collect(DISTINCT f.path) WHERE p IS NOT NULL] AS files
+    RETURN elementId(m) AS eid, labels(m) AS labels, properties(m) AS props,
+           head(repos) AS repo, files
     ORDER BY m.created_at
 """
 
@@ -65,6 +75,16 @@ _LABEL_ONLY = f"""
 def _select_query() -> str:
     disjunction = " OR ".join(f"m:{kind}" for kind in sorted(RECALL_KINDS))
     return _SELECT.replace("__KINDS__", disjunction)
+
+
+def embedding_input_for(row: dict) -> str:
+    """What to embed for one selected row, or "" when it is not a lesson."""
+    kind = next((label for label in row["labels"] if label in RECALL_KINDS), None)
+    if kind is None:
+        return ""
+    return memory_embedding_input(
+        kind, row["props"], repo=row.get("repo"), files=row.get("files") or []
+    )
 
 
 async def main() -> int:
@@ -124,8 +144,7 @@ async def main() -> int:
                 kind = next(
                     (label for label in row["labels"] if label in RECALL_KINDS), "?"
                 )
-                text = memory_embedding_text(kind, row["props"])
-                print(f"  [{kind}] {text[:90]}")
+                print(f"  [{kind}] {embedding_input_for(row)[:90]}")
             if len(rows) > 10:
                 print(f"  ... and {len(rows) - 10} more")
             print("dry run — nothing written")
@@ -152,12 +171,11 @@ async def main() -> int:
 
         embedded = labelled = failed = 0
         for row in rows:
-            kind = next(
-                (label for label in row["labels"] if label in RECALL_KINDS), None
-            )
-            if kind is None:  # pragma: no cover - the query filters these out
+            text = embedding_input_for(row)
+            if not text and not any(
+                label in RECALL_KINDS for label in row["labels"]
+            ):  # pragma: no cover - the query filters these out
                 continue
-            text = memory_embedding_text(kind, row["props"])
             vector = await _embed(client, text) if text else None
             if vector is None:
                 await client.graph.execute_write(_LABEL_ONLY, {"eid": row["eid"]})
