@@ -113,7 +113,9 @@ def _expand_queries(queries: list[dict], split: dict | None) -> None:
 
 
 async def main() -> None:
-    from agent_memory_mcp.mcp._coding_tools import ANCHOR_BOOST, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories  # noqa: F401
+    from agent_memory_mcp.mcp._coding_tools import (  # noqa: F401
+        ANCHOR_BOOST, ANCHOR_LEG_ENABLED, ANCHOR_SLOTS, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories,
+    )
 
     queries = load_json("queries.json")
     pool = load_json("pool.json")
@@ -211,6 +213,7 @@ async def main() -> None:
                # not this process's env, which never embeds a lesson.
                "context_prefix": (load_json("corpus_stats.json") or {}).get("context_prefix"),
                "scored_configs": configs,
+               "anchor_leg": ANCHOR_LEG_ENABLED, "anchor_slots": ANCHOR_SLOTS,
                "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
