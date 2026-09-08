@@ -316,6 +316,7 @@ def transcript_touched_files(path: str, repo_dir: str, cap: int = MAX_FILES_SENT
 def error_steps(
     path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS,
     *, before_line: int | None = None, since_line: int | None = None,
+    with_index: bool = False,
 ) -> list[dict]:
     """Tool calls whose result was an error: ``{"tool", "input", "error",
     "file"}`` in transcript order, newest last. Zero-LLM DeadEnd candidates
@@ -326,7 +327,9 @@ def error_steps(
     at a known line and asks what had just failed before it (MUD-458).
     Calls are paired from the whole file either way, so a failure inside
     the window keeps the command that caused it even when that call is
-    outside.
+    outside. ``with_index`` adds each failure's record index, which the
+    error-keyed query set needs to ask what had been edited before it
+    (MUD-460); off by default, so the capture path's shape is unchanged.
 
     Only results the client flagged ``is_error`` qualify. The keyword regex
     that decides rendering is not used here: a successful ``cat`` of a file
@@ -364,7 +367,10 @@ def error_steps(
                     if _NOT_AN_ATTEMPT_RE.search(text):
                         continue
                     call = calls.get(block.get("tool_use_id"), {"tool": "tool", "input": "", "file": None})
-                    steps.append({**call, "error": _truncate_middle(text, 600)})
+                    step = {**call, "error": _truncate_middle(text, 600)}
+                    if with_index:
+                        step["index"] = index
+                    steps.append(step)
     except Exception:
         pass
     return steps[-cap:]

@@ -364,6 +364,13 @@ CONTEXT_PREFIX: tuple[str, ...] = context_prefix_spec(
     os.environ.get("NAM_EMBED_CONTEXT_PREFIX", "")
 )
 
+# Symptom-only index (MUD-460, P5 E5). An error-keyed query is a symptom,
+# and matching it against the fix is the mismatch this whole phase is
+# about. Lessons with no symptom keep their full text — half the pool has
+# none, and embedding nothing would make them invisible rather than
+# lower-ranked.
+SYMPTOM_ONLY = os.environ.get("NAM_EMBED_SYMPTOM_ONLY", "0") == "1"
+
 
 def _prefix_basenames(files: list[str]) -> str:
     """Up to four distinct file basenames, sorted.
@@ -395,6 +402,10 @@ def memory_embedding_input(
     canonical = memory_embedding_text(kind, props)
     if not canonical.strip():
         return canonical
+    if SYMPTOM_ONLY:
+        symptom = str(props.get("symptom") or "").strip()
+        if symptom:
+            canonical = symptom
     said = " ".join(t.strip() for t in (triggers or []) if t and t.strip())
     if said:
         canonical = f"{canonical} | {said}"

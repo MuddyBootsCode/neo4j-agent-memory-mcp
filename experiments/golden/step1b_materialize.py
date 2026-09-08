@@ -29,7 +29,7 @@ import shutil
 import time
 
 from lib import (GOLDEN_DB, HERE, context_prefix, drop_database, embedding_input, lesson_text,
-                 load_json, result_path, save_json, session_family)
+                 load_json, result_path, save_json, session_family, symptom_only)
 from mem import LOCAL_EMBEDDING_CONFIG, open_client
 from step1_corpus import _create_database
 
@@ -152,6 +152,7 @@ async def main() -> None:
                                     "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched,
                                     "counters_restored": restored,
                                     "context_prefix": context_prefix(),
+                                    "symptom_only": symptom_only(),
                                     "triggers_from": triggers_from,
                                     "triggers_used": sum(1 for it in pool if triggers.get(it["id"]))})
     print(f"materialized {len(pool)} lessons in {time.time() - t0:.0f}s; "

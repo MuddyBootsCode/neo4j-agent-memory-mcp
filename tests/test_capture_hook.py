@@ -229,6 +229,24 @@ class TestTouchedFilesAndErrorSteps:
             "recent failure"]
         assert error_steps(path, "/repo", before_line=0) == []
 
+    def test_error_steps_can_report_where_each_failure_sat(self, tmp_path):
+        """The error-keyed query set (MUD-460) replays each failure with the
+        files edited before it, so it needs the record index."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "boom"}]),
+            ],
+        )
+
+        assert error_steps(path, "/repo", with_index=True) == [
+            {"tool": "Bash", "input": "make", "file": None, "error": "boom", "index": 1}
+        ]
+        assert "index" not in error_steps(path, "/repo")[0]
+
     def test_error_steps_require_the_is_error_flag(self, tmp_path):
         """A successful `cat` of a file that mentions "Traceback" is not a
         dead end. Claude Code flags every failed tool result with is_error

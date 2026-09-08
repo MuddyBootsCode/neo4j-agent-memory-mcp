@@ -31,6 +31,9 @@ from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session
 from mem import open_client
 
 CAP = 5
+# An error-time injection is one or two lines, so MUD-460 reads the top of
+# the list rather than P@5. Reported for every run; comparable across them.
+CAP3 = 3
 # Which configs to score. The gate (E) is a local model call per query and
 # ran at its 6 s timeout throughout p4-live, so an index-side experiment
 # that only needs the ceiling and the ranking asks for "cosine20,D" and
@@ -229,7 +232,9 @@ async def main() -> None:
     if not configs:
         raise SystemExit("GOLDEN_CONFIGS selected nothing to score")
     need_d = "D" in configs or "E" in configs
-    agg = {c: {"injected": 0, "relevant": 0, "unlabeled": 0, "covered": 0, "top5_injected": 0, "top5_relevant": 0, "recall_num": 0} for c in configs}
+    agg = {c: {"injected": 0, "relevant": 0, "unlabeled": 0, "covered": 0, "top5_injected": 0,
+               "top5_relevant": 0, "top3_injected": 0, "top3_relevant": 0, "recall_num": 0}
+           for c in configs}
     relevant_total = 0
     timings: dict[str, list[float]] = {"embed_ms": [], "vector_ms": [], "gate_ms": []}
     per_query = []
@@ -273,6 +278,8 @@ async def main() -> None:
                 a["recall_num"] += len(set(hits) & relevant_ids)
                 a["top5_injected"] += len(got[:CAP])
                 a["top5_relevant"] += sum(1 for lid in got[:CAP] if rel(qid, lid))
+                a["top3_injected"] += len(got[:CAP3])
+                a["top3_relevant"] += sum(1 for lid in got[:CAP3] if rel(qid, lid))
                 row[name] = {"ids": got, "hits": len(hits)}
             per_query.append(row)
             scored = " ".join(f"{n}={row[n]['hits']}/{len(row[n]['ids'])}" for n in configs)
@@ -288,6 +295,7 @@ async def main() -> None:
             "coverage": a["covered"] / n,
             "items_per_query": a["injected"] / n,
             "p_at_5": a["top5_relevant"] / a["top5_injected"] if a["top5_injected"] else None,
+            "p_at_3": a["top3_relevant"] / a["top3_injected"] if a["top3_injected"] else None,
             "unlabeled_injected": a["unlabeled"],
             **{k: a[k] for k in ("injected", "relevant")},
         }
@@ -303,14 +311,16 @@ async def main() -> None:
                "anchor_leg": ANCHOR_LEG_ENABLED, "anchor_slots": ANCHOR_SLOTS,
                "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT,
                "query_card": QUERY_CARD or None, "queries_with_error_line": carded,
-               "hyde": HYDE_FROM or None}
+               "hyde": HYDE_FROM or None,
+               "symptom_only": (load_json("corpus_stats.json") or {}).get("symptom_only")}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")
-    print(f"{'config':<10}{'precision':>10}{'recall':>8}{'P@5':>7}{'coverage':>10}{'items/q':>9}")
+    print(f"{'config':<10}{'precision':>10}{'recall':>8}{'P@3':>7}{'P@5':>7}{'coverage':>10}{'items/q':>9}")
     for name, t in table.items():
         f = lambda x: "n/a" if x is None else f"{x:.0%}"  # noqa: E731
-        print(f"{name:<10}{f(t['precision']):>10}{f(t['recall']):>8}{f(t['p_at_5']):>7}{f(t['coverage']):>10}{t['items_per_query']:>9.2f}")
+        print(f"{name:<10}{f(t['precision']):>10}{f(t['recall']):>8}{f(t['p_at_3']):>7}{f(t['p_at_5']):>7}"
+              f"{f(t['coverage']):>10}{t['items_per_query']:>9.2f}")
     print("latency p50/p95 ms: " + ", ".join(f"{k} {v['p50_ms']:.0f}/{v['p95_ms']:.0f}" for k, v in latency.items()))
 
 

@@ -125,6 +125,41 @@ class TestTriggersInTheEmbeddingInput:
             ) == memory_embedding_text("Gotcha", props)
 
 
+class TestSymptomOnlyIndex:
+    """MUD-460 (E5): an error-keyed query is a symptom, and matching it
+    against the fix is the same mismatch the whole phase is about."""
+
+    def test_a_lesson_with_a_symptom_embeds_only_that(self, monkeypatch):
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "SYMPTOM_ONLY", True)
+
+        assert ct.memory_embedding_input(
+            "Gotcha", {"symptom": "resolves to 2.0", "text": "pin the version"}
+        ) == "resolves to 2.0"
+
+    def test_a_lesson_without_one_falls_back_to_its_text(self, monkeypatch):
+        """139 of the 287 pool lessons carry a symptom; the rest would be
+        invisible to an error query if they embedded nothing."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "SYMPTOM_ONLY", True)
+
+        assert ct.memory_embedding_input(
+            "Gotcha", {"text": "pin the version"}
+        ) == "pin the version"
+
+    def test_the_canonical_text_is_unchanged(self, monkeypatch):
+        """Whatever the index embeds, the id and the labels do not move."""
+        import agent_memory_mcp.mcp._coding_tools as ct
+
+        monkeypatch.setattr(ct, "SYMPTOM_ONLY", True)
+
+        assert ct.memory_embedding_text(
+            "Gotcha", {"symptom": "resolves to 2.0", "text": "pin the version"}
+        ) == "resolves to 2.0 | pin the version"
+
+
 class TestContextPrefixSpec:
     @pytest.mark.parametrize(
         "raw,expected",
