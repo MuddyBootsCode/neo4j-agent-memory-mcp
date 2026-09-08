@@ -23,6 +23,7 @@ p50/p95 over queries.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 
@@ -52,6 +53,10 @@ QUERY_CARD = os.environ.get("GOLDEN_QUERY_CARD", "").strip().lower()
 CARD_ERROR_WINDOW = int(os.environ.get("GOLDEN_CARD_ERROR_WINDOW", "60"))
 CARD_ERROR_WORDS = 25
 CARD_FILES = 4
+# HyDE (MUD-459, P5 E4): a path to a step3b rewrites.json. Each rewrite is
+# embedded and fused as its own vector leg beside the prompt's, so a bad
+# guess costs a leg's worth of rank and never the prompt itself.
+HYDE_FROM = os.environ.get("GOLDEN_HYDE", "").strip()
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -61,26 +66,48 @@ def _pct(xs: list[float], p: float) -> float | None:
     return xs[min(len(xs) - 1, int(round(p * (len(xs) - 1))))]
 
 
+async def _hyde_embeddings(client, q: dict) -> list[list[float]]:
+    """Embed this query's hypothetical lessons, or [] when there are none."""
+    from agent_memory_mcp.mcp._coding_tools import _embed
+
+    out = []
+    for text in q.get("rewrites") or []:
+        vector = await _embed(client, text)
+        if vector is not None:
+            out.append(vector)
+    return out
+
+
 async def _retrieve(client, q: dict, *, config: str, limit: int, embedding=None) -> tuple[list[dict], dict]:
     """Rows for one config, ids attached, with per-stage timing.
 
-    cosine20: the vector leg alone, no threshold.  D: production
-    retrieve_candidates (vector + BM25 fused with RRF) at GATE_DEPTH.
+    cosine20: the vector leg alone, no threshold — with HyDE, the prompt's
+    leg fused by RRF with one leg per hypothetical lesson, which is the
+    ceiling of the fused query side.  D: production retrieve_candidates
+    (vector + BM25, plus any extra legs) at GATE_DEPTH.
     """
-    from agent_memory_mcp.mcp._coding_tools import _embed, _render_memory, retrieve_candidates, vector_leg
+    from agent_memory_mcp.mcp._coding_tools import (
+        _embed, _render_memory, retrieve_candidates, rrf_fuse, vector_leg,
+    )
 
     timing = {}
     if embedding is None:
         t0 = time.perf_counter()
         embedding = await _embed(client, q["prompt"])
         timing["embed_ms"] = (time.perf_counter() - t0) * 1000
+    extra = await _hyde_embeddings(client, q) if HYDE_FROM else []
     t0 = time.perf_counter()
     if config == "cosine20":
-        rows = await vector_leg(client, embedding, repo=q["repo"], files=q["files"], task_key=None,
-                                limit=limit, threshold=0.0) if embedding is not None else []
+        if embedding is None:
+            rows = []
+        else:
+            legs = [await vector_leg(client, e, repo=q["repo"], files=q["files"], task_key=None,
+                                     limit=limit, threshold=0.0) for e in [embedding] + extra]
+            rows = legs[0] if len(legs) == 1 else rrf_fuse(legs)[:limit]
     else:
         rows, _strategy = await retrieve_candidates(client, prompt=q["prompt"], repo=q["repo"], files=q["files"],
-                                                    task_key=None, limit=limit, embedding=embedding)
+                                                    task_key=None, limit=limit, embedding=embedding,
+                                                    extra_embeddings=extra)
     timing["vector_ms"] = (time.perf_counter() - t0) * 1000
     items = []
     for row in rows:
@@ -170,6 +197,14 @@ async def main() -> None:
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
+    if HYDE_FROM:
+        path = HYDE_FROM if os.path.isabs(HYDE_FROM) else os.path.join(os.path.dirname(os.path.abspath(__file__)), HYDE_FROM)
+        with open(path, encoding="utf-8") as fh:
+            rewrites = json.load(fh)
+        for q in queries:
+            q["rewrites"] = rewrites.get(str(q["query_id"])) or []
+        print(f"hyde: {sum(1 for q in queries if q['rewrites'])} of {len(queries)} queries carry rewrites, "
+              f"{sum(len(q['rewrites']) for q in queries) / len(queries):.1f} each")
     split = load_json("session_split.json")
     _expand_queries(queries, split)
     carded = _card_queries(queries, split)
@@ -267,7 +302,8 @@ async def main() -> None:
                "scored_configs": configs,
                "anchor_leg": ANCHOR_LEG_ENABLED, "anchor_slots": ANCHOR_SLOTS,
                "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT,
-               "query_card": QUERY_CARD or None, "queries_with_error_line": carded}
+               "query_card": QUERY_CARD or None, "queries_with_error_line": carded,
+               "hyde": HYDE_FROM or None}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")

@@ -639,10 +639,16 @@ def dedupe_fused(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def retrieve_candidates(
     client: Any, *, prompt: str, repo: str, files: list[str],
     task_key: str | None, limit: int, embedding: list[float] | None = None,
+    extra_embeddings: list[list[float]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Fused candidate rows for ``prompt`` and the strategy that produced
     them: "fused" when both legs ran, "vector" / "fulltext" when only one
-    could, None when neither (no embedder and no usable terms)."""
+    could, None when neither (no embedder and no usable terms).
+
+    ``extra_embeddings`` each add a vector leg of their own (MUD-459): a
+    guessed lesson is fused beside the prompt, not concatenated into it,
+    so a bad guess costs a leg's worth of rank and never the prompt.
+    """
     if embedding is None:
         embedding = await _embed(client, (prompt or "").strip())
     legs: list[list[dict[str, Any]]] = []
@@ -650,6 +656,11 @@ async def retrieve_candidates(
     if embedding is not None:
         legs.append(await vector_leg(client, embedding, repo=repo, files=files, task_key=task_key))
         names.append("vector")
+    for extra in extra_embeddings or []:
+        if extra is None:
+            continue
+        legs.append(await vector_leg(client, extra, repo=repo, files=files, task_key=task_key))
+        names.append("hypothetical")
     text_rows = await fulltext_leg(client, prompt, repo=repo, files=files, task_key=task_key)
     if text_rows or not legs:
         if text_rows:
@@ -671,8 +682,15 @@ async def retrieve_candidates(
         fused = fused[:limit]
     else:
         fused = cap_anchor_slots(fused, limit=limit, anchor_leg=anchor_index, slots=ANCHOR_SLOTS)
-    ranked = [n for n in names if n != "anchor"]
-    return fused, ("fused" if len(ranked) == 2 else (ranked[0] if ranked else "anchor"))
+    # The strategy names the two retrieval kinds. The anchor and
+    # hypothetical legs are modifiers on top of them, not strategies of
+    # their own, and several hypothetical legs are still one kind.
+    kinds = [k for k in ("vector", "fulltext") if k in names]
+    if len(kinds) == 2:
+        return fused, "fused"
+    if kinds:
+        return fused, kinds[0]
+    return fused, ("hypothetical" if "hypothetical" in names else "anchor")
 
 
 def _candidate_block(memories: list[dict[str, Any]]) -> str:

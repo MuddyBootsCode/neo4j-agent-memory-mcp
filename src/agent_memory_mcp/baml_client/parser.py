@@ -53,6 +53,12 @@ class LlmResponseParser:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="request")
         return typing.cast(types.TemporalExtraction, __result__)
 
+    def HypotheticalLessons(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.HypotheticalLessonSet:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="HypotheticalLessons", llm_response=llm_response, mode="request")
+        return typing.cast(types.HypotheticalLessonSet, __result__)
+
     def LessonTriggers(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.LessonTriggerSet:
@@ -114,6 +120,12 @@ class LlmStreamParser:
     ) -> stream_types.TemporalExtraction:
         __result__ = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTemporalContext", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.TemporalExtraction, __result__)
+
+    def HypotheticalLessons(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.HypotheticalLessonSet:
+        __result__ = self.__options.merge_options(baml_options).parse_response(function_name="HypotheticalLessons", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.HypotheticalLessonSet, __result__)
 
     def LessonTriggers(
         self, llm_response: str, baml_options: BamlCallOptions = {},
