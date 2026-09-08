@@ -30,12 +30,12 @@
     },
     "latency": {
       "embed_ms": {
-        "p50_ms": 10.361499997088686,
-        "p95_ms": 23.886209004558623
+        "p50_ms": 9.491875011008233,
+        "p95_ms": 20.146208989899606
       },
       "vector_ms": {
-        "p50_ms": 263.32045800518245,
-        "p95_ms": 454.02441601618193
+        "p50_ms": 254.5877500087954,
+        "p95_ms": 433.85220802156255
       }
     },
     "gate_depth": 10,
@@ -57,7 +57,8 @@
     "symptom_only": false,
     "unlabeled_pairs": 0,
     "labelled_pairs_owed": 28700,
-    "fingerprinted_queries": 0
+    "fingerprinted_queries": 100,
+    "label_rubric": "prompt"
   },
   "per_query": [
     {

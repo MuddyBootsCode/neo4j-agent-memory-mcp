@@ -1,6 +1,6 @@
 {
   "0": {
-    "fingerprint": "e54045d58d8d",
+    "fingerprint": "2f07679b2269",
     "lessons": [
       "Chose to pin the `actions/checkout` action to v4 over v3 because the previous CI failures were caused by the older version's handling of sparse checkouts.",
       "The `GRA-444.json` schema validation fails unless the `epic_id` field is explicitly cast to a string, not just a number.",
@@ -8,7 +8,7 @@
     ]
   },
   "1": {
-    "fingerprint": "38457b37f5c1",
+    "fingerprint": "79715249ec40",
     "lessons": [
       "Chose EPIC_BRIEF.md as the source of truth over GRA-444.json because the brief contains the final approved scope while the JSON only holds technical metadata.",
       "GRA-444.json validation fails unless the 'version' field matches the semantic versioning format defined in the schema.",
@@ -16,7 +16,7 @@
     ]
   },
   "2": {
-    "fingerprint": "451225606fb9",
+    "fingerprint": "426df83cbab3",
     "lessons": [
       "Chose to expose the raw user query string in the `GRA-444.json` payload rather than just the tool call arguments because the EPIC_BRIEF.md requires distinct handling for natural language inputs.",
       "The `get_actual_queries` endpoint fails unless the `capture_mode` flag is explicitly set to `full` in the configuration file.",
@@ -24,7 +24,7 @@
     ]
   },
   "3": {
-    "fingerprint": "69d428d5ebf4",
+    "fingerprint": "e3ae76ff0188",
     "lessons": [
       "Chose the `--dry-run` flag for the migration command to verify schema changes on database-1 before committing, because the EPIC_BRIEF.md specifies a zero-downtime requirement.",
       "The `GRA-444.json` config file fails to parse unless the `timeout_ms` field is explicitly set to an integer, as the default string value causes a runtime error during the log check.",
@@ -32,7 +32,7 @@
     ]
   },
   "4": {
-    "fingerprint": "9a68b5a3e02e",
+    "fingerprint": "f3bd915560f0",
     "lessons": [
       "Chose the --fix flag for /code-review to automatically apply suggested changes rather than just listing them because the PR description indicated the suggestions were already validated.",
       "/code-review fails unless the branch name matches the PR title pattern exactly, causing a mismatch error when the branch is named with a hyphenated prefix.",
@@ -40,7 +40,7 @@
     ]
   },
   "5": {
-    "fingerprint": "b67d2bd30149",
+    "fingerprint": "083669481f1e",
     "lessons": [
       "Chose the `--publish` flag over `--dry-run` to ensure the package is actually registered in the npm registry.",
       "The `npm publish` command fails unless the package version in `package.json` does not already exist in the registry.",
@@ -48,7 +48,7 @@
     ]
   },
   "6": {
-    "fingerprint": "0e447039ba89",
+    "fingerprint": "fb42f9faf98f",
     "lessons": [
       "Chose the PR branch over main because the developer explicitly requested a pull request workflow rather than a direct merge.",
       "<git push> fails unless the upstream branch is set or explicitly specified, which is critical when the prompt implies a specific target branch.",
@@ -56,7 +56,7 @@
     ]
   },
   "7": {
-    "fingerprint": "8c05d826593c",
+    "fingerprint": "10a702a83f5d",
     "lessons": [
       "Chose the `--no-verify` flag for `git commit` to bypass the failing pre-commit hook that was blocking the epic squad workflow.",
       "The `GRA-664-LEAD.md` file fails to parse if the YAML frontmatter contains nested lists without proper indentation.",
@@ -64,7 +64,7 @@
     ]
   },
   "8": {
-    "fingerprint": "87ee9103143e",
+    "fingerprint": "7efb058d1364",
     "lessons": [
       "Chose q1 for the primary sort key and q2 for the secondary filter because GRA-664.json defines q1 as the unique identifier.",
       "The query fails unless EPIC_BRIEF.md is loaded first to resolve the external reference for q2.",
@@ -72,7 +72,7 @@
     ]
   },
   "9": {
-    "fingerprint": "d5b4b24c1d27",
+    "fingerprint": "2f1f957aa097",
     "lessons": [
       "Chose to link ticket 668 to the epic via the 'blocked_by' field rather than the 'depends_on' field because the dependency graph was resolving incorrectly.",
       "<git log --oneline --graph> fails to show the linear history unless the merge commits are squashed first.",
@@ -80,7 +80,7 @@
     ]
   },
   "10": {
-    "fingerprint": "b79b6f763d2e",
+    "fingerprint": "1fdea8306461",
     "lessons": [
       "Chose the `EPIC_BRIEF.md` structure over raw JSON for the source of truth because it allows non-technical stakeholders to validate the ELI requirements without parsing nested objects.",
       "The `GRA-664.json` parser fails unless the `eli_version` field is explicitly cast to a string, as the schema definition defaults to integer.",
@@ -88,7 +88,7 @@
     ]
   },
   "11": {
-    "fingerprint": "6a8798384702",
+    "fingerprint": "f13fc3470e4c",
     "lessons": [
       "Chose the `--target QA` flag for the `grad-graph-mcp-test` container to ensure all 668 endpoints resolve against the correct environment rather than the default staging cluster.",
       "The `grad-graph-mcp-test` container fails to attach locally unless the host's `/etc/hosts` file maps the internal service name to `127.0.0.1` before the container starts.",
@@ -96,7 +96,7 @@
     ]
   },
   "12": {
-    "fingerprint": "454ed21edd30",
+    "fingerprint": "83e5ca5ec5bb",
     "lessons": [
       "Chose the `GRA-664.json` schema over the legacy YAML format because it enforces strict type checking for the new EPIC fields.",
       "The `status` query fails unless the `EPIC_BRIEF.md` header contains the `v2` marker, which the current file lacks.",
@@ -104,7 +104,7 @@
     ]
   },
   "13": {
-    "fingerprint": "1151f96e5888",
+    "fingerprint": "903190415fc7",
     "lessons": [
       "Chose the `--env=qa` flag over the `QA` environment variable to ensure the deployment script correctly targets the staging cluster instead of production.",
       "The `tear_down` step fails unless the previous deployment's load balancer health check has cleared, otherwise the script attempts to delete active resources.",
@@ -112,7 +112,7 @@
     ]
   },
   "14": {
-    "fingerprint": "a819c19bf1ec",
+    "fingerprint": "73bde5a07bac",
     "lessons": [
       "Chose to append the 'qa' entry to the existing 'mcpServers' object in sst.config.ts rather than creating a new top-level property to maintain compatibility with the existing loader.",
       "The local config update fails unless the 'qa' server URL in GRA-664.json is explicitly overridden in sst.config.ts to point to the local mock endpoint instead of the production URL.",
@@ -120,7 +120,7 @@
     ]
   },
   "15": {
-    "fingerprint": "04c214e22cf0",
+    "fingerprint": "efc80bc37a08",
     "lessons": [
       "Chose the client_id 'https://claude.ai/oauth/claude-code-client-metadata' over the default because the EPIC_BRIEF.md specifies that exact URI for the OAuth2 authorization flow.",
       "The internal server error occurs because the redirect_uri 'http://localhost:3118/callback' does not match the registered callback URL in the sst.config.ts environment variables.",
@@ -128,7 +128,7 @@
     ]
   },
   "16": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -136,7 +136,7 @@
     ]
   },
   "17": {
-    "fingerprint": "c9da1ebabf1d",
+    "fingerprint": "f816cc624b43",
     "lessons": [
       "Chose 0.75 as the sampling rate to balance generation speed with text coherence, avoiding the blurriness of lower values.",
       "<command> fails unless the temperature is explicitly set to 0.75, as the default 1.0 causes excessive randomness in this context.",
@@ -144,7 +144,7 @@
     ]
   },
   "18": {
-    "fingerprint": "8aa7bbecd023",
+    "fingerprint": "7eaa35367e0d",
     "lessons": [
       "Chose the `--dry-run` flag for the `helm upgrade` command to validate the eval step without mutating the cluster state.",
       "The `helm template` command fails unless the `values.yaml` file explicitly defines the `replicaCount` key required by the deployment template.",
@@ -152,7 +152,7 @@
     ]
   },
   "19": {
-    "fingerprint": "8402aed9ad4b",
+    "fingerprint": "a66c53d3e2ae",
     "lessons": [
       "Chose the `adjudication_item` column from the `orders` table over the `status` field because it uniquely identifies the specific line item being reviewed.",
       "The `eli` filter fails unless the `adjudication_item` is cast to a string, as the underlying database schema expects a VARCHAR for this specific lookup.",
@@ -160,7 +160,7 @@
     ]
   },
   "20": {
-    "fingerprint": "1d974f789b00",
+    "fingerprint": "302fe3d02ce4",
     "lessons": [
       "Chose the `--fine` flag over `--coarse` because the prompt explicitly requires high-resolution tuning for better answer accuracy.",
       "<prompt files=\"\"> fails unless the attribute value is quoted, causing the parser to misinterpret the empty string as a missing file path.",
@@ -168,7 +168,7 @@
     ]
   },
   "21": {
-    "fingerprint": "c0a1a95795bf",
+    "fingerprint": "76b55554c310",
     "lessons": [
       "Chose to verify the `GRAD_GRAPH_DB_URL` environment variable in the `.env` file because the default SQLite path was overriding the PostgreSQL connection.",
       "The `grad-cli status` command fails unless the `GRAD_TOKEN` is exported in the current shell session, not just set in the IDE settings.",
@@ -176,7 +176,7 @@
     ]
   },
   "22": {
-    "fingerprint": "1c7d88042699",
+    "fingerprint": "673b53311636",
     "lessons": [
       "Chose the `--capture` flag over manual logging because it automatically handles the JSON serialization of the conversation history.",
       "<prompt files> fails unless the directory contains at least one valid image file matching the expected pattern.",
@@ -184,7 +184,7 @@
     ]
   },
   "23": {
-    "fingerprint": "c0885b18ad96",
+    "fingerprint": "91c65f7ccf59",
     "lessons": [
       "Chose to use the `--short` flag with `skill update` to truncate the description in place rather than editing the YAML file manually because it preserves the skill's metadata integrity.",
       "The `skill push` command fails unless the local skill ID matches the remote repository's version, which is why the developer must verify the `skill.json` hash before committing.",
@@ -192,7 +192,7 @@
     ]
   },
   "24": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -200,7 +200,7 @@
     ]
   },
   "25": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -208,7 +208,7 @@
     ]
   },
   "26": {
-    "fingerprint": "427467ac559e",
+    "fingerprint": "a098b4bbed75",
     "lessons": [
       "Chose to pass the `server.py` instance directly to `DocsPage.tsx` via props to avoid circular dependencies between the React component and the Python backend.",
       "The `DocsPage` component fails to render unless the `server.py` response includes a `status` field, otherwise the TypeScript interface throws a runtime error.",
@@ -216,7 +216,7 @@
     ]
   },
   "27": {
-    "fingerprint": "42db2ce0b9fa",
+    "fingerprint": "c4db283f7a45",
     "lessons": [
       "Chose to ignore the note in DocsPage.tsx because the user count threshold was not met, focusing instead on the internal inconsistency between the component's props and the server.py data model.",
       "The internal inconsistency arises because server.py returns a camelCase JSON payload while DocsPage.tsx expects snake_case keys, causing a silent data mismatch.",
@@ -224,7 +224,7 @@
     ]
   },
   "28": {
-    "fingerprint": "edb96f5ed61f",
+    "fingerprint": "723c8e5cad61",
     "lessons": [
       "Chose server.py as the primary backend handler over the legacy API module because it supports the new database schema updates.",
       "DocsPage.tsx fails to render correctly unless the database connection is explicitly initialized before the component mounts.",
@@ -232,7 +232,7 @@
     ]
   },
   "29": {
-    "fingerprint": "c20ad2954e01",
+    "fingerprint": "2896a4c96289",
     "lessons": [
       "Chose to use the `--amend` flag with `git commit` to include the fixes in the current commit without creating a new one because the developer wants to keep the history linear.",
       "The `DocsPage.tsx` component fails to render correctly unless the `server.py` endpoint returns a valid JSON payload, as the frontend expects a specific schema.",
@@ -240,7 +240,7 @@
     ]
   },
   "30": {
-    "fingerprint": "12d6519862e0",
+    "fingerprint": "71794b5596ed",
     "lessons": [
       "Chose to omit the aria-expanded attribute on the disclosure button because the parent component manages the state via props rather than local state.",
       "DocsPage.tsx renders incorrectly unless the server.py endpoint returns a JSON object with a 'content' key instead of a raw string.",
@@ -248,7 +248,7 @@
     ]
   },
   "31": {
-    "fingerprint": "80ba97bd252c",
+    "fingerprint": "a3cffab55f7e",
     "lessons": [
       "Chose the `--linear` flag over `--github` to ensure the output format matches the internal CLI parser expectations.",
       "<git log --linear> fails unless the repository root is correctly identified, otherwise it returns the full commit graph instead of a flat list.",
@@ -256,7 +256,7 @@
     ]
   },
   "32": {
-    "fingerprint": "214475c343b2",
+    "fingerprint": "a9a338bcaddd",
     "lessons": [
       "Chose to close issue #588 in DocsPage.tsx because the server.py endpoint was already returning the correct JSON structure.",
       "The <git log> command fails unless the DocsPage.tsx file is staged, causing the developer to miss the recent commit for issue #588.",
@@ -264,7 +264,7 @@
     ]
   },
   "33": {
-    "fingerprint": "18d19372acb8",
+    "fingerprint": "5628dfa7bd26",
     "lessons": [
       "Chose to rely on the MCP server's hot-reload capability over manual UI refresh because the server sends a configuration change event that the desktop client listens to.",
       "<mcp reload> fails unless the server process is still running and has not lost its connection state during the code update.",
@@ -272,7 +272,7 @@
     ]
   },
   "34": {
-    "fingerprint": "1761deb40125",
+    "fingerprint": "e82972e95afe",
     "lessons": [
       "Chose to use the `mcp describe` command over parsing the JSON schema directly because it captures runtime metadata that the static schema misses.",
       "The `mcp call` command fails unless the server is already running in the background, so a `mcp start` step is required before verification.",
@@ -280,7 +280,7 @@
     ]
   },
   "35": {
-    "fingerprint": "2119d12ac1f7",
+    "fingerprint": "45b3b0cdab3a",
     "lessons": [
       "Chose the `claude desktop` CLI tool over the web UI because it allows direct local testing of the MCP server configuration without deploying to the cloud.",
       "The `claude desktop` app fails to connect to the local MCP server unless the `MCP_HOST` environment variable is explicitly set to `127.0.0.1` in the app's settings file.",
@@ -288,7 +288,7 @@
     ]
   },
   "36": {
-    "fingerprint": "3bd64733d596",
+    "fingerprint": "2d35f572501d",
     "lessons": [
       "Chose Tailwind's `ring` utility over `border` for the active skill item because it provides the necessary inset shadow depth without altering the element's layout dimensions.",
       "<div class=\"skill-item\"> fails unless the parent container has `overflow-hidden` set, causing the `ring-offset` to bleed into adjacent elements.",
@@ -296,7 +296,7 @@
     ]
   },
   "37": {
-    "fingerprint": "c9100704d365",
+    "fingerprint": "5ea4f6264b7e",
     "lessons": [
       "Chose to check the user's role in the `DashboardTheme` component's `render` method rather than passing a prop from the parent to keep the pill logic self-contained.",
       "The preview pill fails to appear unless the `is_super_admin` flag is explicitly set to `True` in the `library_app.py` context, as the default `False` value was not being overridden by the test fixture.",
@@ -304,7 +304,7 @@
     ]
   },
   "38": {
-    "fingerprint": "28ef390fc865",
+    "fingerprint": "a5f5802e7053",
     "lessons": [
       "Chose the default 'light' theme over 'merrimack' because the CSS variables for pill backgrounds were not being overridden by the component's local styles.",
       "<pytest> fails unless the mock for get_skills_library returns a list of dictionaries containing the 'skill_name' key required by the template.",
@@ -312,7 +312,7 @@
     ]
   },
   "39": {
-    "fingerprint": "12d882e14786",
+    "fingerprint": "64374c795b11",
     "lessons": [
       "Chose to import the existing UI components from library_app.py rather than rewriting them in dashboard_theme.py to ensure visual consistency.",
       "test_dashboard_theme.py fails unless the UI layout matches the exact pixel dimensions defined in the reference image.",
@@ -320,7 +320,7 @@
     ]
   },
   "40": {
-    "fingerprint": "6bd03c2f1d4a",
+    "fingerprint": "e29c3ad73901",
     "lessons": [
       "Chose to commit the changes to the main branch before closing the session because the temporary workspace files were not persisted across the Claude restart.",
       "The dashboard_theme.py file failed to update in the editor view unless the file was explicitly saved to disk, as the in-memory buffer was discarded on re-open.",
@@ -328,7 +328,7 @@
     ]
   },
   "41": {
-    "fingerprint": "33264e41043a",
+    "fingerprint": "43558e3b0a0c",
     "lessons": [
       "Chose to keep the MCP server running in the background to preserve state, but this causes the UI panel to read stale data if the server restarts without a full reset.",
       "The dashboard_theme.py file fails to update unless the library_app.py dependency is explicitly re-imported after the MCP disconnect.",
@@ -336,7 +336,7 @@
     ]
   },
   "42": {
-    "fingerprint": "4043a849f6a1",
+    "fingerprint": "7c2c8ead273f",
     "lessons": [
       "Chose to remove the secondary description text from the card component because it was causing unnecessary vertical expansion.",
       "The card height reduction fails unless the secondary description element is completely removed from the DOM rather than just hidden.",
@@ -344,7 +344,7 @@
     ]
   },
   "43": {
-    "fingerprint": "740c2d66e55b",
+    "fingerprint": "f9ad2d9daa6a",
     "lessons": [
       "Chose to validate the school name from the connector in the wrapper rather than relying on the user's spoken input because the connector's session data is the source of truth for the final report.",
       "<test_dashboard_theme> fails unless the mock connector explicitly provides an institution ID, otherwise the school name defaults incorrectly to the user's profile.",
@@ -352,7 +352,7 @@
     ]
   },
   "44": {
-    "fingerprint": "b2aaee34dc7b",
+    "fingerprint": "ed63f0538c29",
     "lessons": [
       "Chose to use a dictionary for the theme configuration in dashboard_theme.py to allow for easy updates without modifying the class structure.",
       "test_dashboard_theme.py fails unless the mock library_app.py is correctly patched to return the expected data structure.",
@@ -360,7 +360,7 @@
     ]
   },
   "45": {
-    "fingerprint": "6ff5a44445dd",
+    "fingerprint": "6bbc0881947c",
     "lessons": [
       "Chose the `file_chooser` widget over `TextInput` for skill uploads because it handles binary data streams more reliably than the chat buffer.",
       "The `upload_skill` function fails unless the file path is absolute, as relative paths resolve incorrectly against the temporary working directory.",
@@ -368,7 +368,7 @@
     ]
   },
   "46": {
-    "fingerprint": "9643304de703",
+    "fingerprint": "98d511b2761a",
     "lessons": [
       "Chose to apply the specific commit hash for the CI/CD fix in `test_dashboard_theme.py` rather than merging the entire branch to avoid regressions in `library_app.py`.",
       "`git cherry-pick` fails unless the commit message explicitly references the CI/CD pipeline configuration file.",
@@ -376,7 +376,7 @@
     ]
   },
   "47": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -384,7 +384,7 @@
     ]
   },
   "48": {
-    "fingerprint": "4c6a1be21a12",
+    "fingerprint": "cfb27500dac1",
     "lessons": [
       "Chose the GitHub CLI `gh pr create` command over the web UI to automatically link the commit message to the pull request.",
       "The `gh pr create` command fails unless the current branch is pushed to the remote repository.",
@@ -392,7 +392,7 @@
     ]
   },
   "49": {
-    "fingerprint": "01b7cd2d3e89",
+    "fingerprint": "dfa7ab3518c1",
     "lessons": [
       "Chose `--no-verify` for `git commit` to bypass the failing pre-commit hook without disabling it permanently.",
       "`npm install` fails unless the `package-lock.json` is regenerated after the dependency version bump.",
@@ -400,7 +400,7 @@
     ]
   },
   "50": {
-    "fingerprint": "ece9231379f2",
+    "fingerprint": "7eb9abc42c51",
     "lessons": [
       "Chose the `--order` flag for `git push` to ensure dependent services deploy in the correct sequence rather than parallel.",
       "The `deploy.sh` script fails unless the `WORK_ORDER` environment variable is explicitly set to avoid race conditions with other agents.",
@@ -408,7 +408,7 @@
     ]
   },
   "51": {
-    "fingerprint": "1f37615a9018",
+    "fingerprint": "a12b7d646909",
     "lessons": [
       "Chose the 'sub-agent' pattern over direct execution to isolate the verification logic from the main thread's state.",
       "The 'Yes' flag must be explicitly passed to the sub-agent's entry point, or it defaults to skipping the verification step.",
@@ -416,7 +416,7 @@
     ]
   },
   "52": {
-    "fingerprint": "372923741431",
+    "fingerprint": "bbfe144c67a2",
     "lessons": [
       "Chose D1 as the initial task because it is the first dependency in the topological sort of the project graph.",
       "The sub-agent fails to start unless the D1 task ID is explicitly passed as a query parameter in the handoff payload.",
@@ -424,7 +424,7 @@
     ]
   },
   "53": {
-    "fingerprint": "ffc8400a7bea",
+    "fingerprint": "64235d7f2f87",
     "lessons": [
       "Chose D2 over D1 because D2 provides the necessary abstraction layer for the new data pipeline without breaking existing contracts.",
       "The D2 configuration file fails to load unless the environment variable D2_MODE is explicitly set to 'active'.",
@@ -432,7 +432,7 @@
     ]
   },
   "54": {
-    "fingerprint": "9fe1521e95d3",
+    "fingerprint": "b4b01732c663",
     "lessons": [
       "Chose to use the `--scripted-path` flag over the default heuristic because the repository's custom entry points were not being detected by the standard path resolution logic.",
       "The `dispatch_sub_agents` command fails unless the `SCRIPTED_PATH` environment variable is explicitly exported in the current shell session.",
@@ -440,7 +440,7 @@
     ]
   },
   "55": {
-    "fingerprint": "117898938220",
+    "fingerprint": "1aef90893cda",
     "lessons": [
       "Chose to use `describe-services` for idempotency checks rather than blindly re-running the task definition to avoid unnecessary roll delays.",
       "The permission classifier halts execution immediately upon detection, preventing the script from decomposing into raw `register-task-definition` calls that would bypass verification.",
@@ -448,7 +448,7 @@
     ]
   },
   "56": {
-    "fingerprint": "f3c3785f581f",
+    "fingerprint": "50a84141f7f1",
     "lessons": [
       "Chose the `files` attribute over `glob` patterns because the developer needed to explicitly pass an array of file paths rather than relying on shell expansion.",
       "<prompt> fails unless the `files` array is non-empty, resulting in an empty prompt block if the array is omitted.",
@@ -456,7 +456,7 @@
     ]
   },
   "57": {
-    "fingerprint": "0f04ecea8fd2",
+    "fingerprint": "16b5763a5ffc",
     "lessons": [
       "Chose `git bundle` over `git archive` because it preserves the full commit history and branch references needed for offline collaboration.",
       "<git bundle create> fails unless the destination file path is writable and does not already exist as a directory.",
@@ -464,7 +464,7 @@
     ]
   },
   "58": {
-    "fingerprint": "381103e6acf0",
+    "fingerprint": "661dd1a02383",
     "lessons": [
       "Chose port 5432 for the host mapping over 5433 because the default PostgreSQL port was already occupied by a local instance.",
       "docker-compose up fails unless the postgres container's exposed ports are explicitly defined in the service configuration.",
@@ -472,7 +472,7 @@
     ]
   },
   "59": {
-    "fingerprint": "8aac9b6e1578",
+    "fingerprint": "6cbb783d834f",
     "lessons": [
       "Chose the `--verify` flag for the `deploy` command to ensure the artifact matches the manifest before pushing, preventing stale deployments.",
       "The `deploy` step fails unless the local cache is cleared, as stale metadata causes false positives during verification.",
@@ -480,7 +480,7 @@
     ]
   },
   "60": {
-    "fingerprint": "f908fe9bb0d7",
+    "fingerprint": "c17264b0577d",
     "lessons": [
       "Chose a 150-character limit for the tool description to ensure it renders fully in the MCP client's tooltip without truncation.",
       "The MCP server fails to register the tool unless the 'description' field is a non-empty string, not just an empty object.",
@@ -488,7 +488,7 @@
     ]
   },
   "61": {
-    "fingerprint": "dcba75028215",
+    "fingerprint": "ba545d6d3ec7",
     "lessons": [
       "Chose to use the `--no-input` flag for `pip install` to prevent hanging on dependency resolution prompts.",
       "The `tools.py` module fails unless the `SERVER_URL` environment variable is explicitly set before import.",
@@ -496,7 +496,7 @@
     ]
   },
   "62": {
-    "fingerprint": "1ab2f21fdad2",
+    "fingerprint": "9947cfa8d3e4",
     "lessons": [
       "Chose to use the `@register` decorator in `tools.py` to map the class to the string key 'admin' instead of relying on the class name directly.",
       "The `server.py` lookup fails unless the registration key matches the exact case of the string passed in the request payload.",
@@ -504,7 +504,7 @@
     ]
   },
   "63": {
-    "fingerprint": "b09528b203c5",
+    "fingerprint": "07418a87f9ce",
     "lessons": [
       "Chose to use the `--reuse` flag for `gcloud` connections to preserve the existing workspace state instead of creating a duplicate entry.",
       "The `tools.py` cache file must be cleared before re-adding the connection, otherwise the stale ID prevents the new connection from binding correctly.",
@@ -512,7 +512,7 @@
     ]
   },
   "64": {
-    "fingerprint": "f45771e831c5",
+    "fingerprint": "d527a5e0f83c",
     "lessons": [
       "Chose the personal settings refresh button over the workspace one because the workspace context was not being preserved during the re-addition.",
       "<button> disappears unless the refresh action explicitly targets the current DOM node rather than re-rendering the entire component tree.",
@@ -520,7 +520,7 @@
     ]
   },
   "65": {
-    "fingerprint": "1ab36d7673bd",
+    "fingerprint": "9460f4c19f36",
     "lessons": [
       "Chose to use the `tools.py` helper function for serialization instead of the built-in `json.dumps` because it handles the custom `ServerState` objects without requiring manual mapping.",
       "The `server.py` daemon fails to restart unless the `tools.py` lock file is explicitly removed, as the stale PID check prevents the new process from binding to the port.",
@@ -528,7 +528,7 @@
     ]
   },
   "66": {
-    "fingerprint": "adfb6cae1a55",
+    "fingerprint": "565ef563b381",
     "lessons": [
       "Chose to inline the video description logic in tools.py to avoid an extra API call because the payload size was negligible.",
       "The MCP container fails to pick up changes unless the build cache is explicitly cleared with --no-cache.",
@@ -536,7 +536,7 @@
     ]
   },
   "67": {
-    "fingerprint": "c35da6b552c6",
+    "fingerprint": "fa2c69cfdecf",
     "lessons": [
       "Chose uvicorn over gunicorn for the development server because it handles hot-reloading more reliably without requiring a separate process manager.",
       "The build script fails unless the virtual environment is activated, as the local packages in ./venv are not in the system PATH.",
@@ -544,7 +544,7 @@
     ]
   },
   "68": {
-    "fingerprint": "c9c046f46480",
+    "fingerprint": "2d90c8f5d302",
     "lessons": [
       "Chose to use the `tools.py` helper for the refresh logic because it handles the WebSocket reconnection state more reliably than the raw `server.py` event loop.",
       "The refresh fails to appear after a disconnect unless `server.py` explicitly clears the cached DOM nodes before re-rendering.",
@@ -552,7 +552,7 @@
     ]
   },
   "69": {
-    "fingerprint": "170850415898",
+    "fingerprint": "66567e1bf347",
     "lessons": [
       "Chose to use the `tools` endpoint's `idempotency_key` parameter over manual deletion because it allows safe retries without creating duplicate tool definitions.",
       "<command> curl -X POST /v1/tools fails with a 409 Conflict unless the `idempotency_key` is unique for each new tool version.",
@@ -560,7 +560,7 @@
     ]
   },
   "70": {
-    "fingerprint": "d73d6470ee6c",
+    "fingerprint": "76be31613c64",
     "lessons": [
       "Chose `tools.py` as the central registry for command handlers to avoid circular imports with `server.py`.",
       "The `server.py` entry point fails unless `tools.py` is in the same directory, as it uses a relative import for the config loader.",
@@ -568,7 +568,7 @@
     ]
   },
   "71": {
-    "fingerprint": "598b831c380f",
+    "fingerprint": "897c5b4c91a4",
     "lessons": [
       "Chose to mark the tools module as read-only in the server configuration to prevent accidental mutation of shared state during concurrent requests.",
       "The server startup fails unless the tools.py file is explicitly imported before the server.py module initializes its dependencies.",
@@ -576,7 +576,7 @@
     ]
   },
   "72": {
-    "fingerprint": "c8e2a10e82f1",
+    "fingerprint": "3d65795c8c10",
     "lessons": [
       "Chose to use the `--draft` flag for the PR creation command to avoid triggering CI checks prematurely while the developer finalizes the changes.",
       "The `git add` command fails silently unless the working directory is clean, so running `git status` first is necessary to ensure all modified files in `server.py` and `tools.py` are staged.",
@@ -584,7 +584,7 @@
     ]
   },
   "73": {
-    "fingerprint": "eac56d79b6a4",
+    "fingerprint": "bb36dedff784",
     "lessons": [
       "Chose the `--force` flag for the deletion command to bypass the confirmation prompt because the admin script runs non-interactively.",
       "The `server.py` restart fails unless `tools.py` is imported first to initialize the database connection pool.",
@@ -592,7 +592,7 @@
     ]
   },
   "74": {
-    "fingerprint": "b09f112335a4",
+    "fingerprint": "4e1224771341",
     "lessons": [
       "Chose to use the `--force` flag in `kubectl rollout status` to bypass the default timeout when the server was stuck in a terminating state.",
       "The `tools.py` health check script fails unless the `SERVER_PORT` environment variable is explicitly exported in the deployment manifest.",
@@ -600,7 +600,7 @@
     ]
   },
   "75": {
-    "fingerprint": "892843f6eea8",
+    "fingerprint": "a4052a4c3b84",
     "lessons": [
       "Chose to use the `--verbose` flag in `tools.py` to expose the underlying HTTP status codes because the default output was too terse for debugging.",
       "The `server.py` health check endpoint fails unless the `tools.py` dependency is explicitly imported at the module level.",
@@ -608,7 +608,7 @@
     ]
   },
   "76": {
-    "fingerprint": "72ff68600644",
+    "fingerprint": "17cd73397b0b",
     "lessons": [
       "Chose the 'blue' environment variable over 'green' because the application defaults to the primary cluster when the database alias is unresolved.",
       "The connection string fails unless the 'database-1' host is explicitly defined in the local hosts file to avoid DNS resolution delays.",
@@ -616,7 +616,7 @@
     ]
   },
   "77": {
-    "fingerprint": "3a68a2a6ca69",
+    "fingerprint": "ef1d3e860fcf",
     "lessons": [
       "Chose to define the epic as a single user story with multiple acceptance criteria because the scope was too broad for a standard feature but too narrow for a full project.",
       "The CI pipeline fails unless the epic's Jira ticket ID is appended to the commit message, as the automation script relies on that specific regex pattern.",
@@ -624,7 +624,7 @@
     ]
   },
   "78": {
-    "fingerprint": "23dbf1208b93",
+    "fingerprint": "b27a160ed246",
     "lessons": [
       "Chose `cache_middleware.py` to handle deduplication of telemetry events before they hit the database because raw logs were causing excessive write load.",
       "<docker-compose.yml> fails unless the `call_telemetry` service explicitly sets the `PYTHONPATH` to include the shared models directory.",
@@ -632,7 +632,7 @@
     ]
   },
   "79": {
-    "fingerprint": "e60ba4ce1225",
+    "fingerprint": "dd208ce3bd8f",
     "lessons": [
       "Chose to use the `cache_middleware.py` decorator for `call_telemetry.py` because it decouples the telemetry logic from the core business logic, allowing for easier unit testing of the SQL queries in `034_tool_call_logs_telemetry.sql`.",
       "<docker-compose.yml> fails to expose the correct port unless the `ports` mapping explicitly matches the internal container port defined in the service's `EXPOSE` directive.",
@@ -640,7 +640,7 @@
     ]
   },
   "80": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -648,7 +648,7 @@
     ]
   },
   "81": {
-    "fingerprint": "d1b9211fd216",
+    "fingerprint": "495f8a657304",
     "lessons": [
       "Chose the `git log --since=\"2 weeks ago\" --oneline` command over manual date calculation because it accurately captures the full two-week window including today.",
       "The summary command fails unless the repository is clean, as uncommitted changes in the `src/` directory cause the log to include stale entries.",
@@ -656,7 +656,7 @@
     ]
   },
   "82": {
-    "fingerprint": "8d4239750533",
+    "fingerprint": "53278d002aeb",
     "lessons": [
       "Chose to check the `schema_migrations` table for the `35` version record instead of relying on the application's internal state cache because the database was recently restored.",
       "The `rails db:migrate:status` command fails to show 'up' for migration 35 unless the `db/migrate/035_add_index_to_users.rb` file exists and matches the version number.",
@@ -664,7 +664,7 @@
     ]
   },
   "83": {
-    "fingerprint": "29e3f3572272",
+    "fingerprint": "3ec84455d9d0",
     "lessons": [
       "Chose using `DROP MATERIALIZED VIEW CONCURRENTLY` over a standard drop to avoid holding an exclusive lock on the underlying table during the migration.",
       "The `test_mv_index_rebuild_coverage.py` test fails unless the materialized view is refreshed before checking index existence, as the index metadata is not updated until refresh.",
@@ -672,7 +672,7 @@
     ]
   },
   "84": {
-    "fingerprint": "1b19191825cc",
+    "fingerprint": "7ba102323e95",
     "lessons": [
       "Chose to use `DROP MATERIALIZED VIEW CONCURRENTLY` in `077_gra629_drop_mv_usage_stats.sql` to avoid holding an exclusive lock during the migration, ensuring zero downtime for the application.",
       "The `test_mv_index_rebuild_coverage.py` test fails unless the `migrations.py` script explicitly calls `rebuild_index` after the `CREATE MATERIALIZED VIEW` step, as the default behavior leaves the index in a pending state.",
@@ -680,7 +680,7 @@
     ]
   },
   "85": {
-    "fingerprint": "849543e24108",
+    "fingerprint": "2f0a22b9812c",
     "lessons": [
       "Chose to leave 264 as a docs-only change because the migration script only updates the README and no SQL schema files were modified.",
       "<git diff> shows no changes in the SQL files for 264, confirming it is a documentation update only.",
@@ -688,7 +688,7 @@
     ]
   },
   "86": {
-    "fingerprint": "5e28a4426916",
+    "fingerprint": "9c7a9ffc000e",
     "lessons": [
       "Chose to use `DROP MATERIALIZED VIEW CONCURRENTLY` over a standard drop to avoid holding an exclusive lock on the table during the operation.",
       "The `test_mv_index_rebuild_coverage.py` test fails unless the materialized view is refreshed before checking index statistics.",
@@ -696,7 +696,7 @@
     ]
   },
   "87": {
-    "fingerprint": "1324aedc8ab2",
+    "fingerprint": "8122c97b9577",
     "lessons": [
       "Chose to use `DROP MATERIALIZED VIEW IF EXISTS` in the migration script to ensure idempotency when re-running the script during development.",
       "The `test_mv_index_rebuild_coverage.py` test fails unless the materialized view is refreshed immediately after creation to populate the underlying index statistics.",
@@ -704,7 +704,7 @@
     ]
   },
   "88": {
-    "fingerprint": "81c218834949",
+    "fingerprint": "0a6f679f38f6",
     "lessons": [
       "Chose to keep line 165 as a draft because the migration script explicitly checks for the existence of the `mv_usage_stats` table before attempting the drop, making the statement idempotent.",
       "<test_mv_index_rebuild_coverage.py> fails unless the `mv_usage_stats` materialized view is rebuilt after the drop to ensure the index integrity is preserved.",
@@ -712,7 +712,7 @@
     ]
   },
   "89": {
-    "fingerprint": "3e5172d1d944",
+    "fingerprint": "44623acac490",
     "lessons": [
       "Chose to remove the `is_banner_visible` column from the `app_settings` table because the migration script `migrations.py` now hardcodes the default to `false` for all environments.",
       "<test_mv_index_rebuild_coverage.py> fails unless the `test_mv_index_rebuild_coverage` fixture explicitly drops the temporary materialized view before asserting the final state.",
@@ -720,7 +720,7 @@
     ]
   },
   "90": {
-    "fingerprint": "89e7f6728ae6",
+    "fingerprint": "a31b19701f30",
     "lessons": [
       "Chose to preserve the lineage documentation in the SQL file rather than extracting it to a separate markdown file to ensure it stays version-controlled with the migration logic.",
       "The test suite fails unless the lineage comments are explicitly parsed by the migration runner, as it ignores standard SQL comments by default.",
@@ -728,7 +728,7 @@
     ]
   },
   "91": {
-    "fingerprint": "f9004191e7ae",
+    "fingerprint": "be28e1077bd2",
     "lessons": [
       "Chose to use the `cp` command with the `-r` flag to recursively copy the skill directories while preserving their internal structure.",
       "The copy operation fails unless the destination path under `Career and Experiential Learning` is explicitly created first.",
@@ -736,7 +736,7 @@
     ]
   },
   "92": {
-    "fingerprint": "6262dfd1772b",
+    "fingerprint": "cbb9aee8fb84",
     "lessons": [
       "Chose the `--no-cache` flag for `docker build` to ensure the latest layer changes are picked up during the image reconstruction.",
       "The `docker-compose up` command fails unless the `VOLUME` directory permissions are set to 777 to allow the containerized user to write logs.",
@@ -744,7 +744,7 @@
     ]
   },
   "93": {
-    "fingerprint": "a4682a24978d",
+    "fingerprint": "a84de170a903",
     "lessons": [
       "Chose to use `npm run deploy` over `npm publish` because the library requires a separate build step before deployment.",
       "<command> fails unless the `libraryDepartments.ts` file is included in the `files` array of `package.json`.",
@@ -752,7 +752,7 @@
     ]
   },
   "94": {
-    "fingerprint": "4dea2b6bfdba",
+    "fingerprint": "3e6d724395f3",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested configuration files in the `./SWARM_BRIEF.md` directory are included in the comparison.",
       "<git diff> fails unless the working tree is clean, so a stale lock file in the root directory will cause the command to abort.",
@@ -760,7 +760,7 @@
     ]
   },
   "95": {
-    "fingerprint": "d435fa47581d",
+    "fingerprint": "9c76b7dedc7e",
     "lessons": [
       "Chose the `--recursive` flag for `git diff` to ensure nested changes in the `src/` directory are captured without manually traversing subdirectories.",
       "The `EPIC_BRIEF.md` file fails to parse if the YAML frontmatter contains unescaped colons, causing the parser to misinterpret the metadata section.",
@@ -768,7 +768,7 @@
     ]
   },
   "96": {
-    "fingerprint": "6aebf34e9318",
+    "fingerprint": "80454bef9915",
     "lessons": [
       "Chose to deploy server.py automatically after merge because the CI pipeline includes a 'deploy' step that triggers on main branch updates.",
       "test_cip4_tools_sql.py fails unless the database connection string is explicitly set in the environment variables during the test run.",
@@ -776,7 +776,7 @@
     ]
   },
   "97": {
-    "fingerprint": "063082bf6b05",
+    "fingerprint": "e36a91186fc8",
     "lessons": [
       "Chose `test_cip4_tools_sql.py` as the primary test file because it explicitly validates the SQL generation logic required by `server.py`.",
       "The merge failed unless `server.py` was updated to handle the new CIP4 data structure before the deployment script ran.",
@@ -784,7 +784,7 @@
     ]
   },
   "98": {
-    "fingerprint": "17a6fb3cf0ea",
+    "fingerprint": "6938ead0cc74",
     "lessons": [
       "Chose direct `kubectl apply` over `sst deploy` because the CI/CD pipeline requires explicit manifest generation to handle environment-specific overrides.",
       "`sst deploy` fails silently unless the `sst.json` config explicitly lists the target stack, causing the developer to miss deployment updates.",
@@ -792,7 +792,7 @@
     ]
   },
   "99": {
-    "fingerprint": "d8620e10d2c0",
+    "fingerprint": "215a3f42e1d9",
     "lessons": [
       "Chose to assert the return value of `get_health()` over checking the HTTP status code because the tool returns a dictionary with nested metrics that the status code alone does not capture.",
       "The test fails unless `server.py` is imported before `test_cip4_tools_sql.py` runs, as the latter relies on a global singleton initialized by the former.",

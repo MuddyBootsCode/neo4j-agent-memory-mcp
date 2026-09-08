@@ -28,7 +28,8 @@ import os
 import time
 
 from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, rewrite_lessons, save_json,
-                 session_family, stale_label_keys, stale_rewrites, unlabeled_pairs)
+                 session_family, stale_label_keys, stale_rewrites, unlabeled_pairs,
+                 wholly_unlabelled)
 from mem import open_client
 
 CAP = 5
@@ -258,6 +259,17 @@ async def main() -> None:
     if leaked:
         raise SystemExit(f"{len(leaked)} pool lesson(s) come from query-session families; rebuild the pool (step1b drops them)")
 
+    # A query with no verdicts at all, before the global tolerance: one
+    # such query is exactly 1.0000% of the p4-live shape, so it would sit
+    # precisely on the bar and score as all-misses with its relevant
+    # lessons out of the denominator.
+    empty = wholly_unlabelled(labels, queries, pool)
+    if empty:
+        named = ", ".join(f"q{q}" for q in sorted(empty)[:8])
+        raise SystemExit(
+            f"{len(empty)} query(ies) carry no verdict at all ({named}"
+            f"{'...' if len(empty) > 8 else ''}); a relabel did not finish. Re-run step4."
+        )
     holes = unlabeled_pairs(labels, queries, pool)
     owed = sum(len(pool_by_repo.get(q["repo"], ())) for q in queries)
     if owed and holes / owed > MAX_UNLABELED:
