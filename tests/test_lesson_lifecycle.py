@@ -32,7 +32,8 @@ class TestBuilders:
         assert "m.valid_from = datetime($ts)" in q
         assert "m.evidence_count = 1" in q
         assert "m.served_count = 0, m.helpful = 0, m.harmful = 0" in q
-        assert q.strip().endswith("RETURN DISTINCT elementId(m) AS eid")
+        assert q.strip().endswith("RETURN elementId(m) AS eid")
+        assert "UNWIND" not in q  # an empty anchor list must still return the eid
 
     def test_reassert_counts_evidence_once_per_session_family(self):
         """A parent session and its subagents are one family: a lesson every
@@ -123,7 +124,7 @@ class ReturningGraph(FakeGraph):
 
     async def execute_write(self, query, params):
         out = await super().execute_write(query, params)
-        if "RETURN DISTINCT elementId(m) AS eid" in query:
+        if query.strip().endswith("RETURN elementId(m) AS eid"):
             return [{"eid": f"4:new:{len(self.writes)}"}]
         return out
 
