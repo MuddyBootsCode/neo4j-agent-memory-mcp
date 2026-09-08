@@ -139,6 +139,37 @@ class TestFingerprintsFollowTheLabels:
         assert stale_label_keys(partial, [after], stored) == {"1:a"}
 
 
+class TestLabellingProtocol:
+    """GOLDEN_LABEL_RUBRIC swaps both the rubric and the user message, so
+    a resume under a different one mixes answers to two questions."""
+
+    def test_the_same_query_under_a_different_rubric_is_a_different_fingerprint(self):
+        from lib import query_fingerprint
+
+        q = {"query_id": 1, "prompt": "Exit code 1 boom", "files": []}
+
+        assert query_fingerprint(q, protocol="prompt") != query_fingerprint(q, protocol="error")
+
+    def test_switching_rubric_invalidates_every_label(self):
+        from lib import fingerprints_for_labelled, stale_label_keys
+
+        queries = [{"query_id": 1, "prompt": "boom", "files": []}]
+        labels = {"1:a": True, "1:b": False}
+        stored = fingerprints_for_labelled(labels, queries, protocol="prompt")
+
+        assert stale_label_keys(labels, queries, stored, protocol="prompt") == set()
+        assert stale_label_keys(labels, queries, stored, protocol="error") == {"1:a", "1:b"}
+
+    def test_the_default_protocol_is_the_prompt_rubric(self):
+        """So a run labelled before the rubric switch existed still reads
+        as what it was."""
+        from lib import query_fingerprint
+
+        q = {"query_id": 1, "prompt": "p", "files": []}
+
+        assert query_fingerprint(q) == query_fingerprint(q, protocol="prompt")
+
+
 class TestRewriteProvenance:
     def test_a_rewrite_is_stale_when_its_query_changed(self):
         """HyDE guesses are keyed by query_id and step5 attaches them the

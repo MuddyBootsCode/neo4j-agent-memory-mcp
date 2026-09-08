@@ -244,7 +244,7 @@ def lesson_id(repo: str, kind: str, canonical_text: str) -> str:
     return h.hexdigest()[:12]
 
 
-def query_fingerprint(query: dict) -> str:
+def query_fingerprint(query: dict, protocol: str = "prompt") -> str:
     """Content hash of a query: exactly what a label was made against.
 
     Labels are keyed ``"<query_id>:<lesson_id>"`` and step4 resumes on that
@@ -253,20 +253,25 @@ def query_fingerprint(query: dict) -> str:
     text — silently, with no error and wrong numbers. The fingerprint is
     what makes that detectable (MUD-460).
 
-    Covers everything the labeller sees: the query text, the files, and the
-    failing call for an error-keyed set. Not the id, so renumbering a set
-    does not invalidate it, and not the file order.
+    Covers everything the labeller sees: the query text, the files, the
+    failing call for an error-keyed set, and ``protocol`` — the rubric it
+    was judged under (GOLDEN_LABEL_RUBRIC), because "would this lesson
+    help at this prompt" and "would it help with this failure" are
+    different questions and their verdicts do not mix. Not the id, so
+    renumbering a set does not invalidate it, and not the file order.
     """
     payload = json.dumps({
         "prompt": query.get("prompt", ""),
         "files": sorted(query.get("files") or []),
         "tool": query.get("tool"),
         "attempt": query.get("attempt"),
+        "protocol": protocol,
     }, sort_keys=True, default=str)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
-def stale_label_keys(labels: dict, queries: list[dict], stored: dict) -> set[str]:
+def stale_label_keys(labels: dict, queries: list[dict], stored: dict,
+                     protocol: str = "prompt") -> set[str]:
     """Label keys whose query has changed since it was labelled.
 
     ``stored`` maps str(query_id) to the fingerprint recorded when the
@@ -276,7 +281,7 @@ def stale_label_keys(labels: dict, queries: list[dict], stored: dict) -> set[str
     changed = {
         str(q["query_id"]) for q in queries
         if str(q["query_id"]) in stored
-        and stored[str(q["query_id"])] != query_fingerprint(q)
+        and stored[str(q["query_id"])] != query_fingerprint(q, protocol)
     }
     if not changed:
         return set()
@@ -308,7 +313,8 @@ def unlabeled_pairs(labels: dict, queries: list[dict], pool: list[dict]) -> int:
     )
 
 
-def fingerprints_for_labelled(labels: dict, queries: list[dict]) -> dict:
+def fingerprints_for_labelled(labels: dict, queries: list[dict],
+                              protocol: str = "prompt") -> dict:
     """Fingerprints for every query that has at least one verdict.
 
     The fingerprint answers "which text were these judged against", not
@@ -321,7 +327,7 @@ def fingerprints_for_labelled(labels: dict, queries: list[dict]) -> dict:
     """
     labelled = {key.split(":", 1)[0] for key in labels}
     return {
-        str(q["query_id"]): query_fingerprint(q)
+        str(q["query_id"]): query_fingerprint(q, protocol)
         for q in queries
         if str(q["query_id"]) in labelled
     }

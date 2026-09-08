@@ -160,7 +160,7 @@ async def main() -> None:
     # against ground truth built for its old text. Drop those labels here;
     # the calls below relabel them (MUD-460, Codex review).
     fingerprints: dict[str, str] = load_json("query_fingerprints.json", {}) or {}
-    stale = stale_label_keys(labels, queries, fingerprints)
+    stale = stale_label_keys(labels, queries, fingerprints, RUBRIC_KIND)
     if stale:
         changed = sorted({int(k.split(":", 1)[0]) for k in stale})
         for key in stale:
@@ -180,7 +180,7 @@ async def main() -> None:
         text change would let the next run keep them and top them up
         against the new one. Whether a query is finished is a separate
         question, and step5 answers it with unlabeled_pairs."""
-        fingerprints.update(fingerprints_for_labelled(labels, queries))
+        fingerprints.update(fingerprints_for_labelled(labels, queries, RUBRIC_KIND))
         save_json("query_fingerprints.json", fingerprints)
 
     _record_provenance()
@@ -213,9 +213,15 @@ async def main() -> None:
             "missing": len(missing), "relevant": sum(verdicts.values()),
         })
         if state["calls"] % 10 == 0:
+            # Provenance before the labels it certifies. A crash between
+            # the two writes then leaves a fingerprint covering fewer
+            # verdicts than it claims, which is the safe direction: the
+            # labels that exist are still tied to the text and rubric that
+            # produced them, and the shortfall is what unlabeled_pairs is
+            # for. The other order leaves verdicts nothing vouches for.
+            _record_provenance()
             save_json("labels.json", labels)
             save_json("label_usage.json", usage_log)
-            _record_provenance()
         print(
             f"  q{q['query_id']:<3} chunk {ci}: {sum(verdicts.values()):>2} relevant"
             f"{' missing=' + str(len(missing)) if missing else ''}"
@@ -252,9 +258,9 @@ async def main() -> None:
                     )
             await asyncio.gather(*(run(q, ci, repo, system, ids) for q in todo[2:]))
 
+    _record_provenance()
     save_json("labels.json", labels)
     save_json("label_usage.json", usage_log)
-    _record_provenance()
     relevant = sum(1 for v in labels.values() if v)
     print(f"\nlabels: {len(labels)} pairs, {relevant} relevant ({relevant / max(len(labels), 1):.1%}); "
           f"{state['calls']} calls this run; total cost ${state['cost']:.2f} -> {result_path('labels.json')}")
