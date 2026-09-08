@@ -1,0 +1,14 @@
+{
+  "materialized_from": "/Users/muddybootscode/Projects/neo4j-agent-memory-mcp/.claude/worktrees/agentic-memory-recall-abf5cd/experiments/golden/results/p4-live/pool.json",
+  "lessons": 287,
+  "embedding": {
+    "provider": "sentence_transformers",
+    "model": "all-MiniLM-L6-v2",
+    "dimensions": 384
+  },
+  "text_mismatches": 0,
+  "counters_restored": 284,
+  "context_prefix": [],
+  "triggers_from": "",
+  "triggers_used": 0
+}
