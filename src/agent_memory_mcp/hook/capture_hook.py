@@ -161,15 +161,24 @@ def _tool_result_line(block: dict, tool_name: str | None) -> str | None:
     return f"[{name} ok] {text[:MAX_OK_RESULT_CHARS]}"
 
 
-def _iter_records(path: str):
+def _iter_records(path: str, *, with_line: bool = False):
+    """Parsed JSON objects from a transcript.
+
+    ``with_line`` yields ``(physical line index, record)``. Blank and
+    malformed lines still consume an index, because every other reader of
+    these files counts physical lines (``lib.iter_transcript_lines`` in the
+    golden set, and the query positions derived from it). Counting parsed
+    records instead would drift after the first skipped line and let a
+    failure that happened later land before an earlier prompt.
+    """
     with open(path, encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
+        for index, raw in enumerate(fh):
             try:
                 record = json.loads(raw)
             except Exception:
                 continue
             if isinstance(record, dict):
-                yield record
+                yield (index, record) if with_line else record
 
 
 def _render_lines(path: str) -> list[str]:
@@ -313,10 +322,23 @@ def transcript_touched_files(path: str, repo_dir: str, cap: int = MAX_FILES_SENT
     return list(seen)
 
 
-def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[dict]:
+def error_steps(
+    path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS,
+    *, before_line: int | None = None, since_line: int | None = None,
+    with_index: bool = False,
+) -> list[dict]:
     """Tool calls whose result was an error: ``{"tool", "input", "error",
     "file"}`` in transcript order, newest last. Zero-LLM DeadEnd candidates
     (MUD-404); the curator decides whether each is worth keeping.
+
+    ``before_line`` and ``since_line`` bound which failures count by the
+    record index of the failing *result* — the golden set replays a prompt
+    at a known line and asks what had just failed before it (MUD-458).
+    Calls are paired from the whole file either way, so a failure inside
+    the window keeps the command that caused it even when that call is
+    outside. ``with_index`` adds each failure's record index, which the
+    error-keyed query set needs to ask what had been edited before it
+    (MUD-460); off by default, so the capture path's shape is unchanged.
 
     Only results the client flagged ``is_error`` qualify. The keyword regex
     that decides rendering is not used here: a successful ``cat`` of a file
@@ -328,10 +350,12 @@ def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[di
     calls: dict[str, dict] = {}
     steps: list[dict] = []
     try:
-        for record in _iter_records(path):
+        for index, record in _iter_records(path, with_line=True):
             content = (record.get("message") or {}).get("content")
             if not isinstance(content, list):
                 continue
+            in_window = ((before_line is None or index < before_line)
+                         and (since_line is None or index >= since_line))
             for block in content:
                 if not isinstance(block, dict):
                     continue
@@ -344,13 +368,18 @@ def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[di
                         "file": normalize_repo_path(args.get("file_path"), repo_dir),
                     }
                 elif block.get("type") == "tool_result":
+                    if not in_window:
+                        continue
                     text = " ".join(_block_text(block.get("content")).split())
                     if not text or not block.get("is_error"):
                         continue
                     if _NOT_AN_ATTEMPT_RE.search(text):
                         continue
                     call = calls.get(block.get("tool_use_id"), {"tool": "tool", "input": "", "file": None})
-                    steps.append({**call, "error": _truncate_middle(text, 600)})
+                    step = {**call, "error": _truncate_middle(text, 600)}
+                    if with_index:
+                        step["index"] = index
+                    steps.append(step)
     except Exception:
         pass
     return steps[-cap:]

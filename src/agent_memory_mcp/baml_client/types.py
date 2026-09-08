@@ -53,7 +53,7 @@ class ServedOutcome(str, Enum):
     UNUSED = "UNUSED"
 
 # #########################################################################
-# Generated classes (19)
+# Generated classes (21)
 # #########################################################################
 
 class CandidateFact(BaseModel):
@@ -121,6 +121,12 @@ class ExtractedReasoningStep(BaseModel):
     observation: str = Field(description='What was learned or observed from the action')
     alternatives_considered: typing.Optional[str] = Field(default=None, description='Other approaches that were weighed and rejected')
     confidence: float = Field(description='Confidence in the extraction, 0.0 to 1.0')
+
+class HypotheticalLessonSet(BaseModel):
+    lessons: typing.List[str] = Field(description='2 or 3 one-sentence lessons, each a different guess')
+
+class LessonTriggerSet(BaseModel):
+    triggers: typing.List[str] = Field(description='2 to 4 sentences, each a different situation in which the lesson applies')
 
 class ReasoningChainInput(BaseModel):
     task: str = Field(description='The task that was solved')

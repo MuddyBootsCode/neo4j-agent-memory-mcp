@@ -231,17 +231,194 @@ def sample_evenly(items: list, k: int) -> list:
     return [items[i] for i in idxs[:k]]
 
 
-def lesson_id(repo: str, kind: str, embedding_text: str) -> str:
+def lesson_id(repo: str, kind: str, canonical_text: str) -> str:
     """Stable pool id: the same lesson text in the same repo gets the same id
-    across corpus rebuilds, so labels survive a rebuild that reproduces it."""
-    h = hashlib.sha1(f"{repo}|{kind}|{embedding_text.strip()}".encode("utf-8"))
+    across corpus rebuilds, so labels survive a rebuild that reproduces it.
+
+    Keyed on the canonical text (``lesson_text``), never on what was
+    embedded (``embedding_input``) — index-side experiments change the
+    latter, and an id that moved with it would detach every label
+    (MUD-456).
+    """
+    h = hashlib.sha1(f"{repo}|{kind}|{canonical_text.strip()}".encode("utf-8"))
     return h.hexdigest()[:12]
 
 
+def query_fingerprint(query: dict, protocol: str = "prompt") -> str:
+    """Content hash of a query: exactly what a label was made against.
+
+    Labels are keyed ``"<query_id>:<lesson_id>"`` and step4 resumes on that
+    key, so a query whose text changes under the same id is skipped as
+    already labelled and then scored against ground truth built for the old
+    text — silently, with no error and wrong numbers. The fingerprint is
+    what makes that detectable (MUD-460).
+
+    Covers everything the labeller sees: the query text, the files, the
+    failing call for an error-keyed set, and ``protocol`` — the rubric it
+    was judged under (GOLDEN_LABEL_RUBRIC), because "would this lesson
+    help at this prompt" and "would it help with this failure" are
+    different questions and their verdicts do not mix. Not the id, so
+    renumbering a set does not invalidate it.
+
+    Files are taken in the order given and in full. Each consumer renders
+    its own slice — step4 shows the labeller ``files[:10]`` as given,
+    step3b shows four sorted basenames — so the order decides what is
+    actually seen once a query carries more than ten. Fingerprinting the
+    whole ordered list is a superset of every such slice: it can
+    invalidate a shade more than strictly necessary, which costs a
+    relabel, and it can never miss a change that mattered, which costs a
+    wrong number (MUD-460, Codex review).
+    """
+    payload = json.dumps({
+        "prompt": query.get("prompt", ""),
+        "files": list(query.get("files") or []),
+        "tool": query.get("tool"),
+        "attempt": query.get("attempt"),
+        "protocol": protocol,
+    }, sort_keys=True, default=str)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def stale_label_keys(labels: dict, queries: list[dict], stored: dict,
+                     protocol: str = "prompt") -> set[str]:
+    """Label keys whose query has changed since it was labelled.
+
+    ``stored`` maps str(query_id) to the fingerprint recorded when the
+    labels were written. A query with no stored fingerprint is left alone:
+    runs labelled before fingerprints existed are still valid evidence.
+    """
+    changed = {
+        str(q["query_id"]) for q in queries
+        if str(q["query_id"]) in stored
+        and stored[str(q["query_id"])] != query_fingerprint(q, protocol)
+    }
+    if not changed:
+        return set()
+    return {key for key in labels if key.split(":", 1)[0] in changed}
+
+
+def _pool_ids_by_repo(pool: list[dict]) -> dict[str, set[str]]:
+    by_repo: dict[str, set[str]] = {}
+    for item in pool:
+        by_repo.setdefault(item["repo"], set()).add(item["id"])
+    return by_repo
+
+
+def unlabeled_pairs(labels: dict, queries: list[dict], pool: list[dict]) -> int:
+    """(query, lesson) pairs in the same repo that carry no verdict.
+
+    A labeller that omits an id, or a relabel that died between deleting
+    the old verdicts and writing the new ones, leaves holes here. step5
+    would not notice: an unlabelled pair is simply absent from the recall
+    denominator and never counts as a hit, so the scores shift quietly
+    rather than failing (MUD-460, Codex review).
+    """
+    by_repo = _pool_ids_by_repo(pool)
+    return sum(
+        1
+        for q in queries
+        for lid in by_repo.get(q["repo"], ())
+        if f"{q['query_id']}:{lid}" not in labels
+    )
+
+
+def wholly_unlabelled(labels: dict, queries: list[dict], pool: list[dict]) -> set:
+    """Queries carrying no verdict at all against the lessons they owe.
+
+    Separate from the global unlabelled tolerance, and not reachable by
+    it: on the p4-live shape one query's 287 pairs is exactly 1.0000% of
+    28,700, so a single interrupted relabel lands precisely on a 1% bar.
+    Such a query scores as all-misses with its relevant lessons absent
+    from the denominator, which is a wrong number rather than a missing
+    one (MUD-460, Codex review).
+    """
+    by_repo = _pool_ids_by_repo(pool)
+    return {
+        q["query_id"]
+        for q in queries
+        if by_repo.get(q["repo"])
+        and not any(f"{q['query_id']}:{lid}" in labels for lid in by_repo[q["repo"]])
+    }
+
+
+def fingerprints_for_labelled(labels: dict, queries: list[dict],
+                              protocol: str = "prompt") -> dict:
+    """Fingerprints for every query that has at least one verdict.
+
+    The fingerprint answers "which text were these judged against", not
+    "is this query finished". Withholding it until a query is complete
+    leaves a half-labelled query unfingerprinted, and a text change there
+    would let step4 keep the chunks already saved — judged against the old
+    prompt — and top them up against the new one, then certify the mixture
+    as coherent. Completeness is a separate question, answered by
+    :func:`unlabeled_pairs`.
+    """
+    labelled = {key.split(":", 1)[0] for key in labels}
+    return {
+        str(q["query_id"]): query_fingerprint(q, protocol)
+        for q in queries
+        if str(q["query_id"]) in labelled
+    }
+
+
+def rewrite_lessons(entry) -> list[str]:
+    """The guesses in a rewrites.json entry, in either shape.
+
+    Entries written before provenance existed are a bare list; entries
+    written since are ``{"fingerprint": ..., "lessons": [...]}``.
+    """
+    if isinstance(entry, dict):
+        return list(entry.get("lessons") or [])
+    return list(entry or [])
+
+
+def stale_rewrites(store: dict, queries: list[dict]) -> set[str]:
+    """Rewrite entries whose query has changed since they were generated.
+
+    HyDE guesses are keyed by query_id and step5 attaches them the same
+    way, so a query regenerated under its own id would silently inherit
+    the guesses written for the prompt it replaced (MUD-459, Codex
+    review). An entry with no fingerprint predates this and is left alone;
+    step5 reports how many of those it is trusting.
+    """
+    return {
+        str(q["query_id"])
+        for q in queries
+        if isinstance(store.get(str(q["query_id"])), dict)
+        and store[str(q["query_id"])].get("fingerprint")
+        and store[str(q["query_id"])]["fingerprint"] != query_fingerprint(q)
+    }
+
+
 def lesson_text(kind: str, props: dict) -> str:
+    """The canonical lesson text: what identifies a lesson."""
     from agent_memory_mcp.mcp._coding_tools import memory_embedding_text
 
     return memory_embedding_text(kind, props)
+
+
+def embedding_input(kind: str, props: dict, repo: str, files: list[str],
+                    triggers: list[str] | None = None) -> str:
+    """What the embedder is given for a lesson: the canonical text, plus
+    whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456) and the lesson's
+    trigger sentences when the run has them (MUD-457)."""
+    from agent_memory_mcp.mcp._coding_tools import memory_embedding_input
+
+    return memory_embedding_input(kind, props, repo=repo, files=files, triggers=triggers)
+
+
+def context_prefix() -> list[str]:
+    """The prefix parts this process would embed with, for the run record."""
+    from agent_memory_mcp.mcp._coding_tools import CONTEXT_PREFIX
+
+    return list(CONTEXT_PREFIX)
+
+
+def symptom_only() -> bool:
+    """Whether this process embeds symptoms alone (MUD-460)."""
+    from agent_memory_mcp.mcp._coding_tools import SYMPTOM_ONLY
+
+    return SYMPTOM_ONLY
 
 
 async def drop_database(name: str) -> None:

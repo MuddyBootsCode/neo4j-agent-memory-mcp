@@ -17,11 +17,16 @@ import os
 import sys
 import time
 
-from lib import LABEL_MODEL, PRICE, load_json, result_path, save_json
+from lib import (LABEL_MODEL, PRICE, fingerprints_for_labelled, load_json, result_path,
+                 save_json, stale_label_keys)
 
 CHUNK = int(os.environ.get("GOLDEN_LABEL_CHUNK", "50"))
 EFFORT = os.environ.get("GOLDEN_LABEL_EFFORT", "medium")
 CONCURRENCY = int(os.environ.get("GOLDEN_LABEL_CONCURRENCY", "4"))
+# "error" labels an error-keyed query set (MUD-460): the query is a failing
+# tool result, not a human prompt, and the question is what would help the
+# assistant that just saw it.
+RUBRIC_KIND = os.environ.get("GOLDEN_LABEL_RUBRIC", "prompt").strip().lower()
 
 RUBRIC = """\
 You are building a relevance benchmark for a coding assistant's memory. The \
@@ -40,6 +45,29 @@ if the prompt touches the behaviour the lesson describes.
 
 Be strict. Most lessons are irrelevant to most prompts. Return a verdict for \
 every lesson id, including the irrelevant ones.
+
+STORED LESSONS (repository: {repo}):
+{lessons}
+"""
+
+ERROR_RUBRIC = """\
+You are building a relevance benchmark for a coding assistant's memory. The \
+assistant stores short lessons learned in earlier work sessions on a \
+repository: decisions (what was chosen and why), gotchas (constraints that \
+cost time to discover), and dead ends (attempts that failed and why).
+
+You will be shown a tool call that just FAILED during a later session, the \
+error it returned, the files that session had edited before it, and a \
+numbered list of stored lessons. The assistant is about to react to this \
+failure. For each lesson decide whether injecting it right now would \
+materially help: it explains this failure, gives the fix or the workaround, \
+or says that this approach was already tried and why it does not work. \
+Sharing vocabulary, the same tool, the same subsystem, or the same file is \
+not enough on its own — the lesson has to bear on THIS failure.
+
+Be strict. Most lessons are irrelevant to most failures, and many failures \
+are ordinary mistakes no stored lesson could have prevented. Return a \
+verdict for every lesson id, including the irrelevant ones.
 
 STORED LESSONS (repository: {repo}):
 {lessons}
@@ -81,13 +109,25 @@ def _cost(usage) -> float:
     ) / 1_000_000
 
 
-async def _label_one(client, system, q: dict, ids: list[str]) -> tuple[dict | None, object, float]:
+def _user_message(q: dict, ids: list[str]) -> str:
     files = ", ".join(q["files"][:10]) or "(none)"
-    user = (
+    if RUBRIC_KIND == "error":
+        attempt = f"{q.get('tool') or 'tool'}: {q.get('attempt') or ''}".strip(": ")
+        return (
+            f"Files edited in this session before the failure: {files}\n\n"
+            f"THE CALL THAT FAILED:\n{attempt}\n\n"
+            f"THE ERROR IT RETURNED:\n{q['prompt']}\n\n"
+            f"Return one verdict per lesson id ({len(ids)} ids)."
+        )
+    return (
         f"Files edited in this session before the prompt: {files}\n\n"
         f"DEVELOPER PROMPT:\n{q['prompt']}\n\n"
         f"Return one verdict per lesson id ({len(ids)} ids)."
     )
+
+
+async def _label_one(client, system, q: dict, ids: list[str]) -> tuple[dict | None, object, float]:
+    user = _user_message(q, ids)
     t0 = time.time()
     response = await client.messages.create(
         model=LABEL_MODEL,
@@ -115,6 +155,36 @@ async def main() -> None:
     labels: dict[str, bool] = load_json("labels.json", {})
     usage_log: list[dict] = load_json("label_usage.json", [])
 
+    # Resume is keyed on "<query_id>:<lesson_id>", so a regenerated query
+    # under the same id would be skipped as already labelled and scored
+    # against ground truth built for its old text. Drop those labels here;
+    # the calls below relabel them (MUD-460, Codex review).
+    fingerprints: dict[str, str] = load_json("query_fingerprints.json", {}) or {}
+    stale = stale_label_keys(labels, queries, fingerprints, RUBRIC_KIND)
+    if stale:
+        changed = sorted({int(k.split(":", 1)[0]) for k in stale})
+        for key in stale:
+            del labels[key]
+        print(f"{len(changed)} query(ies) changed since they were labelled "
+              f"({', '.join(f'q{c}' for c in changed[:8])}"
+              f"{'...' if len(changed) > 8 else ''}); dropped {len(stale)} stale labels, "
+              f"they will be relabelled")
+        save_json("labels.json", labels)
+
+    def _record_provenance() -> None:
+        """Fingerprint every query that now has a verdict, at each save.
+
+        The claim is which text these labels judged, so it travels with
+        the first chunk: a run interrupted between chunks must leave its
+        partial labels tied to the prompt they were made against, or a
+        text change would let the next run keep them and top them up
+        against the new one. Whether a query is finished is a separate
+        question, and step5 answers it with unlabeled_pairs."""
+        fingerprints.update(fingerprints_for_labelled(labels, queries, RUBRIC_KIND))
+        save_json("query_fingerprints.json", fingerprints)
+
+    _record_provenance()
+
     client = anthropic.AsyncAnthropic()
     sem = asyncio.Semaphore(CONCURRENCY)
     by_repo: dict[str, list[dict]] = {}
@@ -139,10 +209,17 @@ async def main() -> None:
             "query_id": q["query_id"], "repo": repo, "chunk": ci, "model": LABEL_MODEL, "effort": EFFORT,
             "input": u.input_tokens, "output": u.output_tokens,
             "cache_write": u.cache_creation_input_tokens, "cache_read": u.cache_read_input_tokens,
-            "cost_usd": round(cost, 5), "elapsed_s": round(elapsed, 1),
+            "cost_usd": round(cost, 5), "elapsed_s": round(elapsed, 1), "rubric": RUBRIC_KIND,
             "missing": len(missing), "relevant": sum(verdicts.values()),
         })
         if state["calls"] % 10 == 0:
+            # Provenance before the labels it certifies. A crash between
+            # the two writes then leaves a fingerprint covering fewer
+            # verdicts than it claims, which is the safe direction: the
+            # labels that exist are still tied to the text and rubric that
+            # produced them, and the shortfall is what unlabeled_pairs is
+            # for. The other order leaves verdicts nothing vouches for.
+            _record_provenance()
             save_json("labels.json", labels)
             save_json("label_usage.json", usage_log)
         print(
@@ -162,7 +239,8 @@ async def main() -> None:
             ids = [it["id"] for it in chunk]
             system = [{
                 "type": "text",
-                "text": RUBRIC.format(repo=repo, lessons="\n".join(_lesson_line(it) for it in chunk)),
+                "text": (ERROR_RUBRIC if RUBRIC_KIND == "error" else RUBRIC).format(
+                    repo=repo, lessons="\n".join(_lesson_line(it) for it in chunk)),
                 "cache_control": {"type": "ephemeral"},
             }]
             todo = [q for q in repo_queries if any(f"{q['query_id']}:{lid}" not in labels for lid in ids)]
@@ -180,6 +258,7 @@ async def main() -> None:
                     )
             await asyncio.gather(*(run(q, ci, repo, system, ids) for q in todo[2:]))
 
+    _record_provenance()
     save_json("labels.json", labels)
     save_json("label_usage.json", usage_log)
     relevant = sum(1 for v in labels.values() if v)

@@ -11,6 +11,11 @@ both indexes.
     NAM_EMBEDDING_MODEL=BAAI/bge-base-en-v1.5 NAM_EMBEDDING_DIMENSIONS=768 \\
     uv run --no-sync --project ../.. python step1b_materialize.py
 
+NAM_EMBED_CONTEXT_PREFIX (MUD-456) and GOLDEN_TRIGGERS (MUD-457, a path
+to a step1c triggers.json) change what is embedded without changing what
+identifies a lesson, so the labels still apply. What was used lands in
+corpus_stats.json.
+
 Copies pool.json, queries.json and labels.json from the source run into the
 new run directory so steps 5 and 6 work unchanged.
 """
@@ -23,7 +28,8 @@ import os
 import shutil
 import time
 
-from lib import GOLDEN_DB, HERE, drop_database, lesson_text, load_json, result_path, save_json, session_family
+from lib import (GOLDEN_DB, HERE, context_prefix, drop_database, embedding_input, lesson_text,
+                 load_json, result_path, save_json, session_family, symptom_only)
 from mem import LOCAL_EMBEDDING_CONFIG, open_client
 from step1_corpus import _create_database
 
@@ -34,6 +40,12 @@ from step1_corpus import _create_database
 # outcome prior (MUD-407) reads exactly these, so a rebuild that dropped
 # them would measure a ranker with no history to read.
 _COUNTERS = ("evidence_count", "served_count", "helpful", "harmful", "outcome_weight")
+
+# Artifacts a rematerialized run inherits from the pool it was built from.
+# Labels and the fingerprints that certify them must move together.
+COPIED_ARTIFACTS = (
+    "queries.json", "labels.json", "session_split.json", "query_fingerprints.json",
+)
 
 
 def _counters_from(item: dict) -> dict:
@@ -72,9 +84,25 @@ async def main() -> None:
     src_dir = os.path.dirname(src)
     with open(src, encoding="utf-8") as fh:
         pool = json.load(fh)
-    for name in ("queries.json", "labels.json", "session_split.json"):
+    # query_fingerprints.json travels with labels.json or the guard it
+    # feeds is defeated by a copy: step5 treats a run with no fingerprint
+    # file as pre-fingerprint evidence and trusts it (MUD-460, Codex).
+    for name in COPIED_ARTIFACTS:
         if os.path.exists(os.path.join(src_dir, name)):
             shutil.copy(os.path.join(src_dir, name), result_path(name))
+
+    # Trigger sentences (MUD-457): keyed by lesson id, which the canonical
+    # text fixes, so one step1c generation serves every E2 variant.
+    triggers: dict[str, list[str]] = {}
+    triggers_from = os.environ.get("GOLDEN_TRIGGERS")
+    if triggers_from:
+        triggers_from = (triggers_from if os.path.isabs(triggers_from)
+                         else os.path.join(HERE, triggers_from))
+        with open(triggers_from, encoding="utf-8") as fh:
+            triggers = json.load(fh)
+        if os.path.abspath(triggers_from) != os.path.abspath(result_path("triggers.json")):
+            shutil.copy(triggers_from, result_path("triggers.json"))
+        print(f"triggers: {sum(1 for v in triggers.values() if v)} lessons carry them")
 
     # Holdout: a pool exported from the live store carries lessons from the
     # sessions the queries came from (and their subagents). Replaying a
@@ -109,7 +137,10 @@ async def main() -> None:
             text = lesson_text(it["kind"], props)
             if text != it["text"]:
                 mismatched += 1
-            vector = await _embed(client, text)
+            # Canonical text keys the id and the labels; the embedder sees
+            # whatever NAM_EMBED_CONTEXT_PREFIX asks for (MUD-456).
+            vector = await _embed(client, embedding_input(
+                it["kind"], props, it["repo"], it["files"], triggers.get(it["id"])))
             if first:
                 ok = await ensure_coding_memory_index(client)
                 print(f"indexes ensured: {ok}")
@@ -128,7 +159,11 @@ async def main() -> None:
     save_json("pool.json", pool)
     save_json("corpus_stats.json", {"materialized_from": src, "lessons": len(pool),
                                     "embedding": LOCAL_EMBEDDING_CONFIG, "text_mismatches": mismatched,
-                                    "counters_restored": restored})
+                                    "counters_restored": restored,
+                                    "context_prefix": context_prefix(),
+                                    "symptom_only": symptom_only(),
+                                    "triggers_from": triggers_from,
+                                    "triggers_used": sum(1 for it in pool if triggers.get(it["id"]))})
     print(f"materialized {len(pool)} lessons in {time.time() - t0:.0f}s; "
           f"{mismatched} whose rebuilt text differs from the pool (labels for those are approximate); "
           f"{restored} with lifecycle counters restored")

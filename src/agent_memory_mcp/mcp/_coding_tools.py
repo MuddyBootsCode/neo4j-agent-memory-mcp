@@ -256,6 +256,28 @@ _FULLTEXT_LEG_QUERY = """
     YIELD node AS m, score
 """ + _LEG_TAIL
 
+# Anchor leg (MUD-461, P5 E6). Sharing an edited file with a lesson
+# explains a fifth of labelled relevance at ~3x lift over chance, but is
+# only ~11% precise on its own, and as a score boost it measured at zero
+# effect (MUD-403). Here it is a leg: the lessons anchored to the files
+# being edited, ranked by cosine among themselves, fused with the others.
+# Anchored lessons are few, so this reads them directly and scores them in
+# the query rather than going through the vector index, which returns a
+# global top-k that the file filter would then mostly throw away.
+ANCHOR_LEG_ENABLED = os.environ.get("NAM_RECALL_ANCHOR_LEG", "0") == "1"
+# How many of the returned slots lessons found ONLY by the anchor may take.
+# Uncapped, a query touching a well-anchored file fills the list with
+# lessons that share a filename and nothing else.
+ANCHOR_SLOTS = int(os.environ.get("NAM_RECALL_ANCHOR_SLOTS", "2"))
+
+_ANCHOR_LEG_QUERY = f"""
+    MATCH (m:{SHARED_RECALL_LABEL})-[:ABOUT]->(af:CodeFile)
+    WHERE af.repo = $repo AND af.path IN $files
+    WITH DISTINCT m
+    WITH m, CASE WHEN m.embedding IS NULL THEN 0.0
+                 ELSE vector.similarity.cosine(m.embedding, $embedding) END AS score
+""" + _LEG_TAIL
+
 # Kept under its old name for the recall sweep and probe, which import it:
 # the vector leg alone, ranked by cosine.
 _HYBRID_QUERY = _VECTOR_LEG_QUERY
@@ -318,6 +340,86 @@ def memory_embedding_text(kind: str, props: dict[str, Any]) -> str:
     else:
         body = str(props.get("text", "")).strip()
     return f"{symptom} | {body}" if symptom else body
+
+
+# Context prefix (MUD-456, P5 E1). Anthropic's contextual retrieval, on
+# lessons instead of chunks: prepend where the lesson comes from before
+# embedding it, so a prompt that shares no words with the fix can still
+# reach it through the repo, the kind, or the files it is anchored to.
+# NAM_EMBED_CONTEXT_PREFIX names the parts ("1" for all of them), which is
+# what makes the E1 ablation an env change and nothing else.
+_CONTEXT_PREFIX_PARTS = ("repo", "kind", "files")
+_MAX_PREFIX_FILES = 4
+
+
+def context_prefix_spec(raw: str) -> tuple[str, ...]:
+    """Parse NAM_EMBED_CONTEXT_PREFIX into prefix parts, in format order."""
+    tokens = {t.strip().lower() for t in (raw or "").split(",") if t.strip()}
+    if "1" in tokens:
+        return _CONTEXT_PREFIX_PARTS
+    return tuple(part for part in _CONTEXT_PREFIX_PARTS if part in tokens)
+
+
+CONTEXT_PREFIX: tuple[str, ...] = context_prefix_spec(
+    os.environ.get("NAM_EMBED_CONTEXT_PREFIX", "")
+)
+
+# Symptom-only index (MUD-460, P5 E5). An error-keyed query is a symptom,
+# and matching it against the fix is the mismatch this whole phase is
+# about. Lessons with no symptom keep their full text — half the pool has
+# none, and embedding nothing would make them invisible rather than
+# lower-ranked.
+SYMPTOM_ONLY = os.environ.get("NAM_EMBED_SYMPTOM_ONLY", "0") == "1"
+
+
+def _prefix_basenames(files: list[str]) -> str:
+    """Up to four distinct file basenames, sorted.
+
+    Sorted rather than as given: capture has the extractor's order and the
+    backfill has the graph's, and a lesson that embeds differently
+    depending on which wrote it is two points in the vector space.
+    """
+    names = sorted({os.path.basename(str(path)) for path in files if path})
+    return ", ".join(names[:_MAX_PREFIX_FILES])
+
+
+def memory_embedding_input(
+    kind: str,
+    props: dict[str, Any],
+    *,
+    repo: str | None = None,
+    files: list[str] | None = None,
+    triggers: list[str] | None = None,
+) -> str:
+    """The string handed to the embedder for a lesson.
+
+    The canonical text by default, optionally between a context prefix
+    (MUD-456) and the lesson's trigger sentences (MUD-457). What varies
+    here must never reach ``memory_embedding_text``: that one identifies a
+    lesson, and a lesson that gains a prefix or a trigger is the same
+    lesson.
+    """
+    canonical = memory_embedding_text(kind, props)
+    if not canonical.strip():
+        return canonical
+    if SYMPTOM_ONLY:
+        symptom = str(props.get("symptom") or "").strip()
+        if symptom:
+            canonical = symptom
+    said = " ".join(t.strip() for t in (triggers or []) if t and t.strip())
+    if said:
+        canonical = f"{canonical} | {said}"
+    parts: list[str] = []
+    for part in CONTEXT_PREFIX:
+        if part == "repo" and repo:
+            parts.append(str(repo))
+        elif part == "kind" and kind:
+            parts.append(kind.lower())
+        elif part == "files" and files:
+            names = _prefix_basenames(files)
+            if names:
+                parts.append(names)
+    return f"{' · '.join(parts)} | {canonical}" if parts else canonical
 
 
 def _embedder(client: Any) -> Any:
@@ -412,6 +514,61 @@ async def fulltext_leg(
         return []
 
 
+async def anchor_leg(
+    client: Any, embedding: list[float], *, repo: str, files: list[str],
+    task_key: str | None, limit: int = LEG_LIMIT,
+) -> list[dict[str, Any]]:
+    """Lessons anchored to ``files``, ranked by cosine among themselves.
+
+    Empty when there are no files to anchor on: without them the match
+    would be every lesson in the repo. Degrades to [] rather than raising,
+    like the fulltext leg — a store on a Neo4j without
+    ``vector.similarity.cosine`` loses this leg, not the recall.
+    """
+    if not files or embedding is None:
+        return []
+    try:
+        return await client.graph.execute_read(
+            _ANCHOR_LEG_QUERY,
+            {"embedding": embedding, "limit": limit,
+             "repo": repo, "files": files, "task_key": task_key},
+        )
+    except Exception as e:
+        logger.warning(f"anchor leg unavailable: {e}")
+        return []
+
+
+def cap_anchor_slots(
+    rows: list[dict[str, Any]], *, limit: int, anchor_leg: int, slots: int,
+    primary_keys: set[str] | frozenset[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """Truncate to ``limit``, letting at most ``slots`` rows through that
+    only the anchor leg found.
+
+    A row the vector or BM25 leg also ranked is not anchor-only and is
+    never capped: the anchor raised it, which is the point.
+
+    ``primary_keys`` are the normalized lesson texts those legs returned,
+    and they are what makes that check correct. The same lesson is several
+    nodes with distinct eids, so ``dedupe_fused`` may have kept the anchor
+    leg's copy and dropped the vector leg's; the surviving row's ``ranks``
+    then say anchor-only about a lesson another leg had independently
+    retrieved, and capping it would discard the lesson entirely.
+    """
+    kept: list[dict[str, Any]] = []
+    anchor_only = 0
+    for row in rows:
+        if (set(row.get("ranks") or {}) == {anchor_leg}
+                and _lesson_dedup_key(row) not in primary_keys):
+            if anchor_only >= slots:
+                continue
+            anchor_only += 1
+        kept.append(row)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
 def outcome_prior(props: dict[str, Any] | None) -> float:
     """Multiplier for a lesson's fused score from its outcome history.
 
@@ -502,10 +659,16 @@ def dedupe_fused(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def retrieve_candidates(
     client: Any, *, prompt: str, repo: str, files: list[str],
     task_key: str | None, limit: int, embedding: list[float] | None = None,
+    extra_embeddings: list[list[float]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Fused candidate rows for ``prompt`` and the strategy that produced
     them: "fused" when both legs ran, "vector" / "fulltext" when only one
-    could, None when neither (no embedder and no usable terms)."""
+    could, None when neither (no embedder and no usable terms).
+
+    ``extra_embeddings`` each add a vector leg of their own (MUD-459): a
+    guessed lesson is fused beside the prompt, not concatenated into it,
+    so a bad guess costs a leg's worth of rank and never the prompt.
+    """
     if embedding is None:
         embedding = await _embed(client, (prompt or "").strip())
     legs: list[list[dict[str, Any]]] = []
@@ -513,17 +676,46 @@ async def retrieve_candidates(
     if embedding is not None:
         legs.append(await vector_leg(client, embedding, repo=repo, files=files, task_key=task_key))
         names.append("vector")
+    for extra in extra_embeddings or []:
+        if extra is None:
+            continue
+        legs.append(await vector_leg(client, extra, repo=repo, files=files, task_key=task_key))
+        names.append("hypothetical")
     text_rows = await fulltext_leg(client, prompt, repo=repo, files=files, task_key=task_key)
     if text_rows or not legs:
         if text_rows:
             legs.append(text_rows)
             names.append("fulltext")
+    anchor_index = None
+    # Keyed on lesson text, not eid: dedupe_fused collapses duplicate nodes
+    # and may keep the anchor leg's copy of a lesson these legs also found.
+    primary_keys = {key for leg in legs for row in leg
+                    if (key := _lesson_dedup_key(row))}
+    if ANCHOR_LEG_ENABLED and embedding is not None:
+        anchor_rows = await anchor_leg(client, embedding, repo=repo, files=files, task_key=task_key)
+        if anchor_rows:
+            anchor_index = len(legs)
+            legs.append(anchor_rows)
+            names.append("anchor")
     if not legs:
         return [], None
     # Dedup before truncating so freed slots backfill with the next-ranked
     # distinct lessons instead of shrinking the recall.
-    fused = dedupe_fused(rrf_fuse(legs))[:limit]
-    return fused, ("fused" if len(names) == 2 else names[0])
+    fused = dedupe_fused(rrf_fuse(legs))
+    if anchor_index is None:
+        fused = fused[:limit]
+    else:
+        fused = cap_anchor_slots(fused, limit=limit, anchor_leg=anchor_index,
+                                 slots=ANCHOR_SLOTS, primary_keys=primary_keys)
+    # The strategy names the two retrieval kinds. The anchor and
+    # hypothetical legs are modifiers on top of them, not strategies of
+    # their own, and several hypothetical legs are still one kind.
+    kinds = [k for k in ("vector", "fulltext") if k in names]
+    if len(kinds) == 2:
+        return fused, "fused"
+    if kinds:
+        return fused, kinds[0]
+    return fused, ("hypothetical" if "hypothetical" in names else "anchor")
 
 
 def _candidate_block(memories: list[dict[str, Any]]) -> str:
@@ -935,7 +1127,10 @@ async def capture_transcript(
         for c in candidates:
             vector = None
             if c["kind"] in RECALL_KINDS:
-                vector = await _embed(client, memory_embedding_text(c["kind"], _node_props(c)))
+                vector = await _embed(client, memory_embedding_input(
+                    c["kind"], _node_props(c),
+                    repo=repo, files=list(c.get("anchor_files") or []),
+                ))
                 for eid, line in await _neighbors(client, repo, vector):
                     if eid not in seen_eids:
                         seen_eids.add(eid)

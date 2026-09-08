@@ -206,6 +206,87 @@ class TestTouchedFilesAndErrorSteps:
             {"tool": "tool", "input": "", "file": None, "error": "boom"},
         ]
 
+    def test_error_steps_can_be_bounded_to_a_window_of_records(self, tmp_path):
+        """The golden set replays a prompt at a known transcript line and
+        asks what had just failed (MUD-458), so the reader takes a window.
+        The bound is on the failing result, not on the call that made it."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make old"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "old failure"}]),
+                _assistant([{"type": "tool_use", "id": "b2", "name": "Bash", "input": {"command": "make new"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b2", "is_error": True, "content": "recent failure"}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "later failure"}]),
+            ],
+        )
+
+        assert [s["error"] for s in error_steps(path, "/repo", before_line=4)] == [
+            "old failure", "recent failure"]
+        assert [s["error"] for s in error_steps(path, "/repo", before_line=4, since_line=2)] == [
+            "recent failure"]
+        assert error_steps(path, "/repo", before_line=0) == []
+
+    def test_error_steps_can_report_where_each_failure_sat(self, tmp_path):
+        """The error-keyed query set (MUD-460) replays each failure with the
+        files edited before it, so it needs the record index."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "boom"}]),
+            ],
+        )
+
+        assert error_steps(path, "/repo", with_index=True) == [
+            {"tool": "Bash", "input": "make", "file": None, "error": "boom", "index": 1}
+        ]
+        assert "index" not in error_steps(path, "/repo")[0]
+
+    def test_error_step_indices_are_physical_lines(self, tmp_path):
+        """The golden set's query line comes from a physical-line count
+        (lib.iter_transcript_lines), so a blank or malformed line must move
+        the error's index with it. Counting parsed records instead lets a
+        failure that happened AFTER a prompt land before it."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = tmp_path / "t.jsonl"
+        path.write_text(
+            "\n"
+            "not json\n"
+            + json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make"}}]}}) + "\n"
+            + json.dumps({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "boom"}]}}) + "\n",
+            encoding="utf-8",
+        )
+
+        assert error_steps(str(path), "/repo", with_index=True)[0]["index"] == 3
+        assert error_steps(str(path), "/repo", before_line=3) == []
+
+    def test_a_long_failure_keeps_its_last_line(self, tmp_path):
+        """A traceback's diagnosis is its last line. The error-keyed query
+        set (MUD-460) uses this text as the query, so the tail surviving is
+        the property it rests on, not an incidental."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        traceback = "Traceback (most recent call last): " + ("File x line y, in z " * 200) + "ValueError: theme has no attribute custom_css"
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "pytest"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": traceback}]),
+            ],
+        )
+
+        error = error_steps(path, "/repo")[0]["error"]
+        assert error.startswith("Traceback (most recent call last):")
+        assert error.endswith("ValueError: theme has no attribute custom_css")
+
     def test_error_steps_require_the_is_error_flag(self, tmp_path):
         """A successful `cat` of a file that mentions "Traceback" is not a
         dead end. Claude Code flags every failed tool result with is_error

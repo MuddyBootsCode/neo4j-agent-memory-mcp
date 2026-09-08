@@ -164,6 +164,34 @@ class BamlSyncClient:
                 "text": text,"reference_time": reference_time,
             })
             return typing.cast(types.TemporalExtraction, __result__.cast_to(types, types, stream_types, False, __runtime__))
+    def HypotheticalLessons(self, prompt: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.HypotheticalLessonSet:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            __stream__ = self.stream.HypotheticalLessons(prompt=prompt,files=files,
+                baml_options=baml_options)
+            return __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = self.__options.merge_options(baml_options).call_function_sync(function_name="HypotheticalLessons", args={
+                "prompt": prompt,"files": files,
+            })
+            return typing.cast(types.HypotheticalLessonSet, __result__.cast_to(types, types, stream_types, False, __runtime__))
+    def LessonTriggers(self, kind: str,lesson: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.LessonTriggerSet:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            __stream__ = self.stream.LessonTriggers(kind=kind,lesson=lesson,files=files,
+                baml_options=baml_options)
+            return __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = self.__options.merge_options(baml_options).call_function_sync(function_name="LessonTriggers", args={
+                "kind": kind,"lesson": lesson,"files": files,
+            })
+            return typing.cast(types.LessonTriggerSet, __result__.cast_to(types, types, stream_types, False, __runtime__))
     def RateServedLessons(self, lessons: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> types.ServedRatings:
@@ -275,6 +303,30 @@ class BamlStreamClient:
           lambda x: typing.cast(types.TemporalExtraction, x.cast_to(types, types, stream_types, False, __runtime__)),
           __ctx__,
         )
+    def HypotheticalLessons(self, prompt: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.HypotheticalLessonSet, types.HypotheticalLessonSet]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_sync_stream(function_name="HypotheticalLessons", args={
+            "prompt": prompt,"files": files,
+        })
+        return baml_py.BamlSyncStream[stream_types.HypotheticalLessonSet, types.HypotheticalLessonSet](
+          __result__,
+          lambda x: typing.cast(stream_types.HypotheticalLessonSet, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.HypotheticalLessonSet, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
+    def LessonTriggers(self, kind: str,lesson: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.LessonTriggerSet, types.LessonTriggerSet]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_sync_stream(function_name="LessonTriggers", args={
+            "kind": kind,"lesson": lesson,"files": files,
+        })
+        return baml_py.BamlSyncStream[stream_types.LessonTriggerSet, types.LessonTriggerSet](
+          __result__,
+          lambda x: typing.cast(stream_types.LessonTriggerSet, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.LessonTriggerSet, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
     def RateServedLessons(self, lessons: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.ServedRatings, types.ServedRatings]:
@@ -354,6 +406,20 @@ class BamlHttpRequestClient:
             "text": text,"reference_time": reference_time,
         }, mode="request")
         return __result__
+    def HypotheticalLessons(self, prompt: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="HypotheticalLessons", args={
+            "prompt": prompt,"files": files,
+        }, mode="request")
+        return __result__
+    def LessonTriggers(self, kind: str,lesson: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="LessonTriggers", args={
+            "kind": kind,"lesson": lesson,"files": files,
+        }, mode="request")
+        return __result__
     def RateServedLessons(self, lessons: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -416,6 +482,20 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTemporalContext", args={
             "text": text,"reference_time": reference_time,
+        }, mode="stream")
+        return __result__
+    def HypotheticalLessons(self, prompt: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="HypotheticalLessons", args={
+            "prompt": prompt,"files": files,
+        }, mode="stream")
+        return __result__
+    def LessonTriggers(self, kind: str,lesson: str,files: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = self.__options.merge_options(baml_options).create_http_request_sync(function_name="LessonTriggers", args={
+            "kind": kind,"lesson": lesson,"files": files,
         }, mode="stream")
         return __result__
     def RateServedLessons(self, lessons: str,transcript: str,
