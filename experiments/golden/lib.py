@@ -244,6 +244,45 @@ def lesson_id(repo: str, kind: str, canonical_text: str) -> str:
     return h.hexdigest()[:12]
 
 
+def query_fingerprint(query: dict) -> str:
+    """Content hash of a query: exactly what a label was made against.
+
+    Labels are keyed ``"<query_id>:<lesson_id>"`` and step4 resumes on that
+    key, so a query whose text changes under the same id is skipped as
+    already labelled and then scored against ground truth built for the old
+    text — silently, with no error and wrong numbers. The fingerprint is
+    what makes that detectable (MUD-460).
+
+    Covers everything the labeller sees: the query text, the files, and the
+    failing call for an error-keyed set. Not the id, so renumbering a set
+    does not invalidate it, and not the file order.
+    """
+    payload = json.dumps({
+        "prompt": query.get("prompt", ""),
+        "files": sorted(query.get("files") or []),
+        "tool": query.get("tool"),
+        "attempt": query.get("attempt"),
+    }, sort_keys=True, default=str)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def stale_label_keys(labels: dict, queries: list[dict], stored: dict) -> set[str]:
+    """Label keys whose query has changed since it was labelled.
+
+    ``stored`` maps str(query_id) to the fingerprint recorded when the
+    labels were written. A query with no stored fingerprint is left alone:
+    runs labelled before fingerprints existed are still valid evidence.
+    """
+    changed = {
+        str(q["query_id"]) for q in queries
+        if str(q["query_id"]) in stored
+        and stored[str(q["query_id"])] != query_fingerprint(q)
+    }
+    if not changed:
+        return set()
+    return {key for key in labels if key.split(":", 1)[0] in changed}
+
+
 def lesson_text(kind: str, props: dict) -> str:
     """The canonical lesson text: what identifies a lesson."""
     from agent_memory_mcp.mcp._coding_tools import memory_embedding_text

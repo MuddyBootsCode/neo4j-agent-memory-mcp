@@ -27,7 +27,8 @@ import json
 import os
 import time
 
-from lib import GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family
+from lib import (GOLDEN_DB, lesson_id, lesson_text, load_json, save_json, session_family,
+                 stale_label_keys)
 from mem import open_client
 
 CAP = 5
@@ -200,6 +201,17 @@ async def main() -> None:
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
+    # A query regenerated under its old id would be scored against labels
+    # made for its old text, silently (MUD-460, Codex review). Runs
+    # labelled before fingerprints existed have no file and are trusted.
+    stale = stale_label_keys(labels, queries, load_json("query_fingerprints.json", {}) or {})
+    if stale:
+        changed = sorted({int(k.split(":", 1)[0]) for k in stale})
+        raise SystemExit(
+            f"{len(changed)} query(ies) changed since they were labelled "
+            f"({', '.join(f'q{c}' for c in changed[:8])}{'...' if len(changed) > 8 else ''}); "
+            f"{len(stale)} labels are stale. Re-run step4 to relabel them."
+        )
     if HYDE_FROM:
         path = HYDE_FROM if os.path.isabs(HYDE_FROM) else os.path.join(os.path.dirname(os.path.abspath(__file__)), HYDE_FROM)
         with open(path, encoding="utf-8") as fh:
