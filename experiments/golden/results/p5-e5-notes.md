@@ -71,5 +71,38 @@ finding that the gap is corpus density rather than ranking. If error-time
 recall is revisited, the thing to change is what capture *stores* about a
 failure, not how retrieval reads it.
 
+## Codex review: the truncation defect, and why the conclusion stands
+
+The adversarial review found that the harvest cut each failure to its
+first 300 characters, and that 34 of the 68 committed queries hit that
+cap. It is a real defect and it is an own-goal: `error_steps` already
+middle-truncates to 600 characters, keeping head *and* tail, precisely
+because a traceback's diagnosis is its last line. Cutting the head off
+again discarded what production had preserved — q1004 lost its "unknown
+revision", q1065 its "Theme object has no attribute custom_css". Fixed:
+the query is now the failure as the reader returns it, and a regression
+pins the tail surviving.
+
+The review's stronger claim, that this "undermines the negative recall
+conclusion", does not hold. Split the committed labels by whether the
+query was truncated:
+
+| | queries | relevant | per query | have any relevant |
+|---|---|---|---|---|
+| hit the 300-char cap | 34 | 32 | 0.94 | 62% |
+| under the cap | 34 | 24 | 0.71 | 44% |
+
+**The truncated queries are the label-denser half**, not the starved one.
+If losing the diagnostic were what made the set sparse, the effect would
+run the other way. The sparsity is the corpus: 0.43% of pairs relevant
+against the prompt set's 3.60%, and every index-side variant flat within
+a point of the others, which is a ranking-independent signal.
+
+The committed `queries.json` was generated before the fix, so it does not
+match the current script; regenerating it invalidates the labels and costs
+another ~$13 of Opus. The evidence above says that rerun would sharpen the
+set without changing its verdict, so it is recorded here as an open option
+rather than taken.
+
 Same artifact policy as the other P5 runs; `queries.json`, `labels.json`
 and `label_usage.json` for the error set live once, under `p5-e5/`.
