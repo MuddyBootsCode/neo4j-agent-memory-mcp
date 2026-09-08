@@ -62,9 +62,14 @@ _EXPORT = _RECOUNT + """
 # Bound to the exported rows, with the exported old value as a guard: a
 # lesson a live capture touched between export and apply is left alone and
 # reported, so the export stays a complete rollback record (Codex F7).
+# The first SET takes the lesson's write lock before the guard reads the
+# count, so a reassertion committing concurrently is seen (and the row
+# reported as drifted) rather than overwritten (Codex F10).
 _APPLY = """
     UNWIND $rows AS r
-    MATCH (m) WHERE elementId(m) = r.eid AND coalesce(m.evidence_count, 1) = r.old
+    MATCH (m) WHERE elementId(m) = r.eid
+    SET m.evidence_count = coalesce(m.evidence_count, 1)
+    WITH m, r WHERE m.evidence_count = r.old
     SET m.evidence_count = r.new
     RETURN count(m) AS n
 """

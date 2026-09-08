@@ -230,3 +230,54 @@ async def test_sibling_subagents_reassert_once_per_family(memory_client):
     )
     assert out[0]["edges"] == 3          # every session keeps its edge
     assert out[0]["evidence"] == 2       # origin + one swarm family, not 4
+
+
+@pytest.mark.integration
+async def test_backfill_apply_does_not_overwrite_a_concurrent_reassert(memory_client, test_database):
+    """A reassertion committing while the backfill applies must survive and
+    the row must count as drifted (Codex F10): the apply takes the lesson's
+    lock before evaluating its old-value guard."""
+    import asyncio
+    import importlib.util
+    import os
+
+    from agent_memory_mcp.capture.cypher import anchored_memory_write, reassert_write, session_upsert
+
+    spec = importlib.util.spec_from_file_location(
+        "backfill_evidence_families",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "backfill_evidence_families.py"),
+    )
+    backfill = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(backfill)
+
+    ts = "2026-09-07T00:00:00Z"
+    g = memory_client.graph
+    for sid in ("origin-b", "other-b"):
+        await g.execute_write(*session_upsert("agent", sid, "repo-y", "main", None, ts))
+    rows = await g.execute_write(*anchored_memory_write(
+        "Gotcha", {"text": "backfill race probe", "confidence": 0.9}, "origin-b", "repo-y", [], None, ts,
+    ))
+    eid = rows[0]["eid"]  # evidence_count = 1
+
+    # tx1 reasserts from a new family and holds the lock open. A driver of
+    # this test's own loop: the session-scoped fixture lives on another.
+    from neo4j import AsyncGraphDatabase
+
+    driver = AsyncGraphDatabase.driver(
+        os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
+        auth=(os.environ.get("NEO4J_USER", "neo4j"), os.environ.get("NEO4J_PASSWORD", "graphmemory")),
+    )
+    async with driver, driver.session(database=test_database) as s1:
+        tx1 = await s1.begin_transaction()
+        q, p = reassert_write(eid, "other-b", ts)
+        await (await tx1.run(q, p)).consume()
+        # The backfill believes the count is 1 and wants to write 1 (a no-op recount).
+        apply = asyncio.create_task(g.execute_write(backfill._APPLY, {"rows": [{"eid": eid, "old": 1, "new": 1}]}))
+        await asyncio.sleep(0.5)
+        assert not apply.done()  # blocked on tx1's lock
+        await tx1.commit()
+        n = (await apply)[0]["n"]
+
+    out = await g.execute_read("MATCH (m) WHERE elementId(m) = $eid RETURN m.evidence_count AS e", {"eid": eid})
+    assert n == 0            # reported as drifted, not applied
+    assert out[0]["e"] == 2  # the concurrent reassertion survived
