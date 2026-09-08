@@ -256,6 +256,28 @@ _FULLTEXT_LEG_QUERY = """
     YIELD node AS m, score
 """ + _LEG_TAIL
 
+# Anchor leg (MUD-461, P5 E6). Sharing an edited file with a lesson
+# explains a fifth of labelled relevance at ~3x lift over chance, but is
+# only ~11% precise on its own, and as a score boost it measured at zero
+# effect (MUD-403). Here it is a leg: the lessons anchored to the files
+# being edited, ranked by cosine among themselves, fused with the others.
+# Anchored lessons are few, so this reads them directly and scores them in
+# the query rather than going through the vector index, which returns a
+# global top-k that the file filter would then mostly throw away.
+ANCHOR_LEG_ENABLED = os.environ.get("NAM_RECALL_ANCHOR_LEG", "0") == "1"
+# How many of the returned slots lessons found ONLY by the anchor may take.
+# Uncapped, a query touching a well-anchored file fills the list with
+# lessons that share a filename and nothing else.
+ANCHOR_SLOTS = int(os.environ.get("NAM_RECALL_ANCHOR_SLOTS", "2"))
+
+_ANCHOR_LEG_QUERY = f"""
+    MATCH (m:{SHARED_RECALL_LABEL})-[:ABOUT]->(af:CodeFile)
+    WHERE af.repo = $repo AND af.path IN $files
+    WITH DISTINCT m
+    WITH m, CASE WHEN m.embedding IS NULL THEN 0.0
+                 ELSE vector.similarity.cosine(m.embedding, $embedding) END AS score
+""" + _LEG_TAIL
+
 # Kept under its old name for the recall sweep and probe, which import it:
 # the vector leg alone, ranked by cosine.
 _HYBRID_QUERY = _VECTOR_LEG_QUERY
@@ -481,6 +503,52 @@ async def fulltext_leg(
         return []
 
 
+async def anchor_leg(
+    client: Any, embedding: list[float], *, repo: str, files: list[str],
+    task_key: str | None, limit: int = LEG_LIMIT,
+) -> list[dict[str, Any]]:
+    """Lessons anchored to ``files``, ranked by cosine among themselves.
+
+    Empty when there are no files to anchor on: without them the match
+    would be every lesson in the repo. Degrades to [] rather than raising,
+    like the fulltext leg — a store on a Neo4j without
+    ``vector.similarity.cosine`` loses this leg, not the recall.
+    """
+    if not files or embedding is None:
+        return []
+    try:
+        return await client.graph.execute_read(
+            _ANCHOR_LEG_QUERY,
+            {"embedding": embedding, "limit": limit,
+             "repo": repo, "files": files, "task_key": task_key},
+        )
+    except Exception as e:
+        logger.warning(f"anchor leg unavailable: {e}")
+        return []
+
+
+def cap_anchor_slots(
+    rows: list[dict[str, Any]], *, limit: int, anchor_leg: int, slots: int,
+) -> list[dict[str, Any]]:
+    """Truncate to ``limit``, letting at most ``slots`` rows through that
+    only the anchor leg found.
+
+    A row the vector or BM25 leg also ranked is not anchor-only and is
+    never capped: the anchor raised it, which is the point.
+    """
+    kept: list[dict[str, Any]] = []
+    anchor_only = 0
+    for row in rows:
+        if set(row.get("ranks") or {}) == {anchor_leg}:
+            if anchor_only >= slots:
+                continue
+            anchor_only += 1
+        kept.append(row)
+        if len(kept) >= limit:
+            break
+    return kept
+
+
 def outcome_prior(props: dict[str, Any] | None) -> float:
     """Multiplier for a lesson's fused score from its outcome history.
 
@@ -587,12 +655,24 @@ async def retrieve_candidates(
         if text_rows:
             legs.append(text_rows)
             names.append("fulltext")
+    anchor_index = None
+    if ANCHOR_LEG_ENABLED and embedding is not None:
+        anchor_rows = await anchor_leg(client, embedding, repo=repo, files=files, task_key=task_key)
+        if anchor_rows:
+            anchor_index = len(legs)
+            legs.append(anchor_rows)
+            names.append("anchor")
     if not legs:
         return [], None
     # Dedup before truncating so freed slots backfill with the next-ranked
     # distinct lessons instead of shrinking the recall.
-    fused = dedupe_fused(rrf_fuse(legs))[:limit]
-    return fused, ("fused" if len(names) == 2 else names[0])
+    fused = dedupe_fused(rrf_fuse(legs))
+    if anchor_index is None:
+        fused = fused[:limit]
+    else:
+        fused = cap_anchor_slots(fused, limit=limit, anchor_leg=anchor_index, slots=ANCHOR_SLOTS)
+    ranked = [n for n in names if n != "anchor"]
+    return fused, ("fused" if len(ranked) == 2 else (ranked[0] if ranked else "anchor"))
 
 
 def _candidate_block(memories: list[dict[str, Any]]) -> str:
