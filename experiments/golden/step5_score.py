@@ -41,6 +41,17 @@ CONFIGS = [c.strip() for c in os.environ.get("GOLDEN_CONFIGS", "cosine20,D,E").s
 # prompt alone (what the hook sends today).
 QUERY_CONTEXT = int(os.environ.get("GOLDEN_QUERY_CONTEXT", "0"))
 QUERY_CONTEXT_CHARS = int(os.environ.get("GOLDEN_QUERY_CONTEXT_CHARS", "800"))
+# Situation card (MUD-458, P5 E3). p3-ctx showed raw prior turns dilute the
+# embedding; this is the structured alternative — what the session was
+# touching and what had just failed, not a transcript window.
+#   full  files + last error + prompt
+#   card  files + last error, no prompt
+QUERY_CARD = os.environ.get("GOLDEN_QUERY_CARD", "").strip().lower()
+# How far back a failing tool result still counts as "just failed". 25 of
+# the 100 p4-live queries have one inside 60 records.
+CARD_ERROR_WINDOW = int(os.environ.get("GOLDEN_CARD_ERROR_WINDOW", "60"))
+CARD_ERROR_WORDS = 25
+CARD_FILES = 4
 
 
 def _pct(xs: list[float], p: float) -> float | None:
@@ -112,6 +123,43 @@ def _expand_queries(queries: list[dict], split: dict | None) -> None:
         q["prompt"] = f"{context[-QUERY_CONTEXT_CHARS:]} {q['prompt']}".strip()
 
 
+def _card_queries(queries: list[dict], split: dict | None) -> int:
+    """Rewrite q["prompt"] as a situation card. Returns how many carry an
+    error line.
+
+    The prompt goes in whole: the baseline embeds all of it, and a card
+    that truncated it would be measuring the truncation. Only the error
+    and the file list are capped, which is where the 60-word budget in
+    MUD-458 was aimed.
+    """
+    if QUERY_CARD not in ("full", "card") or not split:
+        return 0
+    from agent_memory_mcp.hook.capture_hook import error_steps
+
+    sessions = {s["session"]: s for s in split.get("query_sessions", [])}
+    with_error = 0
+    for q in queries:
+        parts = []
+        names = sorted({os.path.basename(f) for f in (q.get("files") or []) if f})
+        if names:
+            parts.append("files: " + ", ".join(names[:CARD_FILES]))
+        source = sessions.get(q["session"])
+        if source:
+            steps = error_steps(
+                source["path"], source.get("repo_root") or "",
+                before_line=q["line"], since_line=max(0, q["line"] - CARD_ERROR_WINDOW),
+            )
+            if steps:
+                line = " ".join(steps[-1]["error"].split()[:CARD_ERROR_WORDS])
+                parts.append(f"last error: {line}")
+                with_error += 1
+        if QUERY_CARD == "full":
+            parts.append("prompt: " + q["prompt"])
+        q["original_prompt"] = q["prompt"]
+        q["prompt"] = " | ".join(parts) or q["prompt"]
+    return with_error
+
+
 async def main() -> None:
     from agent_memory_mcp.mcp._coding_tools import (  # noqa: F401
         ANCHOR_BOOST, ANCHOR_LEG_ENABLED, ANCHOR_SLOTS, GATE_DEPTH, HYBRID_THRESHOLD, screen_memories,
@@ -122,7 +170,11 @@ async def main() -> None:
     labels = load_json("labels.json")
     if not (queries and pool and labels):
         raise SystemExit("run steps 1-4 first")
-    _expand_queries(queries, load_json("session_split.json"))
+    split = load_json("session_split.json")
+    _expand_queries(queries, split)
+    carded = _card_queries(queries, split)
+    if QUERY_CARD:
+        print(f"query card: {QUERY_CARD}, {carded} of {len(queries)} carry an error line")
     pool_by_repo: dict[str, set[str]] = {}
     for it in pool:
         pool_by_repo.setdefault(it["repo"], set()).add(it["id"])
@@ -214,7 +266,8 @@ async def main() -> None:
                "context_prefix": (load_json("corpus_stats.json") or {}).get("context_prefix"),
                "scored_configs": configs,
                "anchor_leg": ANCHOR_LEG_ENABLED, "anchor_slots": ANCHOR_SLOTS,
-               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT}
+               "code": os.environ.get("GOLDEN_CODE_REF"), "query_context": QUERY_CONTEXT,
+               "query_card": QUERY_CARD or None, "queries_with_error_line": carded}
     save_json("scores.json", {"summary": summary, "per_query": per_query})
 
     print(f"\n{n} queries, {len(pool)} lessons, {relevant_total} relevant pairs ({relevant_total / n:.2f}/query)")

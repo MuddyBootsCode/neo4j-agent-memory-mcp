@@ -206,6 +206,29 @@ class TestTouchedFilesAndErrorSteps:
             {"tool": "tool", "input": "", "file": None, "error": "boom"},
         ]
 
+    def test_error_steps_can_be_bounded_to_a_window_of_records(self, tmp_path):
+        """The golden set replays a prompt at a known transcript line and
+        asks what had just failed (MUD-458), so the reader takes a window.
+        The bound is on the failing result, not on the call that made it."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make old"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "old failure"}]),
+                _assistant([{"type": "tool_use", "id": "b2", "name": "Bash", "input": {"command": "make new"}}]),
+                _user([{"type": "tool_result", "tool_use_id": "b2", "is_error": True, "content": "recent failure"}]),
+                _user([{"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "later failure"}]),
+            ],
+        )
+
+        assert [s["error"] for s in error_steps(path, "/repo", before_line=4)] == [
+            "old failure", "recent failure"]
+        assert [s["error"] for s in error_steps(path, "/repo", before_line=4, since_line=2)] == [
+            "recent failure"]
+        assert error_steps(path, "/repo", before_line=0) == []
+
     def test_error_steps_require_the_is_error_flag(self, tmp_path):
         """A successful `cat` of a file that mentions "Traceback" is not a
         dead end. Claude Code flags every failed tool result with is_error

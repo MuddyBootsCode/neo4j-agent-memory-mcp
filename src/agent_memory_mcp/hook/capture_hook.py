@@ -313,10 +313,20 @@ def transcript_touched_files(path: str, repo_dir: str, cap: int = MAX_FILES_SENT
     return list(seen)
 
 
-def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[dict]:
+def error_steps(
+    path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS,
+    *, before_line: int | None = None, since_line: int | None = None,
+) -> list[dict]:
     """Tool calls whose result was an error: ``{"tool", "input", "error",
     "file"}`` in transcript order, newest last. Zero-LLM DeadEnd candidates
     (MUD-404); the curator decides whether each is worth keeping.
+
+    ``before_line`` and ``since_line`` bound which failures count by the
+    record index of the failing *result* — the golden set replays a prompt
+    at a known line and asks what had just failed before it (MUD-458).
+    Calls are paired from the whole file either way, so a failure inside
+    the window keeps the command that caused it even when that call is
+    outside.
 
     Only results the client flagged ``is_error`` qualify. The keyword regex
     that decides rendering is not used here: a successful ``cat`` of a file
@@ -328,10 +338,12 @@ def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[di
     calls: dict[str, dict] = {}
     steps: list[dict] = []
     try:
-        for record in _iter_records(path):
+        for index, record in enumerate(_iter_records(path)):
             content = (record.get("message") or {}).get("content")
             if not isinstance(content, list):
                 continue
+            in_window = ((before_line is None or index < before_line)
+                         and (since_line is None or index >= since_line))
             for block in content:
                 if not isinstance(block, dict):
                     continue
@@ -344,6 +356,8 @@ def error_steps(path: str, repo_dir: str, cap: int = MAX_ERROR_STEPS) -> list[di
                         "file": normalize_repo_path(args.get("file_path"), repo_dir),
                     }
                 elif block.get("type") == "tool_result":
+                    if not in_window:
+                        continue
                     text = " ".join(_block_text(block.get("content")).split())
                     if not text or not block.get("is_error"):
                         continue
