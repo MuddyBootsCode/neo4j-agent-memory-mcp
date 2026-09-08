@@ -281,3 +281,36 @@ async def test_backfill_apply_does_not_overwrite_a_concurrent_reassert(memory_cl
     out = await g.execute_read("MATCH (m) WHERE elementId(m) = $eid RETURN m.evidence_count AS e", {"eid": eid})
     assert n == 0            # reported as drifted, not applied
     assert out[0]["e"] == 2  # the concurrent reassertion survived
+
+
+@pytest.mark.integration
+async def test_backfill_apply_rejects_an_export_whose_new_count_is_stale(memory_client):
+    """The exported (old, new) pair is revalidated under the lock: a row
+    whose family recount no longer matches its exported ``new`` is drifted,
+    not applied (Codex F11)."""
+    import importlib.util
+    import os
+
+    from agent_memory_mcp.capture.cypher import anchored_memory_write, session_upsert
+
+    spec = importlib.util.spec_from_file_location(
+        "backfill_evidence_families",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "backfill_evidence_families.py"),
+    )
+    backfill = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(backfill)
+
+    ts = "2026-09-07T00:00:00Z"
+    g = memory_client.graph
+    await g.execute_write(*session_upsert("agent", "origin-c", "repo-z", "main", None, ts))
+    rows = await g.execute_write(*anchored_memory_write(
+        "Gotcha", {"text": "stale export probe", "confidence": 0.9}, "origin-c", "repo-z", [], None, ts,
+    ))
+    eid = rows[0]["eid"]  # one family, evidence_count = 1
+
+    stale = (await g.execute_write(backfill._APPLY, {"rows": [{"eid": eid, "old": 1, "new": 5}]}))[0]["n"]
+    fresh = (await g.execute_write(backfill._APPLY, {"rows": [{"eid": eid, "old": 1, "new": 1}]}))[0]["n"]
+    out = await g.execute_read("MATCH (m) WHERE elementId(m) = $eid RETURN m.evidence_count AS e", {"eid": eid})
+
+    assert stale == 0 and fresh == 1
+    assert out[0]["e"] == 1

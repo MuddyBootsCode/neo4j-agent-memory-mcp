@@ -64,12 +64,18 @@ _EXPORT = _RECOUNT + """
 # reported, so the export stays a complete rollback record (Codex F7).
 # The first SET takes the lesson's write lock before the guard reads the
 # count, so a reassertion committing concurrently is seen (and the row
-# reported as drifted) rather than overwritten (Codex F10).
-_APPLY = """
+# reported as drifted) rather than overwritten (Codex F10), and the family count is recomputed under that lock, so an export
+# whose old/new pair straddled a concurrent commit is reported as drifted
+# rather than applied (Codex F11).
+_APPLY = f"""
     UNWIND $rows AS r
     MATCH (m) WHERE elementId(m) = r.eid
     SET m.evidence_count = coalesce(m.evidence_count, 1)
+    WITH m, r
+    OPTIONAL MATCH (m)-[:MADE_IN|REASSERTED_IN]->(s:CodingSession)
+    WITH m, r, size(collect(DISTINCT {_FAMILY})) AS families
     WITH m, r WHERE m.evidence_count = r.old
+              AND CASE WHEN families < 1 THEN 1 ELSE families END = r.new
     SET m.evidence_count = r.new
     RETURN count(m) AS n
 """
