@@ -940,28 +940,24 @@ def repo_file_set(repo_root: str, since: str) -> set[str]:
     return files
 
 
-def read_repo_files(repo_root: str, wanted: dict[str, str | None]) -> dict[str, str]:
-    """Text of each wanted file: the main checkout's working tree, else the
-    branch a session that touched it was on, else HEAD (git cat-file)."""
-    texts: dict[str, str] = {}
-    missing = []
-    for rel, branch in wanted.items():
+def read_repo_files(repo_root: str, wanted: dict[str, set]) -> dict[str, list[str]]:
+    """Every version of each wanted file an agent could have seen: the main
+    checkout's working tree and the tip of each branch a session that touched
+    it was on (git cat-file), or HEAD when neither exists."""
+    texts: dict[str, list[str]] = collections.defaultdict(list)
+    specs: list[tuple[str, str]] = []
+    for rel, branches in wanted.items():
         p = os.path.join(repo_root, rel)
         if os.path.isfile(p):
             try:
                 with open(p, encoding="utf-8", errors="replace") as fh:
-                    texts[rel] = fh.read(400_000)
-                continue
+                    texts[rel].append(fh.read(400_000))
             except OSError:
                 pass
-        missing.append((rel, branch))
-    if not missing:
-        return texts
-    specs = []
-    for rel, branch in missing:
-        specs.append(f"refs/heads/{branch}:{rel}" if branch else f"HEAD:{rel}")
-        specs.append(f"HEAD:{rel}")
-    blob = _git(repo_root, "cat-file", "--batch", input_bytes=("\n".join(specs) + "\n").encode())
+        for branch in sorted(b for b in branches if b):
+            specs.append((rel, f"refs/heads/{branch}:{rel}"))
+        specs.append((rel, f"HEAD:{rel}"))
+    blob = _git(repo_root, "cat-file", "--batch", input_bytes=("\n".join(s for _, s in specs) + "\n").encode())
     pos, answers = 0, []
     while pos < len(blob) and len(answers) < len(specs):
         nl = blob.find(b"\n", pos)
@@ -975,12 +971,18 @@ def read_repo_files(repo_root: str, wanted: dict[str, str | None]) -> dict[str, 
             pos += size + 1
         else:
             answers.append(None)
-    for k, (rel, _branch) in enumerate(missing):
-        pair = answers[2 * k:2 * k + 2]
-        text = next((t for t in pair if t is not None), None)
-        if text is not None:
-            texts[rel] = text[:400_000]
-    return texts
+    head_text = {}
+    for (rel, spec), text in zip(specs, answers):
+        if text is None:
+            continue
+        if spec.startswith("HEAD:"):
+            head_text[rel] = text[:400_000]
+        elif text[:400_000] not in texts[rel]:
+            texts[rel].append(text[:400_000])
+    for rel, text in head_text.items():
+        if not texts[rel]:
+            texts[rel].append(text)
+    return {rel: versions for rel, versions in texts.items() if versions}
 
 
 def workspace_packages(repo_root: str, files) -> dict[str, str]:
@@ -1350,7 +1352,7 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
     plus every repo file a Bash command names."""
     file_events = collections.defaultdict(list)
     bash_events = collections.defaultdict(list)
-    branch_of = {}
+    branch_of = collections.defaultdict(set)
     mix = collections.Counter()
     suffix_idx = {}
     for s in sessions.values():
@@ -1371,7 +1373,7 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
                     "repo": repo, "call": f"{s['sid']}:{k}", "tool": c["tool"]}
             if c["tool"] in FILE_TOOLS and c["file"]:
                 file_events[rid].append({**base, "file": c["file"], "edit": c["tool"] in EDIT_TOOLS})
-                branch_of.setdefault((repo, c["file"]), s["branch"])
+                branch_of[(repo, c["file"])].add(s["branch"])
             elif c["tool"] == "Bash" and c["command"]:
                 named = command_files(c["command"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
                                       suffix_index=suffix_idx[repo])
@@ -1380,7 +1382,7 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
                                      suffix_index=suffix_idx[repo]) if named else set()
                 for f in named:
                     bash_events[rid].append({**base, "file": f, "edit": False, "executed": f in ran})
-                    branch_of.setdefault((repo, f), s["branch"])
+                    branch_of[(repo, f)].add(s["branch"])
     repo_of_run = {r["run"]: next(sessions[s]["repo"] for s in r["sessions"]) for r in runs}
     name_of_repo = {s["repo"]: s["repo_name"] for s in sessions.values()}
 
@@ -1395,12 +1397,14 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
         allfiles = files_by_repo.get(repo, set()) | files
         py_idx = build_py_index(allfiles)
         packages = workspace_packages(repo, allfiles)
-        wanted = {f: branch_of.get((repo, f)) for f in files if f.endswith(".py") or f.endswith(JS_SOURCE)}
+        wanted = {f: branch_of.get((repo, f), set()) for f in files if f.endswith(".py") or f.endswith(JS_SOURCE)}
         texts = read_repo_files(repo, wanted)
         imports = {}
-        for f, text in texts.items():
-            imports[f] = py_imports(f, text, py_idx, allfiles) if f.endswith(".py") else \
-                js_imports(f, text, allfiles, packages)
+        for f, versions in texts.items():
+            imports[f] = set()
+            for text in versions:
+                imports[f] |= py_imports(f, text, py_idx, allfiles) if f.endswith(".py") else \
+                    js_imports(f, text, allfiles, packages)
         neighbours = collections.defaultdict(set)
         for f, deps in imports.items():
             for d in deps:

@@ -351,6 +351,32 @@ class TestPromptTriggers:
         assert replay.prompt_error_lines("> fatal: not a git repository") == ["fatal: not a git repository"]
 
 
+class TestReadRepoFiles:
+    def test_every_version_a_touching_branch_holds_is_read(self, tmp_path):
+        """An agent on a feature branch saw that branch's file. Reading one
+        version only made the import relation depend on which session came
+        first."""
+        import subprocess
+
+        def git(*args):
+            subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "t")
+        (tmp_path / "a.py").write_text("import os\n")
+        git("add", "a.py")
+        git("commit", "-q", "-m", "main")
+        git("checkout", "-q", "-b", "feature")
+        (tmp_path / "a.py").write_text("from pkg import b\n")
+        git("commit", "-q", "-am", "feature")
+        git("checkout", "-q", "main")
+
+        texts = replay.read_repo_files(str(tmp_path), {"a.py": {"feature", "gone-branch"}})
+
+        assert sorted(texts["a.py"]) == ["from pkg import b\n", "import os\n"]
+
+
 class TestImports:
     FILES = {"src/a.ts", "src/b.ts", "src/c/index.tsx", "pkg/__init__.py", "pkg/x.py", "pkg/m.py", "tools/lib.py",
              "tools/run.py"}
