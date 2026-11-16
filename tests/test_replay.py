@@ -1,0 +1,370 @@
+"""Phase 1 replay (MUD-850): the counting rules behind each moment's hits.
+
+A wrong rule here does not error. It changes a count that decides whether
+Phases 2 and 3 get built, so each rule is pinned on a small case.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "experiments", "replay"))
+
+import replay  # noqa: E402
+
+MIN = 60.0
+
+
+def _session(sid, worktree, spans, repo="r"):
+    return {"sid": sid, "repo": repo, "worktree": worktree, "spans": spans}
+
+
+class TestActivitySpans:
+    def test_an_idle_gap_longer_than_the_threshold_splits_a_span(self):
+        times = [0, 5 * MIN, 9 * MIN, 40 * MIN, 41 * MIN]
+        assert replay.activity_spans(times, gap=15 * MIN) == [(0, 9 * MIN), (40 * MIN, 41 * MIN)]
+
+    def test_unsorted_times_give_the_same_spans(self):
+        assert replay.activity_spans([9 * MIN, 0, 5 * MIN], gap=15 * MIN) == [(0, 9 * MIN)]
+
+
+class TestGroupRuns:
+    def test_overlapping_sessions_in_two_worktrees_form_a_run(self):
+        runs = replay.group_runs([
+            _session("a", "wt1", [(0, 30 * MIN)]),
+            _session("b", "wt2", [(20 * MIN, 50 * MIN)]),
+        ])
+        assert runs == [["a", "b"]]
+
+    def test_sessions_that_never_overlap_while_active_form_no_run(self):
+        """First-to-last timestamps overlap here, but the active spans do not:
+        one session was idle while the other worked."""
+        runs = replay.group_runs([
+            _session("a", "wt1", [(0, 10 * MIN), (200 * MIN, 210 * MIN)]),
+            _session("b", "wt2", [(60 * MIN, 120 * MIN)]),
+        ])
+        assert runs == []
+
+    def test_overlap_inside_one_worktree_is_not_a_run(self):
+        runs = replay.group_runs([
+            _session("a", "wt1", [(0, 30 * MIN)]),
+            _session("b", "wt1", [(10 * MIN, 40 * MIN)]),
+        ])
+        assert runs == []
+
+    def test_different_repos_never_join(self):
+        runs = replay.group_runs([
+            _session("a", "wt1", [(0, 30 * MIN)], repo="r1"),
+            _session("b", "wt2", [(10 * MIN, 40 * MIN)], repo="r2"),
+        ])
+        assert runs == []
+
+    def test_a_chain_of_overlaps_is_one_run(self):
+        runs = replay.group_runs([
+            _session("a", "wt1", [(0, 30 * MIN)]),
+            _session("b", "wt2", [(20 * MIN, 60 * MIN)]),
+            _session("c", "wt3", [(50 * MIN, 90 * MIN)]),
+        ])
+        assert runs == [["a", "b", "c"]]
+
+
+class TestCmdPrefix:
+    def test_a_leading_cd_is_skipped(self):
+        assert replay.cmd_prefix("cd packages/frontend && npm test") == "npm test"
+
+    def test_git_dash_c_is_dropped(self):
+        assert replay.cmd_prefix("git -C /Users/x/repo status --short") == "git status"
+
+    def test_env_assignments_and_runners_are_stripped(self):
+        assert replay.cmd_prefix("FOO=1 uv run --no-sync pytest tests/test_a.py -q") == "pytest tests/test_a.py"
+
+    def test_python_dash_m_names_the_module(self):
+        assert replay.cmd_prefix(".venv/bin/python -m pytest tests/test_a.py") == "pytest tests/test_a.py"
+
+    def test_a_command_that_is_only_cd_keeps_cd(self):
+        assert replay.cmd_prefix("cd nowhere") == "cd"
+
+
+class TestFailureSignature:
+    def test_bash_error_uses_the_last_error_line_with_placeholders(self):
+        text = "Exit code 1\n(eval):cd:1: no such file or directory: packages/frontend/src"
+        sig = replay.failure_signature(text)
+        assert sig is not None
+        assert "no such file or directory" in sig
+        assert "packages/frontend/src" not in sig
+
+    def test_noise_is_not_a_failure(self):
+        """The F4 NOISE filter: a rejected or blocked call is not a failure."""
+        assert replay.failure_signature("The user doesn't want to proceed with this tool use.") is None
+
+    def test_two_paths_with_the_same_error_share_a_signature(self):
+        a = replay.failure_signature("Exit code 1\nzsh: no such file or directory: /a/b/one.py")
+        b = replay.failure_signature("Exit code 1\nzsh: no such file or directory: /c/d/two.py")
+        assert a == b
+
+
+class TestSameKind:
+    def test_bash_matches_on_command_prefix(self):
+        fail = {"tool": "Bash", "command": "cd x && npm test", "file": None}
+        ok = {"tool": "Bash", "command": "npm test -- --run", "file": None}
+        other = {"tool": "Bash", "command": "npm run build", "file": None}
+        assert replay.same_kind(fail, ok)
+        assert not replay.same_kind(fail, other)
+
+    def test_file_tools_match_on_tool_and_file(self):
+        fail = {"tool": "Edit", "command": None, "file": "src/a.py"}
+        assert replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/a.py"})
+        assert not replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/b.py"})
+        assert not replay.same_kind(fail, {"tool": "Write", "command": None, "file": "src/a.py"})
+
+
+class TestFirstResolution:
+    def test_the_first_later_success_of_the_same_kind_resolves(self):
+        calls = [
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
+            {"tool": "Read", "command": None, "file": "a.ts", "ok": True},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": True},
+        ]
+        assert replay.first_resolution(calls, 0) == 3
+
+    def test_no_later_success_means_unresolved(self):
+        calls = [
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
+            {"tool": "Bash", "command": "npm run build", "file": None, "ok": True},
+        ]
+        assert replay.first_resolution(calls, 0) is None
+
+
+def _touch(ts, sid, wt, f):
+    return {"ts": ts, "sid": sid, "worktree": wt, "file": f}
+
+
+class TestFileWindowHits:
+    def test_a_later_touch_by_another_worktree_inside_the_window_hits(self):
+        events = [_touch(0, "a", "wt1", "src/x.py"), _touch(10 * MIN, "b", "wt2", "src/x.py")]
+        hits = replay.file_window_hits(events, 15 * MIN)
+        assert [h["event"]["sid"] for h in hits] == ["b"]
+        assert hits[0]["other"]["sid"] == "a"
+
+    def test_outside_the_window_is_no_hit(self):
+        events = [_touch(0, "a", "wt1", "src/x.py"), _touch(20 * MIN, "b", "wt2", "src/x.py")]
+        assert replay.file_window_hits(events, 15 * MIN) == []
+        assert len(replay.file_window_hits(events, 60 * MIN)) == 1
+
+    def test_the_same_worktree_is_no_hit(self):
+        events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
+        assert replay.file_window_hits(events, 15 * MIN) == []
+
+    def test_related_files_hit_through_the_relation(self):
+        events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt2", "src/y.py")]
+        assert replay.file_window_hits(events, 15 * MIN) == []
+        related = {"src/y.py": {"src/x.py"}, "src/x.py": {"src/y.py"}}
+        hits = replay.file_window_hits(events, 15 * MIN, related=lambda f: related.get(f, set()))
+        assert [h["event"]["file"] for h in hits] == ["src/y.py"]
+
+
+class TestRepoRel:
+    def test_a_path_under_the_repo_in_other_letter_case_still_resolves(self):
+        """macOS paths are case-insensitive; sessions opened under
+        ~/projects and ~/Projects touch the same files."""
+        assert replay.repo_rel("/users/me/Proj/src/a.py", "/Users/me/proj") == "src/a.py"
+
+    def test_a_path_in_another_repos_worktree_does_not(self):
+        assert replay.repo_rel("/Users/me/other/.claude/worktrees/w/src/a.py", "/Users/me/proj") is None
+
+
+class TestCommandFiles:
+    FILES = {"src/app/main.py", "tests/test_main.py"}
+
+    def test_repo_files_named_in_a_command_are_touches(self):
+        cmd = "cd /Users/me/proj && sed -i 's/a/b/' src/app/main.py && pytest tests/test_main.py -q"
+        assert replay.command_files(cmd, self.FILES, repo_root="/Users/me/proj") == [
+            "src/app/main.py", "tests/test_main.py"]
+
+    def test_a_command_naming_no_repo_file_touches_nothing(self):
+        assert replay.command_files("git status --short", self.FILES, repo_root="/Users/me/proj") == []
+
+    def test_a_script_run_as_the_program_is_executed_not_worked_on(self):
+        """Every agent runs the same gate script; that is using a tool, not
+        working on the file, and it would make every pair of agents collide."""
+        files = {"scripts/verify/gate.mjs", "src/a.ts", "tools/check.sh", "src/app/main.py"}
+        cmd = "node scripts/verify/gate.mjs --check src/a.ts && bash tools/check.sh && pytest src/app/main.py"
+        assert replay.executed_files(cmd, files, repo_root="/Users/me/proj") == {
+            "scripts/verify/gate.mjs", "tools/check.sh"}
+
+
+class TestSameDirectory:
+    def test_siblings_relate_and_a_file_does_not_relate_to_itself(self):
+        rel = replay.same_directory_relation(["src/a.py", "src/b.py", "lib/c.py"])
+        assert rel("src/a.py") == {"src/b.py"}
+        assert rel("lib/c.py") == set()
+
+
+class TestRepeatFailureHits:
+    def _f(self, ts, sid, wt, sig, resolved_ts=None):
+        return {"ts": ts, "sid": sid, "worktree": wt, "sig": sig, "resolved_ts": resolved_ts}
+
+    def test_a_signature_another_worktree_already_got_past_hits_with_the_fix(self):
+        fs = [self._f(0, "a", "wt1", "s", resolved_ts=2 * MIN), self._f(10 * MIN, "b", "wt2", "s")]
+        hits = replay.repeat_failure_hits(fs)
+        assert len(hits) == 1
+        assert hits[0]["earlier"]["sid"] == "a"
+        assert hits[0]["resolved_before"] is True
+
+    def test_an_earlier_failure_not_yet_resolved_hits_without_the_fix(self):
+        fs = [self._f(0, "a", "wt1", "s", resolved_ts=30 * MIN), self._f(10 * MIN, "b", "wt2", "s")]
+        hits = replay.repeat_failure_hits(fs)
+        assert hits[0]["resolved_before"] is False
+        assert hits[0]["resolved_ever"] is True
+
+    def test_the_same_worktree_or_another_signature_is_no_hit(self):
+        fs = [self._f(0, "a", "wt1", "s"), self._f(5 * MIN, "b", "wt1", "s"), self._f(6 * MIN, "c", "wt2", "t")]
+        assert replay.repeat_failure_hits(fs) == []
+
+    def test_a_window_drops_earlier_failures_older_than_it(self):
+        fs = [self._f(0, "a", "wt1", "s"), self._f(30 * MIN, "b", "wt2", "s")]
+        assert replay.repeat_failure_hits(fs, window_s=15 * MIN) == []
+        assert len(replay.repeat_failure_hits(fs, window_s=60 * MIN)) == 1
+
+
+class TestFailureKind:
+    def test_a_hook_block_is_its_own_kind(self):
+        text = "PreToolUse:Bash hook error: [agent-test-budget]: local tests share two slots"
+        assert replay.failure_kind(text) == "hook block"
+
+    def test_a_rejected_tool_input_is_its_own_kind(self):
+        text = "InputValidationError: if your input does not match this schema, correct it"
+        assert replay.failure_kind(text) == "tool input rejected"
+
+    def test_anything_else_is_a_command_or_tool_failure(self):
+        assert replay.failure_kind("Exit code 1\nzsh: command not found: vulture") == "command or tool failure"
+
+
+def _write_jsonl(path, records):
+    import json
+
+    with open(path, "w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+    return str(path)
+
+
+def _rec(kind, sid, ts, content, **extra):
+    return {"type": kind, "sessionId": sid, "timestamp": ts, "cwd": "/repo",
+            "message": {"role": kind, "content": content}, **extra}
+
+
+class TestSessionAttribution:
+    def test_records_copied_into_a_resumed_session_stay_with_the_session_that_made_them(self, tmp_path):
+        """A resumed or forked transcript repeats the earlier session's
+        records under their original sessionId. Counting them twice doubles
+        prompts and failures and can fake an overlap between worktrees."""
+        use = {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "make"}}
+        result = {"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": "Exit code 2\nmake: *** no rule"}
+        original = [_rec("assistant", "aaa", "2026-10-01T10:00:00Z", [use]),
+                    _rec("user", "aaa", "2026-10-01T10:00:05Z", [result])]
+        own_use = {"type": "tool_use", "id": "t2", "name": "Read", "input": {"file_path": "/repo/x.py"}}
+        resumed = original + [_rec("assistant", "bbb", "2026-10-02T09:00:00Z", [own_use])]
+        a = replay.scan_transcript(_write_jsonl(tmp_path / "aaa.jsonl", original), 0)
+        b = replay.scan_transcript(_write_jsonl(tmp_path / "bbb.jsonl", resumed), 0)
+
+        merged = replay.merge_scans([a, b])
+
+        assert [c["id"] for c in merged["aaa"]["calls"]] == ["t1"]
+        assert merged["aaa"]["calls"][0]["ok"] is False
+        assert [c["id"] for c in merged["bbb"]["calls"]] == ["t2"]
+        assert len(merged["aaa"]["times"]) == 2
+
+
+class TestSessionBrief:
+    def test_a_brief_from_the_session_that_started_this_one_is_a_brief(self):
+        rec = {"type": "user", "promptSource": "sdk", "turnOrigin": "sdk",
+               "message": {"content": "Background (from the session that started this one): fix MUD-1"}}
+        assert replay.session_brief(rec).startswith("Background")
+
+    def test_a_human_prompt_is_not_a_brief(self):
+        rec = {"type": "user", "origin": {"kind": "human"}, "message": {"content": "fix MUD-1"}}
+        assert replay.session_brief(rec) is None
+
+
+class TestHumanPrompt:
+    def _rec(self, content, **extra):
+        return {"type": "user", "message": {"role": "user", "content": content}, **extra}
+
+    def test_a_human_turn_is_a_prompt(self):
+        rec = self._rec("fix the bug", origin={"kind": "human"}, promptSource="sdk")
+        assert replay.human_prompt(rec) == "fix the bug"
+
+    def test_a_task_notification_is_not(self):
+        rec = self._rec("<task-notification>x</task-notification>",
+                        origin={"kind": "task-notification"}, promptSource="system")
+        assert replay.human_prompt(rec) is None
+
+    def test_a_system_reminder_is_stripped_from_a_human_turn(self):
+        rec = self._rec("<system-reminder>You are in a worktree</system-reminder>\nrun the tests",
+                        origin={"kind": "human"}, promptSource="sdk")
+        assert replay.human_prompt(rec) == "run the tests"
+
+    def test_shell_mode_input_is_not_a_prompt(self):
+        rec = self._rec("<bash-input>ls</bash-input>", origin={"kind": "human"}, promptSource="sdk")
+        assert replay.human_prompt(rec) is None
+
+    def test_a_session_started_by_another_session_is_not_human(self):
+        rec = self._rec("Background (from the session that started this one): do X",
+                        promptSource="sdk", turnOrigin="sdk")
+        assert replay.human_prompt(rec) is None
+
+    def test_a_tool_result_is_not_a_prompt(self):
+        rec = self._rec([{"type": "tool_result", "tool_use_id": "t", "content": "ok"}])
+        assert replay.human_prompt(rec) is None
+
+
+class TestPromptTriggers:
+    FILES = {"src/app/main.py", "README.md", "tradeCraft/packages/core/src/a.ts"}
+
+    def test_an_existing_repo_path_is_found(self):
+        assert replay.prompt_paths("look at src/app/main.py:42 please", self.FILES) == ["src/app/main.py"]
+
+    def test_an_absolute_worktree_path_is_normalised(self):
+        text = "see /Users/me/proj/.claude/worktrees/wt-1/src/app/main.py"
+        assert replay.prompt_paths(text, self.FILES, repo_root="/Users/me/proj") == ["src/app/main.py"]
+
+    def test_a_path_relative_to_the_session_cwd_is_found(self):
+        assert replay.prompt_paths("open packages/core/src/a.ts", self.FILES, cwd_prefix="tradeCraft") == [
+            "tradeCraft/packages/core/src/a.ts"
+        ]
+
+    def test_a_path_that_does_not_exist_is_not(self):
+        assert replay.prompt_paths("what about src/app/other.py", self.FILES) == []
+
+    def test_ticket_keys_are_the_known_teams_in_upper_case(self):
+        assert replay.prompt_tickets("Do MUD-850 then GRA-12, not UTF-8 or mud-1") == ["MUD-850", "GRA-12"]
+
+    def test_a_pasted_error_line_is_found_and_prose_is_not(self):
+        assert replay.prompt_error_lines("there's an error when I click save") == []
+        assert replay.prompt_error_lines("it says\nTypeError: x is undefined\n") == ["TypeError: x is undefined"]
+        assert replay.prompt_error_lines("fatal: not a git repository") == ["fatal: not a git repository"]
+
+    def test_a_quoted_error_line_is_found_without_its_quote_marker(self):
+        """Pasted terminal output often arrives quoted; the marker would also
+        keep its signature from matching the same error from a tool call."""
+        assert replay.prompt_error_lines("> fatal: not a git repository") == ["fatal: not a git repository"]
+
+
+class TestImports:
+    FILES = {"src/a.ts", "src/b.ts", "src/c/index.tsx", "pkg/__init__.py", "pkg/x.py", "pkg/m.py", "tools/lib.py",
+             "tools/run.py"}
+
+    def test_relative_ts_imports_resolve_with_extensions_and_index(self):
+        text = "import { a } from './a';\nimport C from './c';\nexport * from './b.js';\n"
+        assert replay.js_imports("src/main.ts", text, self.FILES, {}) == {"src/a.ts", "src/b.ts", "src/c/index.tsx"}
+
+    def test_relative_python_imports_resolve(self):
+        idx = replay.build_py_index(self.FILES)
+        assert replay.py_imports("pkg/m.py", "from .x import thing\n", idx, self.FILES) == {"pkg/x.py"}
+
+    def test_absolute_python_imports_resolve(self):
+        idx = replay.build_py_index(self.FILES)
+        assert replay.py_imports("tools/run.py", "import pkg.x\nfrom lib import y\n", idx, self.FILES) == {
+            "pkg/x.py", "tools/lib.py"
+        }
