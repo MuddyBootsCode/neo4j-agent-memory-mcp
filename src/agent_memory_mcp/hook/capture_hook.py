@@ -346,11 +346,17 @@ def error_steps(
     store's DeadEnds (MUD-407 A1). Claude Code sets the flag on every failed
     tool call, so nothing real is lost. Blocked and rejected actions are
     flagged too but nothing ran, so they are skipped.
+
+    Only user and assistant turns are read. Newer transcripts also log
+    each API request (``api-request-blob``) with a message that repeats
+    earlier tool results, and reading those counted a failure twice.
     """
     calls: dict[str, dict] = {}
     steps: list[dict] = []
     try:
         for index, record in _iter_records(path, with_line=True):
+            if record.get("type") not in ("user", "assistant"):
+                continue
             content = (record.get("message") or {}).get("content")
             if not isinstance(content, list):
                 continue
