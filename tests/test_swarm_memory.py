@@ -102,6 +102,27 @@ def session_record(db, sid):
     return q(db, "SELECT id, info, status FROM record WHERE kind = 'session' AND session_id = ?", (sid,))[0]
 
 
+def version_1_store(db, texts):
+    """A store at schema version 1 whose failures hold each text as a head and
+    a signature. Closing the only connection folds the WAL into the file, so
+    the text lands in the file's pages."""
+    con = sqlite3.connect(db, isolation_level=None)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.executescript(store.SCHEMA)
+    con.execute("PRAGMA user_version=1")
+    for n, text in enumerate(texts, 1):
+        con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, status, tool_use_id, info)"
+                    " VALUES (?, 'failure', ?, 's1', 'Bash', 'command or tool failure', 'open', ?, ?)",
+                    (n, T, f"t{n}", json.dumps({"head": text, "sig": text.lower(), "exit": 1, "program": "x"})))
+        con.execute("INSERT INTO link VALUES (?, 'signature', ?, ?)", (n, text.lower(), T))
+    con.close()
+
+
+def raw_bytes(db):
+    """The store's database file, WAL and shm as bytes, lower-cased."""
+    return b"".join(open(db + s, "rb").read() for s in ("", "-wal", "-shm") if os.path.exists(db + s)).lower()
+
+
 def delivered(db, moment=None):
     sql = "SELECT session_id, moment, records, detail FROM event WHERE kind = 'would_deliver'"
     rows = q(db, sql + (" AND moment = ?" if moment else "") + " ORDER BY id", (moment,) if moment else ())
@@ -828,6 +849,58 @@ class TestSafety:
         dump = "\n".join(str(row) for table in ("event", "record", "link")
                          for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         assert "zorkquill" not in dump and "login failed" not in dump
+
+    def test_a_migrated_store_is_rewritten_so_no_old_text_is_left_in_its_bytes(self, db):
+        """Review finding: the migration replaced the values, but SQLite keeps a
+        replaced value in the page's free space and in WAL frames, so the old
+        text could still be read from the file. The rewrite clears both."""
+        texts = ["fatal: zorkmarker needed a single revision", "SyntaxError: plughmarker unterminated literal"]
+        version_1_store(db, texts)
+        other_hook = sqlite3.connect(db, isolation_level=None)  # holds the store open, as live hooks do
+        other_hook.execute("SELECT count(*) FROM record").fetchone()
+        store.connect(db).close()
+        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        rows = "\n".join(str(r) for t in ("record", "link") for r in q(db, f"SELECT * FROM {t}"))  # noqa: S608
+        assert "zorkmarker" not in rows and "plughmarker" not in rows
+        assert b"zorkmarker" in raw_bytes(db) and b"plughmarker" in raw_bytes(db)
+        con = store.connect(db)
+        assert store.purge_freed_text(con) is True
+        con.close()
+        other_hook.close()
+        data = raw_bytes(db)
+        assert b"zorkmarker" not in data and b"plughmarker" not in data
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'failure'") == [(2,)]
+
+    def test_the_rewrite_steps_back_from_a_writer_or_a_reader_and_retries(self, db):
+        """It never waits past the busy timeout: a writer holding the lock, or a
+        reader on an older snapshot, leaves the store at version 2 for later."""
+        version_1_store(db, ["fatal: zorkmarker needed a single revision"])
+        con = store.connect(db)
+        holder = sqlite3.connect(db, isolation_level=None)
+        holder.execute("BEGIN IMMEDIATE")
+        assert store.purge_freed_text(con) is False
+        holder.execute("ROLLBACK")
+        holder.execute("BEGIN")
+        holder.execute("SELECT count(*) FROM record").fetchone()
+        assert store.purge_freed_text(con) is False
+        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        holder.execute("COMMIT")
+        holder.close()
+        assert store.purge_freed_text(con) is True
+        con.close()
+        assert b"zorkmarker" not in raw_bytes(db)
+
+    def test_only_a_session_hook_rewrites_the_store_and_a_new_store_needs_none(self, db, repo, tmp_path):
+        version_1_store(db, ["fatal: zorkmarker needed a single revision"])
+        tool_ok(db, "s1", repo, T, "Bash", {"command": "ls"}, "t9")
+        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        start(db, "s1", repo, T + 1)
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert b"zorkmarker" not in raw_bytes(db)
+        fresh = str(tmp_path / "fresh" / "observe.sqlite3")
+        start(fresh, "s2", repo, T)
+        assert q(fresh, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
 
     def test_the_report_shows_a_short_hash_and_the_tool_use_id(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",

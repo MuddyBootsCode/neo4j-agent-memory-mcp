@@ -20,7 +20,9 @@ an HMAC under a random key kept beside the store (``<store>.key``, mode 0600),
 so repeats still match and the hash cannot be checked against a guess. If the
 key file goes missing while the store holds hashes, the next failure makes a
 new key and logs a ``signature_key_new`` event: hashes from before it no longer
-match those after it.
+match those after it. A store that held text (schema version 1) is migrated,
+then rewritten on a session hook with VACUUM and a TRUNCATE checkpoint, so the
+replaced text is gone from the file's bytes as well as its rows.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
 lock up front; if it is not free within ``BUSY_TIMEOUT_MS`` the hook skips and
@@ -41,7 +43,7 @@ from swarm_memory import rules
 ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
-SCHEMA_VERSION = 2  # 2: a failure keeps only a keyed hash of its signature
+SCHEMA_VERSION = 3  # 2: a failure keeps only a keyed hash of its signature; 3: and the file holds no old text
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS event (
@@ -204,11 +206,39 @@ def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
                 con.execute("UPDATE link SET key = ? WHERE record_id = ? AND type = 'signature' AND key = ?",
                             (signature_hash(key, text), rid, text))
                 counts["links_hashed"] += 1
-        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute(f"PRAGMA user_version={HASH_ONLY_VERSION}")
         con.execute("COMMIT")
         return counts
     except BaseException:
         con.execute("ROLLBACK")
+        raise
+
+
+HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows; the file may still hold the old bytes
+
+
+def purge_freed_text(con: sqlite3.Connection) -> bool:
+    """Version 2 to 3: rewrite the file so the text the migration replaced is
+    gone from its bytes, not only from its rows. SQLite leaves a replaced value
+    in the page's free space and in older WAL frames. VACUUM writes a fresh
+    copy of the database, and a TRUNCATE checkpoint moves it into the file and
+    empties the WAL.
+
+    It needs the write lock, and no other connection may still be reading an
+    older snapshot. When either is busy it stops, leaves the store at version
+    2, and a later session hook tries again. True when the file was rewritten."""
+    if con.execute("PRAGMA user_version").fetchone()[0] != HASH_ONLY_VERSION:
+        return False
+    try:
+        con.execute("VACUUM")
+        if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+            return False
+        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return True
+    except sqlite3.OperationalError as exc:
+        if _is_busy(exc):
+            return False
         raise
 
 
@@ -223,14 +253,14 @@ def connect(path: str) -> sqlite3.Connection:
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version != SCHEMA_VERSION:
+    if version in (0, 1):
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
             if version == 1:
-                migrate_to_hash_only(con, path)
+                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() finishes it
             else:
-                con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")  # a new store never held text
         except sqlite3.OperationalError as exc:
             con.close()
             if _is_busy(exc):

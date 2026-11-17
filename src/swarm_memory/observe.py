@@ -55,6 +55,9 @@ BRIEF_FILES = ("SWARM_BRIEF.md", "EPIC_BRIEF.md")
 BRIEF_MAX_BYTES = 64 * 1024
 HOOKS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "SessionEnd")
 TOOL_HOOKS = ("PostToolUse", "PostToolUseFailure")
+# A store migrated from version 1 is rewritten on a session hook, so the
+# rewrite never delays a tool call; when the store is busy a later one retries.
+PURGE_HOOKS = ("SessionStart", "SessionEnd")
 
 
 def run(raw: str, db_arg: str | None = None, t0: float | None = None, ts: float | None = None) -> None:
@@ -74,6 +77,8 @@ def run(raw: str, db_arg: str | None = None, t0: float | None = None, ts: float 
         con = store.connect(path)
         try:
             handle(con, payload, ts, t0, store.ticket_keys(path), db=path)
+            if hook in PURGE_HOOKS:
+                store.purge_freed_text(con)
         finally:
             con.close()
     except store.Busy:
