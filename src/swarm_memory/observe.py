@@ -24,6 +24,9 @@ Would deliver (one ``event`` row each, naming the records it would have shown)
   not ended. Logged again after resume and compaction, when the context is new.
 * ``first_prompt``: at a session's first prompt, other sessions seen in the last
   60 minutes that hold a ticket the prompt names, or have edited a file it names.
+* ``brief_file``: the same lookup over a swarm brief file (``SWARM_BRIEF.md``,
+  ``EPIC_BRIEF.md``) the first time the session reads it, because a swarm
+  worker's prompt only tells it to read that file.
 * ``same_file_edit``: after an edit, another session's edit of the same file
   within 60 minutes, once per session, file and other session.
 
@@ -41,6 +44,8 @@ from swarm_memory import rules, store
 
 WINDOW_S = 60 * 60
 ROSTER_LIMIT = 20
+BRIEF_FILES = ("SWARM_BRIEF.md", "EPIC_BRIEF.md")
+BRIEF_MAX_BYTES = 64 * 1024
 HOOKS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "SessionEnd")
 
 
@@ -183,13 +188,22 @@ def _on_prompt(con, call: Call, session, ts: float) -> dict:
     call.dedupe = key
     prompt = call.payload.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
-    tickets = rules.prompt_tickets(prompt)
     bases = [b for b in (call.cwd, loc[2] if loc else None) if b]
-    files = [fl for fl in (rules.file_location(p) for p in rules.named_files(prompt, bases)) if fl]
+    return {"first": True, **_holders(con, call, rid, prompt, bases, ts, "first_prompt", "prompt")}
+
+
+def _holders(con, call: Call, rid: int, text: str, bases: list, ts: float, moment: str, source: str) -> dict:
+    """Moment 2 (D14): other sessions seen in the last 60 minutes that hold a
+    ticket the text names, or have edited a repo file it names. A brief file
+    is never a held file: each worker has its own. The text also supplies the
+    session's ticket when it has none yet."""
+    tickets = rules.prompt_tickets(text)
+    files = [fl for fl in (rules.file_location(p) for p in rules.named_files(text, bases))
+             if fl and os.path.basename(fl[3]) not in BRIEF_FILES]
     if tickets and not con.execute("SELECT 1 FROM link WHERE record_id = ? AND type = 'ticket'", (rid,)).fetchone():
         store.add_links(con, rid, ts, [("ticket", tickets[0])])
-        con.execute("UPDATE record SET info = json_set(coalesce(info, '{}'), '$.ticket_from', 'prompt') WHERE id = ?",
-                    (rid,))
+        con.execute("UPDATE record SET info = json_set(coalesce(info, '{}'), '$.ticket_from', ?) WHERE id = ?",
+                    (source, rid))
     shown: list[int] = []
     hit_tickets: list[str] = []
     hit_files: list[str] = []
@@ -216,9 +230,32 @@ def _on_prompt(con, call: Call, session, ts: float) -> dict:
             hit_files.append(rel)
             shown += list(latest.values())
     if shown:
-        store.log_event(con, "would_deliver", ts, hook=call.hook, session_id=call.sid, moment="first_prompt",
-                        records=sorted(set(shown)), detail={"tickets": hit_tickets, "files": hit_files})
-    return {"first": True, "tickets": len(tickets), "files": len(files)}
+        store.log_event(con, "would_deliver", ts, hook=call.hook, session_id=call.sid, agent_id=call.agent_id,
+                        tool=call.tool, moment=moment, records=sorted(set(shown)),
+                        detail={"tickets": hit_tickets, "files": hit_files})
+    return {"tickets": len(tickets), "files": len(files), "held": len(set(shown))}
+
+
+def _brief(con, call: Call, rid: int, desc: dict, ts: float) -> dict:
+    """A swarm worker's prompt only says to read its brief file (ollama-swarm
+    SWARM_BRIEF.md, epic-squad EPIC_BRIEF.md), so its brief is looked up the
+    first time the session reads one."""
+    if desc["action"] not in ("read", "mention"):
+        return {}
+    path = next((os.path.join(wt, rel) for _k, _n, wt, rel in desc["files"]
+                 if os.path.basename(rel) in BRIEF_FILES), None)
+    key = f"brief_file|{call.sid}"
+    if path is None or con.execute("SELECT 1 FROM event WHERE dedupe = ?", (key,)).fetchone():
+        return {}
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read(BRIEF_MAX_BYTES).decode("utf-8", "replace")
+    except OSError:
+        return {}
+    call.dedupe = key
+    root = rules.locate(path)
+    bases = [os.path.dirname(path)] + ([root[2]] if root else [])
+    return {"brief": _holders(con, call, rid, text, bases, ts, "brief_file", "brief")}
 
 
 # ---------------------------------------------------------------- tool calls
@@ -265,7 +302,8 @@ def _on_tool_success(con, call: Call, session, ts: float) -> dict:
             store.add_links(con, rid, ts, [("repo", f[0]) for f in desc["files"]])
             if desc["action"] == "edit":
                 _same_file_edit(con, call, desc["files"], ts)
-    return {"activity": made, "files": len(desc["files"]), "resolved": _resolve(con, call, desc, ts)}
+    return {"activity": made, "files": len(desc["files"]), "resolved": _resolve(con, call, desc, ts),
+            **_brief(con, call, rid, desc, ts)}
 
 
 def _same_file_edit(con, call: Call, files, ts: float) -> None:

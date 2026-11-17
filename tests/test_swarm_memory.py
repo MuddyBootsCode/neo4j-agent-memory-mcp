@@ -316,6 +316,33 @@ class TestWouldDeliver:
         assert sid == "s2" and records == sorted([session_record(db, "s1")[0], activity])
         assert detail == {"tickets": ["GRA-101"], "files": ["src/app.py"]}
 
+    def test_a_swarm_brief_file_is_looked_up_when_the_worker_reads_it(self, db, repo):
+        """ollama-swarm and epic-squad workers get "Read ./SWARM_BRIEF.md ..." as
+        their prompt, so the brief's ticket and files only appear when it is read."""
+        a = wt(repo, "a")
+        start(db, "s1", a, T)
+        edit(db, "s1", a, T + MIN, a / "src" / "app.py", "t1")
+        (repo / "SWARM_BRIEF.md").write_text("Slice 2 of GRA-101.\nChange src/app.py only.\n")
+        start(db, "w1", repo, T + 2 * MIN)
+        fire(db, "UserPromptSubmit", "w1", repo, T + 2 * MIN, prompt="Read ./SWARM_BRIEF.md in this directory and follow it exactly.")
+        assert delivered(db, "first_prompt") == []
+        for n in (1, 2):
+            tool_ok(db, "w1", repo, T + 3 * MIN, "Read", {"file_path": str(repo / "SWARM_BRIEF.md")}, f"r{n}")
+        (sid, _, records, detail), = delivered(db, "brief_file")
+        activity = q(db, "SELECT id FROM record WHERE tool_use_id = 't1'")[0][0]
+        assert sid == "w1" and records == sorted([session_record(db, "s1")[0], activity])
+        assert detail == {"tickets": ["GRA-101"], "files": ["src/app.py"]}
+        rid, info, _ = session_record(db, "w1")
+        assert links(db, rid, "ticket") == ["GRA-101"] and json.loads(info)["ticket_from"] == "brief"
+
+    def test_whoever_wrote_a_brief_file_is_not_a_holder_of_it(self, db, repo):
+        tool_ok(db, "lead", repo, T, "Write", {"file_path": str(repo / "EPIC_BRIEF.md"), "content": "x"}, "t1")
+        (repo / "EPIC_BRIEF.md").write_text("Read README.md first.\n")
+        start(db, "w1", repo, T + MIN)
+        fire(db, "UserPromptSubmit", "w1", repo, T + MIN, prompt="Read ./EPIC_BRIEF.md in this directory, then begin.")
+        tool_ok(db, "w1", repo, T + 2 * MIN, "Read", {"file_path": str(repo / "EPIC_BRIEF.md")}, "t2")
+        assert delivered(db, "first_prompt") == [] and delivered(db, "brief_file") == []
+
     def test_a_same_file_edit_is_logged_once_per_session_file_and_other_session(self, db, repo):
         a, b = wt(repo, "a"), wt(repo, "b")
         edit(db, "s1", a, T, a / "src" / "app.py", "t1")
@@ -353,6 +380,18 @@ class TestSafety:
                              capture_output=True, timeout=30)
         assert (res.returncode, res.stdout) == (0, b"")
         assert q(db, "SELECT action FROM record WHERE kind = 'activity'") == [("mention",)]
+
+    def test_a_package_that_will_not_load_still_exits_0_and_is_counted(self, db, tmp_path):
+        import shutil
+        pkg = tmp_path / "copy" / "swarm_memory"
+        shutil.copytree(os.path.join(os.path.dirname(os.path.dirname(__file__)), "src", "swarm_memory"), pkg,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (pkg / "observe.py").write_text("def broken(:\n")
+        res = subprocess.run([sys.executable, "-I", "-S", str(pkg / "hook.py"), "--db", db], input=b"{}",
+                             capture_output=True, timeout=30)
+        assert (res.returncode, res.stdout) == (0, b"")
+        with open(f"{db}.errors.log") as fh:
+            assert [ln.rstrip("\n").split("\t")[-1] for ln in fh] == ["SyntaxError"]
 
     def test_an_exception_is_counted_and_never_raised(self, db, repo, monkeypatch):
         def boom(*_):
