@@ -26,7 +26,6 @@ import os
 import re
 import shlex
 
-TEAM_KEYS = ("MUD", "GRA")
 FILE_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
@@ -132,22 +131,47 @@ def file_key(repo_key: str, rel: str) -> str:
 
 # ---------------------------------------------------------------- tickets
 
-_TICKET = re.compile(r"\b(?:%s)-\d+\b" % "|".join(TEAM_KEYS))
-_TICKET_ANY_CASE = re.compile(r"\b(?:%s)-\d+\b" % "|".join(TEAM_KEYS), re.I)
+_KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 
-def prompt_tickets(text: str) -> list[str]:
-    """Ticket keys a prompt names, upper case only (replay Limit 7)."""
+def parse_ticket_keys(keys) -> tuple:
+    """Upper-case prefixes of one to ten letters or digits, starting with a
+    letter. Ticket prefixes are a local setting (``store.ticket_keys``), never
+    part of the repo. The same rule as the replay's ``parse_ticket_keys``."""
+    if isinstance(keys, str):
+        keys = keys.split(",")
+    if not isinstance(keys, (list, tuple)):
+        return ()
+    clean = (k.strip() for k in keys if isinstance(k, str))
+    return tuple(dict.fromkeys(k for k in clean if _KEY.match(k)))
+
+
+@functools.lru_cache(maxsize=32)
+def _ticket_patterns(keys: tuple):
+    if not keys:
+        return None, None
+    alt = r"\b(?:%s)-\d+\b" % "|".join(map(re.escape, keys))
+    return re.compile(alt), re.compile(alt, re.I)
+
+
+def prompt_tickets(text: str, keys=()) -> list[str]:
+    """Ticket keys with a configured prefix that a prompt names, upper case
+    only (replay Limit 7). No prefixes, no tickets."""
+    upper, _ = _ticket_patterns(tuple(keys))
     out: list[str] = []
-    for t in _TICKET.findall(text or ""):
+    if upper is None:
+        return out
+    for t in upper.findall(text or ""):
         if t not in out:
             out.append(t)
     return out
 
 
-def branch_ticket(name: str | None) -> str | None:
-    """The first ticket key in a branch name, which is usually lower case."""
-    m = _TICKET_ANY_CASE.search(name or "")
+def branch_ticket(name: str | None, keys=()) -> str | None:
+    """The first ticket key with a configured prefix in a branch name, which
+    is usually lower case."""
+    _, any_case = _ticket_patterns(tuple(keys))
+    m = any_case.search(name or "") if any_case else None
     return m.group(0).upper() if m else None
 
 

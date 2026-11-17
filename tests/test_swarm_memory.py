@@ -33,7 +33,7 @@ def git(*args):
 
 @pytest.fixture
 def repo(tmp_path):
-    """``proj`` on main, with worktrees ``a`` (branch agent/gra-101-a) and ``b`` (agent/gra-102-b)."""
+    """``proj`` on main, with worktrees ``a`` (branch agent/abc-101-a) and ``b`` (agent/abc-102-b)."""
     main = tmp_path / "proj"
     git("init", "-q", "-b", "main", str(main))
     (main / "src").mkdir()
@@ -43,14 +43,18 @@ def repo(tmp_path):
     (main / "scripts" / "run.sh").write_text("echo run\n")
     git("-C", str(main), "add", ".")
     git("-C", str(main), "commit", "-q", "-m", "init")
-    git("-C", str(main), "worktree", "add", "-q", "-b", "agent/gra-101-a", str(main / ".worktrees" / "a"))
-    git("-C", str(main), "worktree", "add", "-q", "-b", "agent/gra-102-b", str(main / ".worktrees" / "b"))
+    git("-C", str(main), "worktree", "add", "-q", "-b", "agent/abc-101-a", str(main / ".worktrees" / "a"))
+    git("-C", str(main), "worktree", "add", "-q", "-b", "agent/abc-102-b", str(main / ".worktrees" / "b"))
     return main
 
 
 @pytest.fixture
 def db(tmp_path):
-    return str(tmp_path / "state" / "observe.sqlite3")
+    """A store path whose ``config.json`` sets the made-up ticket prefix ABC."""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "config.json").write_text('{"ticket_keys": ["ABC"]}')
+    return str(state / "observe.sqlite3")
 
 
 def wt(repo, name):
@@ -117,14 +121,38 @@ class TestLocate:
 
     def test_the_branch_and_its_ticket_come_from_the_checkouts_head(self, repo):
         loc = rules.locate(str(wt(repo, "a")))
-        assert rules.branch(loc[3]) == "agent/gra-101-a"
-        assert rules.branch_ticket(rules.branch(loc[3])) == "GRA-101"
-        assert rules.branch_ticket("main") is None
+        assert rules.branch(loc[3]) == "agent/abc-101-a"
+        assert rules.branch_ticket(rules.branch(loc[3]), ("ABC",)) == "ABC-101"
+        assert rules.branch_ticket("main", ("ABC",)) is None
+        assert rules.branch_ticket(rules.branch(loc[3])) is None
 
     def test_paths_outside_a_repo_or_inside_dot_git_are_not_repo_files(self, repo, tmp_path):
         (tmp_path / "loose.txt").write_text("x")
         assert rules.file_location(str(tmp_path / "loose.txt")) is None
         assert rules.file_location(str(repo / ".git" / "HEAD")) is None
+
+
+class TestTicketKeys:
+    """Ticket prefixes are a local setting beside the store, never part of the repo."""
+
+    def test_prefixes_come_from_the_config_beside_the_store(self, tmp_path):
+        store_path = str(tmp_path / "observe.sqlite3")
+        assert store.ticket_keys(store_path) == ()
+        (tmp_path / "config.json").write_text('{"ticket_keys": ["ABC", "not a key", "abc", "XYZ", "ABC"]}')
+        assert store.ticket_keys(store_path) == ("ABC", "XYZ")
+        (tmp_path / "config.json").write_text("not json")
+        assert store.ticket_keys(store_path) == ()
+
+    def test_the_prefix_rule_matches_the_replay(self):
+        for keys in (["ABC", "xy", "X1", "TOOLONGPREFIX1", "A-B"], "ABC, XYZ", None, 7):
+            assert rules.parse_ticket_keys(keys) == replay.parse_ticket_keys(keys)
+
+    def test_with_no_prefixes_configured_nothing_names_a_ticket(self, tmp_path, repo):
+        bare = str(tmp_path / "bare" / "observe.sqlite3")
+        start(bare, "s1", wt(repo, "a"), T)
+        fire(bare, "UserPromptSubmit", "s1", wt(repo, "a"), T + 1, prompt="Work on ABC-7")
+        rid, info, _ = session_record(bare, "s1")
+        assert links(bare, rid, "ticket") == [] and "ticket_from" not in json.loads(info)
 
 
 class TestReplayParity:
@@ -278,24 +306,24 @@ class TestSession:
     def test_session_start_records_repo_worktree_branch_and_ticket(self, db, repo):
         start(db, "s1", wt(repo, "a"), T)
         rid, info, status = session_record(db, "s1")
-        assert json.loads(info) == {"branch": "agent/gra-101-a", "ticket_from": "branch"} and status == "active"
-        assert links(db, rid, "ticket") == ["GRA-101"]
+        assert json.loads(info) == {"branch": "agent/abc-101-a", "ticket_from": "branch"} and status == "active"
+        assert links(db, rid, "ticket") == ["ABC-101"]
         assert links(db, rid, "repo") == [os.path.realpath(repo / ".git")]
         assert links(db, rid, "worktree") == [os.path.realpath(wt(repo, "a"))]
 
     def test_without_a_branch_ticket_the_first_prompt_supplies_it(self, db, repo):
         start(db, "s1", repo, T)
-        fire(db, "UserPromptSubmit", "s1", repo, T + 1, prompt="Work on MUD-77 next, not gra-5")
-        fire(db, "UserPromptSubmit", "s1", repo, T + 2, prompt="Also MUD-78")
+        fire(db, "UserPromptSubmit", "s1", repo, T + 1, prompt="Work on ABC-77 next, not abc-5")
+        fire(db, "UserPromptSubmit", "s1", repo, T + 2, prompt="Also ABC-78")
         rid, info, _ = session_record(db, "s1")
-        assert links(db, rid, "ticket") == ["MUD-77"]
+        assert links(db, rid, "ticket") == ["ABC-77"]
         assert json.loads(info)["ticket_from"] == "prompt"
 
     def test_a_session_first_seen_after_it_started_is_still_recorded(self, db, repo):
         edit(db, "s1", wt(repo, "b"), T, wt(repo, "b") / "README.md", "t1")
         rid, info, _ = session_record(db, "s1")
-        assert json.loads(info)["branch"] == "agent/gra-102-b"
-        assert links(db, rid, "ticket") == ["GRA-102"]
+        assert json.loads(info)["branch"] == "agent/abc-102-b"
+        assert links(db, rid, "ticket") == ["ABC-102"]
 
     def test_a_session_outside_any_repo_records_the_repos_it_touches_apart(self, db, repo, tmp_path):
         """A lead often runs from ~/Projects and edits repos by absolute path. Its
@@ -388,12 +416,12 @@ class TestWouldDeliver:
         start(db, "s1", a, T)
         edit(db, "s1", a, T + MIN, a / "src" / "app.py", "t1")
         start(db, "s2", repo, T + 2 * MIN)
-        fire(db, "UserPromptSubmit", "s2", repo, T + 3 * MIN, prompt="Pick up GRA-101 and fix src/app.py")
-        fire(db, "UserPromptSubmit", "s2", repo, T + 4 * MIN, prompt="Again: GRA-101, src/app.py")
+        fire(db, "UserPromptSubmit", "s2", repo, T + 3 * MIN, prompt="Pick up ABC-101 and fix src/app.py")
+        fire(db, "UserPromptSubmit", "s2", repo, T + 4 * MIN, prompt="Again: ABC-101, src/app.py")
         (sid, _, records, detail), = delivered(db, "first_prompt")
         activity = q(db, "SELECT id FROM record WHERE kind = 'activity'")[0][0]
         assert sid == "s2" and records == sorted([session_record(db, "s1")[0], activity])
-        assert detail == {"tickets": ["GRA-101"], "files": ["src/app.py"]}
+        assert detail == {"tickets": ["ABC-101"], "files": ["src/app.py"]}
 
     def test_a_swarm_brief_file_is_looked_up_when_the_worker_reads_it(self, db, repo):
         """ollama-swarm and epic-squad workers get "Read ./SWARM_BRIEF.md ..." as
@@ -401,7 +429,7 @@ class TestWouldDeliver:
         a = wt(repo, "a")
         start(db, "s1", a, T)
         edit(db, "s1", a, T + MIN, a / "src" / "app.py", "t1")
-        (repo / "SWARM_BRIEF.md").write_text("Slice 2 of GRA-101.\nChange src/app.py only.\n")
+        (repo / "SWARM_BRIEF.md").write_text("Slice 2 of ABC-101.\nChange src/app.py only.\n")
         start(db, "w1", repo, T + 2 * MIN)
         fire(db, "UserPromptSubmit", "w1", repo, T + 2 * MIN, prompt="Read ./SWARM_BRIEF.md in this directory and follow it exactly.")
         assert delivered(db, "first_prompt") == []
@@ -410,18 +438,18 @@ class TestWouldDeliver:
         (sid, _, records, detail), = delivered(db, "brief_file")
         activity = q(db, "SELECT id FROM record WHERE tool_use_id = 't1'")[0][0]
         assert sid == "w1" and records == sorted([session_record(db, "s1")[0], activity])
-        assert detail == {"tickets": ["GRA-101"], "files": ["src/app.py"]}
+        assert detail == {"tickets": ["ABC-101"], "files": ["src/app.py"]}
         rid, info, _ = session_record(db, "w1")
-        assert links(db, rid, "ticket") == ["GRA-101"] and json.loads(info)["ticket_from"] == "brief"
+        assert links(db, rid, "ticket") == ["ABC-101"] and json.loads(info)["ticket_from"] == "brief"
 
     def test_a_brief_read_with_a_shell_command_counts_too(self, db, repo):
         a = wt(repo, "a")
         start(db, "s1", a, T)
-        (repo / "EPIC_BRIEF.md").write_text("Slice of GRA-101.\n")
+        (repo / "EPIC_BRIEF.md").write_text("Slice of ABC-101.\n")
         start(db, "w1", repo, T + MIN)
         tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": "cat ./EPIC_BRIEF.md"}, "t1")
         (sid, _, records, detail), = delivered(db, "brief_file")
-        assert sid == "w1" and records == [session_record(db, "s1")[0]] and detail["tickets"] == ["GRA-101"]
+        assert sid == "w1" and records == [session_record(db, "s1")[0]] and detail["tickets"] == ["ABC-101"]
 
     def test_whoever_wrote_a_brief_file_is_not_a_holder_of_it(self, db, repo):
         tool_ok(db, "lead", repo, T, "Write", {"file_path": str(repo / "EPIC_BRIEF.md"), "content": "x"}, "t1")

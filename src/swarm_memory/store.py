@@ -27,6 +27,8 @@ import os
 import sqlite3
 import time
 
+from swarm_memory import rules
+
 ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
@@ -85,6 +87,27 @@ class Busy(Exception):
 
 def db_path(arg: str | None = None) -> str:
     return arg or os.environ.get(ENV_DB) or DEFAULT_DB
+
+
+CONFIG_NAME = "config.json"
+
+
+def config_path(db: str) -> str:
+    """The local settings file beside the store, such as
+    ``{"ticket_keys": ["ABC", "XYZ"]}``. Ticket prefixes live here, never in
+    the repo."""
+    return os.path.join(os.path.dirname(db) or ".", CONFIG_NAME)
+
+
+def ticket_keys(db: str) -> tuple:
+    """The configured ticket prefixes. With no file or no keys nothing names a
+    ticket: sessions get no ticket link, and Moment 2 matches on files only."""
+    try:
+        with open(config_path(db), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return ()
+    return rules.parse_ticket_keys(data.get("ticket_keys") if isinstance(data, dict) else None)
 
 
 def connect(path: str) -> sqlite3.Connection:

@@ -70,7 +70,7 @@ def run(raw: str, db_arg: str | None = None, t0: float | None = None, ts: float 
         session_id = payload.get("session_id")
         con = store.connect(path)
         try:
-            handle(con, payload, ts, t0)
+            handle(con, payload, ts, t0, store.ticket_keys(path))
         finally:
             con.close()
     except store.Busy:
@@ -104,8 +104,9 @@ def _record_error(path, ts, hook, session_id, exc) -> None:
 class Call:
     """The parts of a hook payload the handlers read."""
 
-    def __init__(self, payload: dict):
+    def __init__(self, payload: dict, keys=()):
         self.payload = payload
+        self.keys = tuple(keys)
         self.hook = payload.get("hook_event_name")
         self.sid = payload.get("session_id")
         cwd = payload.get("cwd")
@@ -121,8 +122,8 @@ class Call:
         self.dedupe = None
 
 
-def handle(con, payload: dict, ts: float, t0: float) -> None:
-    call = Call(payload)
+def handle(con, payload: dict, ts: float, t0: float, keys=()) -> None:
+    call = Call(payload, keys)
     if call.hook not in HOOKS or not isinstance(call.sid, str) or not call.sid:
         return
     store.begin(con)
@@ -143,7 +144,7 @@ def _ensure_session(con, call: Call, ts: float):
     row = con.execute("SELECT id FROM record WHERE kind = 'session' AND session_id = ?", (call.sid,)).fetchone()
     if row is None:
         br = rules.branch(loc[3]) if loc else None
-        ticket = rules.branch_ticket(br)
+        ticket = rules.branch_ticket(br, call.keys)
         info = {"branch": br, "ticket_from": "branch" if ticket else None}
         agent_type = call.payload.get("agent_type") if call.hook == "SessionStart" else None
         if isinstance(agent_type, str) and agent_type:
@@ -167,7 +168,7 @@ def _on_session_start(con, call: Call, session, ts: float) -> dict:
     detail = {"source": source}
     if loc is None:
         return detail
-    ticket = rules.branch_ticket(rules.branch(loc[3]))
+    ticket = rules.branch_ticket(rules.branch(loc[3]), call.keys)
     if ticket:
         store.add_links(con, rid, ts, [("ticket", ticket)])
     rows = con.execute(
@@ -203,7 +204,7 @@ def _holders(con, call: Call, rid: int, text: str, bases: list, ts: float, momen
     ticket the text names, or have edited a repo file it names. A brief file
     is never a held file: each worker has its own. The text also supplies the
     session's ticket when it has none yet."""
-    tickets = rules.prompt_tickets(text)
+    tickets = rules.prompt_tickets(text, call.keys)
     files = [fl for fl in (rules.file_location(p) for p in rules.named_files(text, bases))
              if fl and os.path.basename(fl[3]) not in BRIEF_FILES]
     if tickets and not con.execute("SELECT 1 FROM link WHERE record_id = ? AND type = 'ticket'", (rid,)).fetchone():
