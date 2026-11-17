@@ -609,6 +609,22 @@ class TestWouldDeliver:
         first = q(db, "SELECT id FROM record WHERE tool_use_id = 't1'")[0][0]
         assert rows[0][2] == [first] and rows[0][3]["age_s"] == 120
 
+    def test_a_symlink_and_its_target_are_one_file(self, db, repo):
+        """Review finding: a link such as alias.py -> src/app.py got its own
+        file key, so two sessions editing one physical file never matched."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        os.symlink("src/app.py", a / "alias.py")
+        os.symlink("src", a / "lib")
+        for name in ("alias.py", "lib/app.py"):
+            assert rules.file_location(str(a / name))[2:] == (os.path.realpath(a), "src/app.py"), name
+        edit(db, "s1", a, T, a / "alias.py", "t1")
+        edit(db, "s2", b, T + MIN, b / "src" / "app.py", "t2")
+        assert [(s, d["file"]) for s, _, _, d in delivered(db, "same_file_edit")] == [("s2", "src/app.py")]
+        outside = repo.parent / "elsewhere.py"
+        outside.write_text("y = 2\n")
+        os.symlink(str(outside), a / "out.py")
+        assert rules.file_location(str(a / "out.py")) is None
+
     def test_an_old_edit_a_read_or_a_mention_is_not_a_same_file_edit(self, db, repo):
         a, b = wt(repo, "a"), wt(repo, "b")
         edit(db, "s1", a, T, a / "src" / "app.py", "t1")

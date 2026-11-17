@@ -112,9 +112,14 @@ def repo_rel(path: str, root: str) -> str | None:
 def file_location(path: str):
     """``(repo_key, repo_name, worktree, rel)`` for a file inside a checkout, else None.
 
-    ``worktree`` is the real path of the checkout root. ``rel`` is relative to
-    that root, so the same file in two worktrees of one repo gets one ``rel``.
+    The path is first resolved to the file it names, symlinks included, so a
+    link and its target are one file. ``worktree`` is the real path of the
+    checkout root. ``rel`` is relative to that root, so the same file in two
+    worktrees of one repo gets one ``rel``.
     """
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return None
+    path = os.path.realpath(path)
     loc = locate(path)
     if loc is None:
         return None
