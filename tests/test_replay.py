@@ -411,6 +411,33 @@ class TestReadOnly:
         assert not marker.exists()
 
 
+class TestBackgroundLaunch:
+    def test_a_background_launch_has_no_known_outcome_and_resolves_nothing(self, tmp_path):
+        """Review finding: a background launch's acknowledgement counted as the
+        way past a failure, even if the command later failed."""
+        import json
+        sid, recs = "s-bg", []
+
+        def call(i, cmd, at, result, error=False, background=False):
+            inp = {"command": cmd, **({"run_in_background": True} if background else {})}
+            recs.append({"type": "assistant", "sessionId": sid, "timestamp": at[0], "cwd": "/tmp/x",
+                         "message": {"content": [{"type": "tool_use", "id": f"t{i}", "name": "Bash", "input": inp}]}})
+            recs.append({"type": "user", "sessionId": sid, "timestamp": at[1], "cwd": "/tmp/x",
+                         "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": result,
+                                                  "is_error": error}]}})
+
+        call(0, "npm test", ("2026-11-01T10:00:00Z", "2026-11-01T10:01:00Z"), "Exit code 1\nError: 3 failed", error=True)
+        call(1, "npm test", ("2026-11-01T10:02:00Z", "2026-11-01T10:02:01Z"),
+             "Command running in background with ID: b1. Output is being written to: /tmp/o", background=True)
+        call(2, "npm test", ("2026-11-01T10:05:00Z", "2026-11-01T10:06:00Z"), "ok")
+        path = tmp_path / f"{sid}.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+        calls = replay.scan_transcript(str(path), 0)["sessions"][sid]["calls"]
+        assert [c["ok"] for c in calls] == [False, None, True]
+        assert replay.first_resolution(calls, 0) == 2
+        assert replay._ASYNC_LAUNCH.search("Async agent launched successfully. (internal metadata)")
+
+
 class TestGitRunsNoRepoCode:
     def test_a_configured_fsmonitor_hook_never_runs(self, tmp_path):
         """Review finding: git ls-files ran a repo's core.fsmonitor hook."""

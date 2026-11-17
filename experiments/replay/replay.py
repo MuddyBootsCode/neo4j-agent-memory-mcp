@@ -21,7 +21,9 @@ Each tool call and prompt is counted once. The repo and worktree come from
 the session's cwd: the path before ``/.claude/worktrees/<name>`` (or the cwd
 itself) walked up to the directory that holds ``.git``. The main checkout
 counts as one worktree. An agent is a session, and two agents are different
-when they ran in different worktrees.
+when they ran in different worktrees. A session keeps the checkout of its
+first cwd in a repo, so one that moves into another worktree part-way stays
+attributed to the first: runs and hits are a lower bound for such sessions.
 
 Runs. A session's activity is split into spans wherever two consecutive
 events are more than ``--idle-gap`` minutes apart. Two sessions in different
@@ -51,7 +53,8 @@ is the F4 normaliser (MUD-478 attachment ``failure-recurrence-baseline-
 in the same run had failed with that signature within the window before. That
 earlier agent got past it when a later call of the same kind succeeded: same
 command prefix for Bash, same tool on the same file for file tools, same tool
-otherwise. Hook blocks and rejected tool inputs are counted apart from
+otherwise. A background launch (``run_in_background``, or an agent launched
+async) answers before its work ends, so it never counts as getting past. Hook blocks and rejected tool inputs are counted apart from
 command and tool failures.
 
 Moment 2 (with the prompt). A prompt is a hit when it contains a path that
@@ -786,6 +789,9 @@ def prompt_error_lines(text: str) -> list[str]:
 
 # ---------------------------------------------------------------- transcript scan
 
+_ASYNC_LAUNCH = re.compile(r"Command running in background with ID|Async agent launched")
+
+
 def _new_bucket() -> dict:
     return {"times": [], "cwds": [], "branches": collections.Counter(), "calls": [], "prompts": [], "briefs": []}
 
@@ -858,6 +864,7 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                     call = {"id": b.get("id"), "ts": ts, "line": line_no, "tool": name, "sub": is_sub,
                             "path": fpath if isinstance(fpath, str) else None,
                             "command": command[:2000] if command else None,
+                            "background": bool(args.get("run_in_background")),
                             "ok": None, "blocked": False, "rts": None, "error": None}
                     bucket["calls"].append(call)
                     if isinstance(b.get("id"), str):
@@ -881,7 +888,10 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                             if flat:
                                 call["error"] = text if len(text) <= 4000 else text[:1500] + "\n" + text[-2500:]
                         else:
-                            call["ok"] = True
+                            # A background launch answers before its work ends, so
+                            # its outcome is unknown and it cannot resolve a failure.
+                            launched = call["background"] or _ASYNC_LAUNCH.search(flat[:200])
+                            call["ok"] = None if launched else True
                 if want_prompts:
                     pid = rec.get("promptId") or rec.get("uuid") or f"{path}:{line_no}"
                     if pid in seen_prompt_ids:
