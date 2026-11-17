@@ -36,8 +36,8 @@ Would deliver (one ``event`` row each, naming the records it would have shown)
   within 60 minutes, once per session, file and other session.
 
 Never stored: command text, prompt text, tool output. The store keeps the
-program, repo-relative paths, and a failed call's exit code, kind and keyed
-signature hash.
+program as one bare name, the repo-relative paths of files that exist, and a
+failed call's exit code, kind and keyed signature hash.
 """
 
 from __future__ import annotations
@@ -94,7 +94,8 @@ def _side(path, name, ts, hook, session_id, what) -> None:
 
 
 def _record_error(path, ts, hook, session_id, exc) -> None:
-    detail = {"type": type(exc).__name__, "message": rules.scrub(str(exc))[:120]}
+    # The exception's type only: its message can quote a path or a command.
+    detail = {"type": rules.bare_name(type(exc).__name__)}
     try:
         con = store.connect(path)
         try:
@@ -293,7 +294,8 @@ def _describe(call: Call) -> dict:
         path = path if isinstance(path, str) and path else None
         if path and not os.path.isabs(path) and call.cwd:
             path = os.path.join(call.cwd, path)
-        fl = rules.file_location(path) if path else None
+        # Only a file that exists: a failed call can name any text as its path.
+        fl = rules.file_location(path) if path and os.path.isfile(path) else None
         return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read", "program": None}
     if tool in rules.SHELL_TOOLS:
         cmd = ti.get("command") if isinstance(ti.get("command"), str) else ""

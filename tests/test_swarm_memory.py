@@ -212,6 +212,23 @@ class TestReplayParity:
             assert rules.failure_signature(text) == replay.failure_signature(text), text
             assert rules.failure_kind(text) == replay.failure_kind(text), text
 
+    def test_command_files_match_the_replay(self, repo):
+        """Both copies resolve a Bash command's paths the same way: each
+        segment from the directory its cd moved to, starting from the call's
+        cwd, and a file a segment only runs is no touch."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        (repo / "src" / "util.py").write_text("y = 2\n")
+        cmds = ["cat src/app.py README.md", f"cd {b} && cat README.md", "bash -lc 'cd src && cat app.py' && cat README.md",
+                f"agent-test-budget run -- /bin/zsh -c 'cd {a} && bash scripts/run.sh src/app.py'",
+                "cd src && cat app.py util.py", "bash scripts/run.sh && cat scripts/run.sh"]
+
+        def to_file(path):
+            return (path, None) if path and os.path.isfile(path) else None
+
+        for cmd in cmds:
+            named, executed = replay.command_touches(cmd, str(repo), to_file)
+            assert sorted(rules.command_files(cmd, str(repo))) == sorted(f for f, _ in named if f not in executed), cmd
+
 
 class TestCommandProgram:
     """The program a shell command runs, linked from its activity and failures."""
@@ -221,7 +238,25 @@ class TestCommandProgram:
                  "FOO=1 npm run build": "npm", "bash -c 'python3 -m ruff check src'": "ruff",
                  "agent-test-budget run -- /bin/zsh -c 'cd /x && make lint'": "make",
                  "bash -lc 'npm run test -- --ci'": "npm", "timeout 60 npm test": "npm",
-                 "bash -x scripts/run.sh -c x": "bash", "export A=1; cd /tmp": "export", "": ""}
+                 "bash -x scripts/run.sh -c x": "bash", "export A=1; cd /tmp": "export", "": "",
+                 "/opt/homebrew/bin/python3 -I x.py": "python3"}
+        for cmd, prog in cases.items():
+            assert rules.command_program(cmd) == prog, cmd
+
+    def test_anything_but_one_bare_name_stores_no_program(self):
+        """Review finding: env -S carried a whole command, credential included,
+        into the program. Only one bare name is ever a program."""
+        for cmd in ("env -S 'curl --user alice:hunterpw' https://example.invalid", "npx create-react-app@latest app",
+                    "'my tool' --flag", "x" * 65):
+            assert rules.command_program(cmd) == "", cmd
+
+    def test_a_word_after_a_wrapper_option_is_not_the_program(self):
+        """It may be the option's value: a user, a package, a signal."""
+        for cmd in ("sudo -u alice id", "uv run --with hunterpw ruff check", "npx -p hunterpw cowsay",
+                    "timeout -s KILL 5 make", "env -u HOMEBREW_GITHUB_API_TOKEN brew list"):
+            assert rules.command_program(cmd) == "", cmd
+        cases = {"env -i PATH=/usr/bin make": "make", "sudo -- make install": "make", "timeout 5 make": "make",
+                 "python3 -m pytest -q": "pytest"}
         for cmd, prog in cases.items():
             assert rules.command_program(cmd) == prog, cmd
 
@@ -601,8 +636,8 @@ class TestSafety:
         tool_ok(db, "s1", repo, T, "Bash", {"command": "ls"}, "t1")
         observe.run("not json", db_arg=db, ts=T)
         rows = q(db, "SELECT hook, detail FROM event WHERE kind = 'hook_error' ORDER BY id")
-        assert [(h, json.loads(d)["type"]) for h, d in rows] == [("PostToolUse", "RuntimeError"),
-                                                                  (None, "JSONDecodeError")]
+        assert [(h, json.loads(d)) for h, d in rows] == [("PostToolUse", {"type": "RuntimeError"}),
+                                                          (None, {"type": "JSONDecodeError"})]
         assert q(db, "SELECT count(*) FROM record") == [(0,)]
 
     def test_a_busy_store_is_skipped_and_counted(self, db, repo):
@@ -821,6 +856,34 @@ class TestSafety:
         (sig,), = q(db, "SELECT key FROM link WHERE type = 'signature'")
         out = report.build(db)
         assert "toolu_x1" in out and sig[:12] in out and sig not in out and "make: ***" not in out
+
+    def test_a_credential_in_wrapper_arguments_reaches_no_record_link_or_report(self, db, repo):
+        """Review finding: the program of ``env -S 'curl --user ...'`` was the
+        whole quoted command, stored in records and program links and printed."""
+        cmd = f"env -S 'curl --user alice:hunterpw' https://example.invalid {repo}/README.md"
+        tool_ok(db, "s1", repo, T, "Bash", {"command": cmd}, "t1")
+        tool_fail(db, "s1", repo, T + 1, "Bash", {"command": cmd}, "Exit code 22\ncurl: (22) error 401", "t2")
+        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"sudo -u alice cat {repo}/README.md"}, "t3")
+        assert q(db, "SELECT kind FROM record WHERE kind != 'session' ORDER BY id") == [("activity",), ("failure",),
+                                                                                    ("activity",)]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'program'") == [(0,)]
+        dump = "\n".join(str(row) for table in ("event", "record", "link")
+                         for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        text = (dump + report.build(db)).lower()
+        assert "hunterpw" not in text and "alice" not in text and "--user" not in text
+
+    def test_a_failed_file_tool_path_that_names_no_file_is_not_stored(self, db, repo):
+        """A failed Read or Edit kept its path whether or not the file existed,
+        so any text given as the path was stored in a file link."""
+        tool_fail(db, "s1", repo, T, "Read", {"file_path": f"{repo}/no such file, alice hunterpw.txt"},
+                  "File does not exist.", "t1")
+        tool_fail(db, "s1", repo, T + 1, "Edit", {"file_path": f"{repo}/README.md"}, "String to replace not found", "t2")
+        keys = [k for (k,) in q(db, "SELECT key FROM link WHERE type = 'file'")]
+        assert len(keys) == 1 and keys[0].endswith("::README.md")
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'failure'") == [(2,)]
+        dump = "\n".join(str(row) for table in ("event", "record", "link")
+                         for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        assert "hunterpw" not in dump and "hunterpw" not in report.build(db)
 
     def test_no_prompt_command_or_output_text_is_stored(self, db, repo):
         start(db, "s1", repo, T)

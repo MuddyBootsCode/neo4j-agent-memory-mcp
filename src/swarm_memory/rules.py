@@ -212,6 +212,14 @@ def _segments(command: str) -> list[list[str]]:
 
 
 def _strip_wrappers(toks: list[str]) -> list[str]:
+    return _unwrap(toks)[0]
+
+
+def _unwrap(toks: list[str]) -> tuple[list[str], bool]:
+    """``toks`` without its wrappers, and whether the word now first came
+    right after a wrapper option, so it may be that option's value
+    (``sudo -u alice id``) rather than the program."""
+    after_option = False
     changed = True
     while toks and changed:
         changed = False
@@ -223,11 +231,13 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
         elif re.fullmatch(r"python[\d.]*", head) and len(toks) >= 3 and toks[1] == "-m":
             toks, changed = toks[2:], True
         if changed:
+            after_option = False
             while toks and (toks[0].startswith("-") or _ENV_ASSIGN.match(toks[0])):
+                after_option = toks[0].startswith("-") and toks[0] != "--"
                 toks = toks[1:]
             if head == "timeout" and toks and _DURATION.match(toks[0]):
-                toks = toks[1:]
-    return toks
+                toks, after_option = toks[1:], False
+    return toks, after_option
 
 
 _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
@@ -282,10 +292,27 @@ def program_tokens(command: str) -> list[str]:
     return out
 
 
+# A stored program is one bare name. Anything else, such as a whole command a
+# wrapper option carried (env -S 'curl --user a:b'), is not stored at all.
+_BARE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+
+
+def bare_name(value) -> str | None:
+    """``value`` when it is one bare name (letters, digits, ``.``, ``_``,
+    ``+``, ``-``, at most 64), else None."""
+    return value if isinstance(value, str) and _BARE_NAME.fullmatch(value) else None
+
+
 def command_program(command: str) -> str:
     """The program a command runs, without its arguments: the first command
     that is not a cd, export or similar, with wrappers such as ``uv run``
-    stripped and a shell's ``-c`` string read as commands of its own."""
+    stripped and a shell's ``-c`` string read as commands of its own. Empty
+    when that is not one bare name, or when the word follows a wrapper option
+    and may be its value, so a wrapper argument is never stored."""
+    return bare_name(_first_program(command)) or ""
+
+
+def _first_program(command: str) -> str:
     if not isinstance(command, str) or not command.strip():
         return ""
     first_head = ""
@@ -298,13 +325,15 @@ def command_program(command: str) -> str:
         first_head = first_head or head
         if head in _SKIP_HEADS:
             continue
-        toks = _strip_wrappers(toks)
+        toks, after_option = _unwrap(toks)
         if not toks:
             continue
+        if after_option:
+            return ""
         prog = os.path.basename(toks[0])
         inner = _shell_command_string(toks[1:]) if prog in _SHELLS else None
-        if inner is not None and command_program(inner):
-            return command_program(inner)
+        if inner is not None and _first_program(inner):
+            return _first_program(inner)
         return prog
     return first_head
 
@@ -440,15 +469,6 @@ def diag_line(t):
             return ln
     return lines[-1]
 # --- end of the F4 code ---
-
-
-_SECRETISH = re.compile(r"[A-Za-z0-9_\-]{24,}")
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-
-
-def scrub(text: str) -> str:
-    """Drop anything token-shaped (replay rule)."""
-    return _EMAIL.sub("<email>", _SECRETISH.sub("<tok>", text))
 
 
 def failure_signature(error_text: str) -> str | None:
