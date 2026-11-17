@@ -250,6 +250,16 @@ class TestCommandFiles:
         assert rules.command_files(f"cat README.md && cd {b} && cat src/app.py", str(a)) == [
             str(a / "README.md"), str(b / "src" / "app.py")]
 
+    def test_a_cd_inside_a_shell_c_string_moves_only_that_string(self, repo):
+        """Review finding: the cd inside ``bash -c '...'`` was ignored, so its
+        paths resolved from the outer directory. Every agent-test-budget run
+        has this shape."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        assert rules.command_files(f"bash -c 'cd {b} && cat README.md'", str(a)) == [str(b / "README.md")]
+        wrapped = f"agent-test-budget run -- /bin/zsh -c 'cd {b} && cat src/app.py'"
+        assert rules.command_files(wrapped, str(a)) == [str(b / "src" / "app.py")]
+        assert rules.command_files(f"bash -c 'cd {b}' && cat README.md", str(a)) == [str(a / "README.md")]
+
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
 
@@ -536,6 +546,17 @@ class TestWouldDeliver:
         (_, _, records, detail), = delivered(db, "brief_file")
         assert detail["tickets"] == ["ABC-101"] and records == [session_record(db, "s1")[0]]
 
+    def test_a_brief_read_after_a_cd_inside_a_shell_c_string_is_that_directorys_brief(self, db, repo):
+        """Review finding: the wrong brief was opened and marked read for good."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        start(db, "s1", a, T)
+        (repo / "SWARM_BRIEF.md").write_text("Nothing to do here.\n")
+        (b / "SWARM_BRIEF.md").write_text("Slice of ABC-101.\n")
+        start(db, "w1", repo, T + MIN)
+        tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": f"zsh -c 'cd {b} && cat SWARM_BRIEF.md'"}, "t1")
+        (_, _, records, detail), = delivered(db, "brief_file")
+        assert detail["tickets"] == ["ABC-101"] and records == [session_record(db, "s1")[0]]
+
     def test_whoever_wrote_a_brief_file_is_not_a_holder_of_it(self, db, repo):
         tool_ok(db, "lead", repo, T, "Write", {"file_path": str(repo / "EPIC_BRIEF.md"), "content": "x"}, "t1")
         (repo / "EPIC_BRIEF.md").write_text("Read README.md first.\n")
@@ -663,6 +684,24 @@ class TestSafety:
         text = (stored + report.build(db)).lower()
         for secret in secrets:
             assert secret not in text
+
+    def test_curl_user_credentials_reach_no_stored_field_and_no_report(self, db, repo):
+        """Review finding: an echoed ``curl -u app:password`` kept the password."""
+        secrets = ("blorptastic", "frobnicate", "glorbish", "quuxly", "zibble", "zabble", "snorfle")
+        errors = ["Exit code 22\nerror: curl --user app:blorptastic https://api.internal failed",
+                  "Exit code 22\n+ curl -u app:frobnicate https://api.internal\ncurl: (22) error 401",
+                  "Exit code 22\nerror: curl -uapp:glorbish -X POST https://api.internal failed",
+                  "Exit code 22\nerror: curl --proxy-user=proxy:quuxly https://api.internal failed",
+                  'Exit code 22\nerror: curl -U "proxy:zibble zabble" https://api.internal failed',
+                  "Exit code 1\nerror: wget --user=app:snorfle failed to connect"]
+        for n, err in enumerate(errors):
+            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
+        stored = "\n".join(str(row) for table in ("event", "record", "link")
+                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        text = (stored + report.build(db)).lower()
+        for secret in secrets:
+            assert secret not in text
+        assert rules.redact("error: git push -u origin main failed") == "error: git push -u origin main failed"
 
     def test_no_prompt_command_or_output_text_is_stored(self, db, repo):
         start(db, "s1", repo, T)

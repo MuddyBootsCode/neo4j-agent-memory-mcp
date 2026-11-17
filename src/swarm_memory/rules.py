@@ -385,13 +385,27 @@ def executed_files(command: str, bases: list[str]) -> set[str]:
 
 
 MAX_SEGMENTS = 200
+MAX_SHELL_DEPTH = 3
 
 
-def command_files(command: str, cwd: str) -> list[str]:
+def _shell_payload(toks: list[str]) -> str | None:
+    """The ``-c`` string of a segment that runs a shell, wrappers stripped."""
+    while toks and _ENV_ASSIGN.match(toks[0]):
+        toks = toks[1:]
+    toks = _strip_wrappers(toks)
+    if not toks or os.path.basename(toks[0]) not in _SHELLS:
+        return None
+    args = toks[1:]
+    return args[args.index("-c") + 1] if "-c" in args and args.index("-c") + 1 < len(args) else None
+
+
+def command_files(command: str, cwd: str, _depth: int = 0) -> list[str]:
     """Absolute paths of existing files a shell command names, except what it
     runs as a program (MUD-850 D18, replay rule). Each segment resolves its
     relative paths from the directory the command's ``cd`` had moved to by
-    then, as the shell would."""
+    then, as the shell would. A shell's ``-c`` string is read the same way,
+    from the directory that shell starts in, so its ``cd`` moves only its own
+    commands."""
     if not isinstance(command, str) or not command.strip() or not cwd:
         return []
     found: list[str] = []
@@ -401,12 +415,17 @@ def command_files(command: str, cwd: str) -> list[str]:
             if len(toks) >= 2:
                 current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
             continue
-        text = shlex.join(toks)
-        try:
-            executed = executed_files(text, [current])
-        except Exception:
-            executed = set()
-        for f in named_files(text, [current], exclude=executed):
+        inner = _shell_payload(toks) if _depth < MAX_SHELL_DEPTH else None
+        if inner is not None:
+            names = command_files(inner, current, _depth + 1)
+        else:
+            text = shlex.join(toks)
+            try:
+                executed = executed_files(text, [current])
+            except Exception:
+                executed = set()
+            names = named_files(text, [current], exclude=executed)
+        for f in names:
             if f not in found:
                 found.append(f)
                 if len(found) >= MAX_NAMED_FILES:
@@ -490,6 +509,9 @@ _SECRET_FLAG = re.compile(
 # The whole Authorization value, scheme and credential: Basic, Bearer or other.
 _AUTH_VALUE = re.compile(
     r"(?i)(authorization\\*['\"]?\s*[=:]\s*)(" + _QUOTED + r"|(?:[A-Za-z][\w-]*\s+)?\S+)")
+# user:password after curl's -u/--user or -U/--proxy-user, attached or not. A
+# bare value needs the colon, so git push -u origin and python -u keep theirs.
+_USER_FLAG = re.compile(r"(?<![\w-])(--(?:proxy-)?user(?:=|\s+)|-[uU]\s*)(" + _QUOTED + r"|[^\s:'\"]+:\S+)")
 _URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
 HEAD_CHARS = 160
 
@@ -503,11 +525,12 @@ def exit_code(error_text: str) -> int | None:
 def redact(text: str) -> str:
     """Credentials replaced: ``user:password@`` in URLs, the whole
     ``Authorization`` value whatever its scheme, the value after a flag such
-    as ``--password``, Bearer tokens, and the value after ``password=``,
-    ``token:`` and similar keys."""
+    as ``--password``, ``user:password`` after ``curl -u``, Bearer tokens,
+    and the value after ``password=``, ``token:`` and similar keys."""
     text = _URL_CREDENTIALS.sub(r"\1<redacted>@", text)
     text = _AUTH_VALUE.sub(lambda m: m.group(1) + "<redacted>", text)
     text = _SECRET_FLAG.sub(lambda m: m.group(1) + "<redacted>", text)
+    text = _USER_FLAG.sub(lambda m: m.group(1) + "<redacted>", text)
     text = _BEARER.sub("bearer <redacted>", text)
     return _SECRET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", text)
 
