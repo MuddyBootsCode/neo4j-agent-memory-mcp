@@ -21,9 +21,10 @@ Each tool call and prompt is counted once. The repo and worktree come from
 the session's cwd: the path before ``/.claude/worktrees/<name>`` (or the cwd
 itself) walked up to the directory that holds ``.git``. The main checkout
 counts as one worktree. An agent is a session, and two agents are different
-when they ran in different worktrees. A session keeps the checkout of its
-first cwd in a repo, so one that moves into another worktree part-way stays
-attributed to the first: runs and hits are a lower bound for such sessions.
+when they ran in different worktrees. Each touch is attributed to the worktree
+of the file it touched. A session whose cwd moves into another worktree of its
+repo is left out of runs, since a run places each session in one worktree; the
+summary counts them.
 
 Runs. A session's activity is split into spans wherever two consecutive
 events are more than ``--idle-gap`` minutes apart. Two sessions in different
@@ -330,7 +331,8 @@ def touch_ts(call: dict) -> float | None:
 
 
 def file_window_hits(events: list[dict], window_s: float, related=None) -> list[dict]:
-    """Events that another worktree's touch of the same (or a related) file preceded within the window.
+    """Events that another session's touch of the same (or a related) file, in
+    another worktree, preceded within the window.
 
     ``events``: dicts with ts, sid, worktree, file, all from one run.
     ``related``: None for the same file, else a function from a file to the
@@ -353,7 +355,7 @@ def file_window_hits(events: list[dict], window_s: float, related=None) -> list[
             hi = bisect.bisect_right(lst, (e["ts"], float("inf")))
             for _ts, k2 in reversed(lst[lo:hi]):
                 o = evs[k2]
-                if o is e or o["worktree"] == e["worktree"]:
+                if o is e or o["worktree"] == e["worktree"] or o["sid"] == e["sid"]:
                     continue
                 if best is None or o["ts"] > best["ts"]:
                     best = o
@@ -621,15 +623,6 @@ def prompt_paths(text: str, files, cwd_prefix: str = "", repo_root: str | None =
     return found
 
 
-def command_files(command: str, files, cwd_prefix: str = "", repo_root: str | None = None,
-                  suffix_index: dict | None = None, checkout_root: str | None = None) -> list[str]:
-    """Existing repo files a Bash command names, by the same rules as a
-    prompt. Relative paths are read from the session's starting directory,
-    so a path after a ``cd`` resolves only as a unique suffix."""
-    return prompt_paths(command or "", files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
-                        checkout_root=checkout_root)
-
-
 _INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
 _JS_INLINE = {"-e", "--eval", "-p", "--print"}
 _INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": _JS_INLINE, "ts-node": _JS_INLINE,
@@ -667,15 +660,63 @@ def program_tokens(command: str) -> list[str]:
     return out
 
 
-def executed_files(command: str, files, cwd_prefix: str = "", repo_root: str | None = None,
-                   suffix_index: dict | None = None, checkout_root: str | None = None) -> set[str]:
-    """Repo files a command runs as a program (``program_tokens``), which is
-    using a tool rather than working on the file."""
-    out: set[str] = set()
-    for tok in program_tokens(command):
-        out.update(prompt_paths(tok, files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
-                                checkout_root=checkout_root))
-    return out
+MAX_SEGMENTS = 200
+MAX_SHELL_DEPTH = 3
+
+
+def _shell_payload(toks: list[str]) -> str | None:
+    """The ``-c`` string of a segment that runs a shell, wrappers stripped."""
+    while toks and _ENV_ASSIGN.match(toks[0]):
+        toks = toks[1:]
+    toks = _strip_wrappers(toks)
+    if not toks or os.path.basename(toks[0]) not in _SHELLS:
+        return None
+    return _shell_command_string(toks[1:])
+
+
+def _absolute(tok: str, current: str) -> str | None:
+    """The absolute path a path-like token names from ``current``, else None."""
+    tok = _clean_token(tok)
+    if not tok or not ("/" in tok or _HAS_EXT.search(tok)):
+        return None
+    if tok.startswith("~"):
+        return os.path.normpath(os.path.expanduser(tok))
+    return os.path.normpath(tok if tok.startswith("/") else os.path.join(current, tok))
+
+
+def command_touches(command: str, cwd: str, to_file, _depth: int = 0) -> tuple[list, set]:
+    """The repo files a Bash command names, and those it only runs as a
+    program (``program_tokens``), which is using a tool rather than working on
+    the file. A file a segment runs and another segment reads is a touch.
+    Each segment resolves its relative paths from the directory the command's
+    ``cd`` had moved to, starting from the call's own cwd, and a shell's
+    ``-c`` string the same way from the directory that shell starts in.
+    ``to_file`` maps an absolute path to a ``(repo file, worktree)`` pair, or
+    None. The same rule as ``swarm_memory.rules.command_files``."""
+    named: list = []
+    plain: set = set()
+    current = cwd
+    for toks in _segments(command or "")[:MAX_SEGMENTS]:
+        if toks and toks[0] == "cd":
+            if len(toks) >= 2:
+                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
+            continue
+        inner = _shell_payload(toks) if _depth < MAX_SHELL_DEPTH else None
+        if inner is not None:
+            more, ran = command_touches(inner, current, to_file, _depth + 1)
+            named += [t for t in more if t not in named]
+            plain |= {f for f, _wt in more} - ran
+            continue
+        text = shlex.join(toks)
+        ran = {hit[0] for hit in (to_file(_absolute(tok, current) or "") for tok in program_tokens(text)) if hit}
+        for raw in _TOKEN_SPLIT.findall(text):
+            hit = to_file(_absolute(raw, current) or "")
+            if hit:
+                if hit not in named:
+                    named.append(hit)
+                if hit[0] not in ran:
+                    plain.add(hit[0])
+    return named, {f for f, _wt in named} - plain
 
 
 _KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
@@ -839,6 +880,7 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                     fpath = args.get("file_path") or args.get("notebook_path")
                     call = {"id": b.get("id"), "ts": ts, "line": line_no, "tool": name, "sub": is_sub,
                             "path": fpath if isinstance(fpath, str) else None,
+                            "cwd": cwd if isinstance(cwd, str) and cwd else None,
                             "command": command[:2000] if command else None,
                             "ok": None, "blocked": False, "rts": None, "error": None}
                     bucket["calls"].append(call)
@@ -961,6 +1003,7 @@ def find_git_root(path: str) -> tuple[str | None, str | None]:
         p = parent
 
 
+@functools.lru_cache(maxsize=None)
 def resolve_location(cwd: str) -> tuple[str | None, str | None]:
     """(repo root, worktree root) for a session cwd."""
     if not cwd:
@@ -978,6 +1021,27 @@ def resolve_location(cwd: str) -> tuple[str | None, str | None]:
     if repo is None:
         return None, None
     return repo, wt_root or checkout
+
+
+def worktree_of(path: str, repo_root: str, checkout: str | None) -> str | None:
+    """The checkout an absolute path lies in, lower-cased like session
+    worktrees: a linked worktree under the repo by its marker, the main
+    checkout, or the session's own checkout outside it."""
+    low = path.lower()
+    root = repo_root.lower().rstrip("/") + "/"
+    if low.startswith(root):
+        for marker in WORKTREE_MARKERS:
+            at = low.find(marker)
+            if at != -1:
+                return low[:at + len(marker)] + low[at + len(marker):].split("/", 1)[0]
+        return repo_root.lower()
+    if checkout and low.startswith(checkout.lower().rstrip("/") + "/"):
+        return checkout.lower()
+    return None
+
+
+def worktree_label(worktree: str, repo_root: str) -> str:
+    return "main checkout" if worktree == repo_root.lower() else os.path.basename(worktree)
 
 
 def repo_rel(path: str | None, repo_root: str) -> str | None:
@@ -1254,6 +1318,8 @@ def main(argv=None) -> int:
             continue
         ident = repo_identity(repo)
         repo = repo_roots.setdefault(ident, repo)
+        worktrees = {w.lower() for r, w in (resolve_location(c) for _t, c in m["cwds"])
+                     if r and repo_identity(r) == ident}
         for c in m["calls"]:
             c["file"] = repo_rel(c["path"], repo) or checkout_rel(c["path"], wt)
         own = sorted(f for f in m["files"] if os.path.basename(f)[:-6] == sid)
@@ -1262,6 +1328,7 @@ def main(argv=None) -> int:
         sessions[sid] = {
             "sid": sid, "repo": repo, "worktree": wt.lower(), "worktree_name": (
                 "main checkout" if wt == repo else os.path.basename(wt)),
+            "cwd": cwd, "moved": len(worktrees) > 1,
             "project_dir": os.path.basename(os.path.dirname(home)),
             "cwd_prefix": "" if cwd_prefix in (".", "") or cwd_prefix.startswith("..") else cwd_prefix,
             "times": m["times"], "spans": activity_spans(m["times"], gap_s),
@@ -1278,7 +1345,8 @@ def main(argv=None) -> int:
         s["repo_name"] = names[s["repo"]]
 
     # 3. Runs.
-    run_lists = group_runs(list(sessions.values()))
+    placed = [s for s in sessions.values() if not s["moved"]]
+    run_lists = group_runs(placed)
     runs = []
     for k, sids in enumerate(sorted(run_lists, key=lambda ss: min(sessions[s]["times"][0] for s in ss))):
         members = [sessions[s] for s in sids]
@@ -1295,11 +1363,11 @@ def main(argv=None) -> int:
     run_by_id = {r["run"]: r for r in runs}
     gap_sensitivity = {}
     for g in (5, 15, 30):
-        alt = [{**s, "spans": activity_spans(s["times"], g * 60)} for s in sessions.values()]
+        alt = [{**s, "spans": activity_spans(s["times"], g * 60)} for s in placed]
         rl = group_runs(alt)
         gap_sensitivity[g] = {"runs": len(rl), "sessions": sum(len(r) for r in rl)}
     first_pass = first_pass_runs(sessions)
-    rl = group_runs([s for s in sessions.values() if s["worktree_name"] != "main checkout"])
+    rl = group_runs([s for s in placed if s["worktree_name"] != "main checkout"])
     linked_only = {"runs": len(rl), "sessions": sum(len(r) for r in rl)}
 
     # 4. Repo file sets, relations.
@@ -1335,6 +1403,7 @@ def main(argv=None) -> int:
     }
     summary["runs"] = {
         "runs": len(runs), "sessions_in_runs": sum(len(r["sessions"]) for r in runs),
+        "sessions_left_out_because_their_cwd_moved_between_worktrees": len(sessions) - len(placed),
         "repos_with_runs": len({r["repo"] for r in runs}),
         "worktrees_per_run_median": _median([len(r["worktrees"]) for r in runs]),
         "worktrees_per_run_max": max((len(r["worktrees"]) for r in runs), default=0),
@@ -1443,15 +1512,17 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
     bash_events = collections.defaultdict(list)
     branch_of = collections.defaultdict(set)
     mix = collections.Counter()
-    suffix_idx = {}
     for s in sessions.values():
         rid = s.get("run")
         if not rid:
             continue
         repo = s["repo"]
         files = files_by_repo.get(repo, set())
-        if repo not in suffix_idx:
-            suffix_idx[repo] = build_suffix_index(files)
+
+        def to_file(path, repo=repo, files=files, wt=s["worktree"]):
+            rel = (repo_rel(path, repo) or checkout_rel(path, wt)) if path else None
+            return (rel, worktree_of(path, repo, wt) or wt) if rel in files else None
+
         for k, c in enumerate(s["calls"]):
             mix["tool calls in runs"] += 1
             mix["Bash calls in runs"] += c["tool"] == "Bash"
@@ -1462,19 +1533,18 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
             if ts is None:
                 mix["calls with no result"] += 1
                 continue
-            base = {"ts": ts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
-                    "repo": repo, "call": f"{s['sid']}:{k}", "tool": c["tool"]}
+            base = {"ts": ts, "sid": s["sid"], "repo": repo, "call": f"{s['sid']}:{k}", "tool": c["tool"]}
             if c["tool"] in FILE_TOOLS and c["file"]:
-                file_events[rid].append({**base, "file": c["file"], "edit": c["tool"] in EDIT_TOOLS})
+                wt = worktree_of(c["path"], repo, s["worktree"]) or s["worktree"]
+                file_events[rid].append({**base, "worktree": wt, "wt_name": worktree_label(wt, repo),
+                                         "file": c["file"], "edit": c["tool"] in EDIT_TOOLS})
                 branch_of[(repo, c["file"])].add(s["branch"])
             elif c["tool"] == "Bash" and c["command"]:
-                named = command_files(c["command"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
-                                      suffix_index=suffix_idx[repo], checkout_root=s["worktree"])
+                named, ran = command_touches(c["command"], c["cwd"] or s["cwd"], to_file)
                 mix["Bash calls naming a repo file"] += bool(named)
-                ran = executed_files(c["command"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
-                                     suffix_index=suffix_idx[repo], checkout_root=s["worktree"]) if named else set()
-                for f in named:
-                    bash_events[rid].append({**base, "file": f, "edit": False, "executed": f in ran})
+                for f, wt in named:
+                    bash_events[rid].append({**base, "worktree": wt, "wt_name": worktree_label(wt, repo),
+                                             "file": f, "edit": False, "executed": f in ran})
                     branch_of[(repo, f)].add(s["branch"])
     repo_of_run = {r["run"]: next(sessions[s]["repo"] for s in r["sessions"]) for r in runs}
     name_of_repo = {s["repo"]: s["repo_name"] for s in sessions.values()}
