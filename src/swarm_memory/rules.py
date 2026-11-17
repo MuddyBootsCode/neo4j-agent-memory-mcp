@@ -259,7 +259,8 @@ _HAS_EXT = re.compile(r"\.[A-Za-z][\w]{0,7}$")
 
 
 def _clean_token(tok: str) -> str:
-    tok = tok.strip(".,:;)]}>'\"`")
+    # A leading dot belongs to the path (./x, ../x, .env); only trailing dots are punctuation.
+    tok = tok.lstrip(",:;)]}>'\"`").rstrip(".,:;)]}>'\"`")
     tok = re.sub(r"(:\d+){1,2}$", "", tok)
     tok = re.sub(r"#L\d+(-L?\d+)?$", "", tok)
     tok = tok.lstrip("@")

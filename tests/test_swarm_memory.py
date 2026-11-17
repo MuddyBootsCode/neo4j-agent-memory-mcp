@@ -167,6 +167,17 @@ class TestCommandFiles:
         found = rules.command_files(f"cat src/app.py && wc -l {repo / 'README.md'} missing.txt", cwd)
         assert found == [os.path.join(cwd, "src", "app.py"), str(repo / "README.md")]
 
+    def test_dot_relative_paths_and_dotfiles_count(self, repo):
+        """Regression: the replay's token cleaner stripped the leading dot, so
+        ``./x`` became ``/x`` and ``.env`` became ``env`` (fixed in both copies)."""
+        (repo / ".env.sample").write_text("A=1\n")
+        cwd = str(wt(repo, "a"))
+        found = rules.command_files(f"cat ./README.md ../../.env.sample && head {repo}/src/app.py.", cwd)
+        assert found == [os.path.join(cwd, "README.md"), str(repo / ".env.sample"), str(repo / "src" / "app.py")]
+        for tok in ("./x/y.py", "../y.py", ".env", "src/a.py.", "`src/a.py`"):
+            assert rules._clean_token(tok) == replay._clean_token(tok)
+        assert replay._clean_token("./x/y.py") == "x/y.py"
+
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
 
@@ -334,6 +345,15 @@ class TestWouldDeliver:
         assert detail == {"tickets": ["GRA-101"], "files": ["src/app.py"]}
         rid, info, _ = session_record(db, "w1")
         assert links(db, rid, "ticket") == ["GRA-101"] and json.loads(info)["ticket_from"] == "brief"
+
+    def test_a_brief_read_with_a_shell_command_counts_too(self, db, repo):
+        a = wt(repo, "a")
+        start(db, "s1", a, T)
+        (repo / "EPIC_BRIEF.md").write_text("Slice of GRA-101.\n")
+        start(db, "w1", repo, T + MIN)
+        tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": "cat ./EPIC_BRIEF.md"}, "t1")
+        (sid, _, records, detail), = delivered(db, "brief_file")
+        assert sid == "w1" and records == [session_record(db, "s1")[0]] and detail["tickets"] == ["GRA-101"]
 
     def test_whoever_wrote_a_brief_file_is_not_a_holder_of_it(self, db, repo):
         tool_ok(db, "lead", repo, T, "Write", {"file_path": str(repo / "EPIC_BRIEF.md"), "content": "x"}, "t1")
