@@ -88,7 +88,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
         info = json.loads(info) if info else {}
         if kind == "session":
             wts = [os.path.basename(w) for w in links[rid]["worktree"]]
-            sessions.append((_short(sid), ", ".join(_repo_name(k) for k in links[rid]["repo"]), ", ".join(wts),
+            here = ", ".join(_repo_name(k) for k in links[rid]["repo"]) or "none: cwd outside a git repo"
+            sessions.append((_short(sid), here, ", ".join(wts),
+                             ", ".join(_repo_name(k) for k in links[rid]["touched_repo"]),
                              info.get("branch"), ", ".join(links[rid]["ticket"]), _clock(ts), _clock(ts_end), status))
         elif kind == "activity":
             activity.append((rid, _clock(ts), _short(sid), _short(agent), tool, action, files_of(rid), info.get("program")))
@@ -104,7 +106,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
         if r[1] == "session":
             info = json.loads(r[10]) if r[10] else {}
             wt = ", ".join(os.path.basename(w) for w in links[rid]["worktree"])
-            return (f"session {_short(r[4])} in {wt or '?'} (branch {info.get('branch')},"
+            where = f"in {wt}" if wt else ("outside any repo, touched " + (", ".join(
+                _repo_name(k) for k in links[rid]["touched_repo"]) or "none"))
+            return (f"session {_short(r[4])} {where} (branch {info.get('branch')},"
                     f" ticket {', '.join(links[rid]['ticket']) or 'none'})")
         return f"{r[7]} of {files_of(rid) or '?'} by {_short(r[4])} at {_clock(r[2])}"
 
@@ -124,8 +128,8 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
     con.close()
 
     out = [f"# swarm_memory store {db}", ""]
-    out.append(_table("Sessions", ["session", "repo", "worktree", "branch", "ticket", "first seen", "last seen", "status"],
-                      sessions))
+    out.append(_table("Sessions", ["session", "repo (cwd)", "worktree", "touched repos", "branch", "ticket",
+                                   "first seen", "last seen", "status"], sessions))
     out.append(_table("Activity", ["record", "time", "session", "subagent", "tool", "action", "files", "program"], activity))
     out.append(_table("Failures", ["record", "time", "session", "tool", "program", "kind", "exit", "signature",
                                    "error head", "status", "resolved after s"], failures))

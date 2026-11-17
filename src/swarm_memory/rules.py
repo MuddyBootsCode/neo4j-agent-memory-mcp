@@ -200,7 +200,39 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
         if changed:
             while toks and (toks[0].startswith("-") or _ENV_ASSIGN.match(toks[0])):
                 toks = toks[1:]
+            if head == "timeout" and toks and _DURATION.match(toks[0]):
+                toks = toks[1:]
     return toks
+
+
+_DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+
+
+def program_tokens(command: str) -> list[str]:
+    """Tokens a command runs as programs rather than works on: each segment's
+    first word, its program once wrappers such as ``env``, ``timeout 60`` or
+    ``uv run`` are stripped, the script an interpreter runs (``node x.mjs``,
+    ``bash x.sh``), and the same inside ``sh -c '...'``. A bare name and an
+    absolute path such as ``/opt/homebrew/bin/python3`` are alike."""
+    out: list[str] = []
+    for toks in _segments(command or ""):
+        while toks and _ENV_ASSIGN.match(toks[0]):
+            toks = toks[1:]
+        if not toks:
+            continue
+        out.append(toks[0])
+        toks = _strip_wrappers(toks)
+        if not toks:
+            continue
+        out.append(toks[0])
+        prog, args = os.path.basename(toks[0]), toks[1:]
+        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
+            out += program_tokens(args[args.index("-c") + 1])
+        elif _INTERPRETERS.match(prog):
+            rest = [a for a in args if not a.startswith("-")]
+            if rest:
+                out.append(rest[0])
+    return out
 
 
 def cmd_prefix(command: str) -> str:
@@ -312,25 +344,14 @@ def _command_bases(command: str, cwd: str) -> list[str]:
 
 
 def executed_files(command: str, bases: list[str]) -> set[str]:
-    """Files a command runs as its program (``./x.sh``, ``node x.mjs``,
-    ``bash x.sh``), which is using a tool rather than working on the file."""
+    """Existing files a command runs as a program (``program_tokens``), which
+    is using a tool rather than working on the file."""
     out: set[str] = set()
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        toks = _strip_wrappers(toks)
-        if not toks:
+    for tok in program_tokens(command):
+        tok = _clean_token(tok)
+        if not tok or not ("/" in tok or _HAS_EXT.search(tok)):
             continue
-        prog = toks[0]
-        if _INTERPRETERS.match(os.path.basename(prog)):
-            args = [a for a in toks[1:] if not a.startswith("-")]
-            if not args:
-                continue
-            prog = args[0]
-        prog = _clean_token(prog)
-        if not prog or not ("/" in prog or _HAS_EXT.search(prog)):
-            continue
-        for cand in _candidates(prog, bases):
+        for cand in _candidates(tok, bases):
             if os.path.isfile(cand):
                 out.add(cand)
                 break

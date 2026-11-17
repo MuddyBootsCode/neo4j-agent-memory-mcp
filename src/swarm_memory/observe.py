@@ -6,8 +6,12 @@ Records
 * ``session``: one per session, made by the first hook the session fires
   (SessionStart, or any other event when the hooks were registered mid-session).
   Links: session, repo, worktree, and ticket from the branch name or, failing
-  that, from the first prompt. ``info.branch`` holds the branch. ``ts_end`` is
-  the last time any hook saw the session.
+  that, from the brief file or the first prompt. ``repo`` and ``worktree``
+  come from the session's cwd only, so a session started outside any git repo
+  has none. A repo whose files it touches from elsewhere is linked as
+  ``touched_repo``: a lead running from ~/Projects still appears in that
+  repo's roster without the repo becoming its own. ``info.branch`` holds the
+  branch. ``ts_end`` is the last time any hook saw the session.
 * ``activity``: one per successful tool call that touched repo files. A file
   tool is ``edit`` (Edit, Write, MultiEdit, NotebookEdit) or ``read`` (Read). A
   shell command that names repo files is ``mention``, because the command does
@@ -20,8 +24,9 @@ Records
 
 Would deliver (one ``event`` row each, naming the records it would have shown)
 
-* ``session_start``: other sessions seen in this repo in the last 60 minutes and
-  not ended. Logged again after resume and compaction, when the context is new.
+* ``session_start``: other sessions seen in the last 60 minutes and not ended
+  that run in this repo or touched its files. Logged again after resume and
+  compaction, when the context is new.
 * ``first_prompt``: at a session's first prompt, other sessions seen in the last
   60 minutes that hold a ticket the prompt names, or have edited a file it names.
 * ``brief_file``: the same lookup over a swarm brief file (``SWARM_BRIEF.md``,
@@ -168,7 +173,8 @@ def _on_session_start(con, call: Call, session, ts: float) -> dict:
     rows = con.execute(
         "SELECT r.id FROM record r WHERE r.kind = 'session' AND r.ts_end >= ? AND r.session_id != ?"
         " AND r.status != 'ended'"
-        " AND EXISTS (SELECT 1 FROM link l WHERE l.record_id = r.id AND l.type = 'repo' AND l.key = ?)"
+        " AND EXISTS (SELECT 1 FROM link l WHERE l.record_id = r.id AND l.type IN ('repo', 'touched_repo')"
+        " AND l.key = ?)"
         " ORDER BY r.ts_end DESC LIMIT ?",
         (ts - WINDOW_S, call.sid, loc[0], ROSTER_LIMIT)).fetchall()
     if rows:
@@ -289,7 +295,7 @@ def _links(call: Call, desc: dict) -> list:
 
 
 def _on_tool_success(con, call: Call, session, ts: float) -> dict:
-    rid, _loc = session
+    rid, loc = session
     desc = _describe(call)
     made = 0
     if desc["files"]:
@@ -299,7 +305,8 @@ def _on_tool_success(con, call: Call, session, ts: float) -> dict:
         if arid:
             made = 1
             store.add_links(con, arid, ts, _links(call, desc))
-            store.add_links(con, rid, ts, [("repo", f[0]) for f in desc["files"]])
+            here = loc[0] if loc else None
+            store.add_links(con, rid, ts, [("touched_repo", f[0]) for f in desc["files"] if f[0] != here])
             if desc["action"] == "edit":
                 _same_file_edit(con, call, desc["files"], ts)
     return {"activity": made, "files": len(desc["files"]), "resolved": _resolve(con, call, desc, ts),

@@ -148,6 +148,20 @@ class TestReplayParity:
         "export A=1; cd /tmp",
     ]
 
+    PROGRAMS = [
+        "echo hi && /opt/homebrew/bin/python3 -I -S /x/report.py --minutes 15",
+        "env A=1 timeout 60 .venv/bin/python -m pytest tests/test_x.py",
+        "bash -c 'node scripts/gate.mjs --check src/a.ts' | tee out.log",
+        "cd sub && ./run.sh a.py; uv run python tools/x.py b.py",
+        "timeout 60 npm test",
+    ]
+
+    def test_program_tokens_match_the_replay(self):
+        for cmd in self.PROGRAMS:
+            assert rules.program_tokens(cmd) == replay.program_tokens(cmd), cmd
+            assert rules.cmd_prefix(cmd) == replay.cmd_prefix(cmd), cmd
+        assert rules.cmd_prefix("timeout 60 npm test") == "npm test"
+
     def test_signatures_kinds_and_prefixes_match_the_replay(self):
         for text in self.ERRORS:
             assert rules.failure_signature(text) == replay.failure_signature(text), text
@@ -177,6 +191,26 @@ class TestCommandFiles:
         for tok in ("./x/y.py", "../y.py", ".env", "src/a.py.", "`src/a.py`"):
             assert rules._clean_token(tok) == replay._clean_token(tok)
         assert replay._clean_token("./x/y.py") == "x/y.py"
+
+    def test_a_program_is_never_a_file_mention(self, repo, tmp_path):
+        """Regression (live store, 2026-11-16): /opt/homebrew is a git checkout,
+        so the interpreter running report.py was logged as a mention of
+        ``bin/python3`` in a repo named homebrew. A segment's program, bare or
+        absolute, before or after wrappers, is never a mention."""
+        brew = tmp_path / "homebrew"
+        git("init", "-q", "-b", "main", str(brew))
+        (brew / "bin").mkdir()
+        py = brew / "bin" / "python3"
+        py.write_text("#!/bin/sh\n")
+        venv_py = repo / ".venv" / "bin" / "python"
+        venv_py.parent.mkdir(parents=True)
+        venv_py.write_text("#!/bin/sh\n")
+        outside, readme = str(tmp_path), str(repo / "README.md")
+        assert rules.command_files(f"echo hi && {py} -I -S {repo}/src/app.py --minutes 15", outside) == []
+        assert rules.command_files(f"env A=1 {py} {repo}/src/app.py", outside) == []
+        assert rules.command_files(f"bash -c '{py} {repo}/src/app.py {readme}'", outside) == [readme]
+        assert rules.command_files("timeout 60 ./scripts/run.sh src/app.py", str(repo)) == [str(repo / "src" / "app.py")]
+        assert rules.command_files(".venv/bin/python -m pytest README.md", str(repo)) == [readme]
 
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
@@ -214,6 +248,21 @@ class TestActivity:
         assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
         assert q(db, "SELECT count(*) FROM event WHERE kind = 'observed'") == [(3,)]
 
+    def test_the_interpreter_running_a_command_is_not_activity(self, db, repo, tmp_path):
+        """The live row through the whole hook: no activity, and the session
+        borrows no repo from the interpreter's checkout."""
+        brew = tmp_path / "homebrew"
+        git("init", "-q", "-b", "main", str(brew))
+        (brew / "bin").mkdir()
+        (brew / "bin" / "python3").write_text("#!/bin/sh\n")
+        outside = tmp_path / "projects"
+        outside.mkdir()
+        cmd = f"echo hi && {brew}/bin/python3 -I -S {repo}/src/app.py --minutes 15"
+        tool_ok(db, "lead", outside, T, "Bash", {"command": cmd}, "t1")
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
+        rid, _, _ = session_record(db, "lead")
+        assert links(db, rid, "repo") == [] and links(db, rid, "touched_repo") == []
+
     def test_a_tool_call_is_recorded_once(self, db, repo):
         edit(db, "s1", repo, T, repo / "src" / "app.py", "t1")
         edit(db, "s1", repo, T + 1, repo / "src" / "app.py", "t1")
@@ -247,6 +296,25 @@ class TestSession:
         rid, info, _ = session_record(db, "s1")
         assert json.loads(info)["branch"] == "agent/gra-102-b"
         assert links(db, rid, "ticket") == ["GRA-102"]
+
+    def test_a_session_outside_any_repo_records_the_repos_it_touches_apart(self, db, repo, tmp_path):
+        """A lead often runs from ~/Projects and edits repos by absolute path. Its
+        activity goes under the file's repo, and the session gets touched_repo,
+        never a repo of its own, yet still shows in that repo's roster."""
+        outside = tmp_path / "projects"
+        outside.mkdir()
+        key = os.path.realpath(repo / ".git")
+        start(db, "lead", outside, T)
+        edit(db, "lead", outside, T + 1, repo / "src" / "app.py", "t1")
+        rid, _, _ = session_record(db, "lead")
+        assert (links(db, rid, "repo"), links(db, rid, "worktree"), links(db, rid, "touched_repo")) == ([], [], [key])
+        (arid,), = q(db, "SELECT id FROM record WHERE kind = 'activity'")
+        assert links(db, arid, "repo") == [key]
+        start(db, "w1", wt(repo, "a"), T + MIN)
+        edit(db, "w1", wt(repo, "a"), T + 2 * MIN, wt(repo, "a") / "README.md", "t2")
+        assert links(db, session_record(db, "w1")[0], "touched_repo") == []
+        (sid, _, records, _), = delivered(db, "session_start")
+        assert (sid, records) == ("w1", [rid])
 
     def test_session_end_marks_the_session_ended(self, db, repo):
         start(db, "s1", repo, T)

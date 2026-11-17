@@ -11,7 +11,8 @@ Three tables (MUD-850 "Data store"):
   and ``failure`` (a failed tool call and its resolution).
 * ``link``: record to the objects it is about, by type and key: ``repo`` (git
   common dir), ``worktree``, ``file`` (``<repo>::<repo-relative path>``),
-  ``program``, ``signature``, ``ticket`` and ``session``. ``ts`` copies the
+  ``program``, ``signature``, ``ticket`` and ``session``, plus
+  ``touched_repo`` from a session to a repo it touched from outside it. ``ts`` copies the
   record's time so a lookup by key can range on time. This table is the graph.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
