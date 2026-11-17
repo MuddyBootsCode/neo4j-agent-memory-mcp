@@ -42,7 +42,9 @@ adds those scripts too. Related is tested three ways: same directory, import
 neighbour (one hop either way, static parse of Python and JS/TS imports), and
 same ontology rule (a gate in ``ontology/*.md`` naming the file, or
 ``ontology/gates/*.json``). Paths are repo-relative, so worktrees compare,
-including linked worktrees outside the main checkout. Relations come from
+including linked worktrees outside the main checkout, which a file tool call
+reaches through the worktree's ``.git`` file. A symlink inside a checkout
+counts as the file it points to. Relations come from
 today's files and branch tips, not the version each agent saw, so related-file
 counts can drift as repos change. Same-file counts do not depend on them, and
 MUD-850 D16 logs related files without delivering them.
@@ -1063,7 +1065,58 @@ def worktree_of(path: str, repo_root: str, checkout: str | None) -> str | None:
         return repo_root.lower()
     if checkout and low.startswith(checkout.lower().rstrip("/") + "/"):
         return checkout.lower()
-    return None
+    sibling = sibling_checkout(path, repo_root)
+    return sibling.lower() if sibling else None
+
+
+@functools.lru_cache(maxsize=None)
+def sibling_checkout(path: str, repo_root: str) -> str | None:
+    """The linked worktree of ``repo_root`` an absolute path lies in when
+    that worktree sits outside the main checkout, found from its ``.git``
+    file, else None."""
+    if not path or not path.startswith("/"):
+        return None
+    main, checkout = find_git_root(os.path.dirname(path))
+    if not main or checkout == main or repo_identity(main) != repo_identity(repo_root):
+        return None
+    return checkout
+
+
+def sibling_rel(path: str | None, repo_root: str) -> str | None:
+    """Path relative to a linked worktree of the repo outside its main
+    checkout, which neither ``repo_rel`` nor ``checkout_rel`` reaches."""
+    return checkout_rel(path, sibling_checkout(path, repo_root)) if path else None
+
+
+@functools.lru_cache(maxsize=None)
+def canonical_path(path: str, roots: tuple) -> str:
+    """``path`` with its symlinks resolved when the file it names lies in the
+    same checkout root, written under that root as recorded, so a link and
+    its target are one file (``alias.py -> src/app.py``). Unchanged when the
+    target leaves the root or the path is in none of ``roots``."""
+    if not path or not path.startswith("/"):
+        return path
+    for root in roots:
+        if not root:
+            continue
+        prefix = root.rstrip("/") + "/"
+        if not path.lower().startswith(prefix.lower()):
+            continue
+        real, real_root = os.path.realpath(path), os.path.realpath(root).rstrip("/") + "/"
+        if not real.lower().startswith(real_root.lower()):
+            return path
+        return prefix + real[len(real_root):]
+    return path
+
+
+def attribute_call(c: dict, repo: str, checkout: str) -> None:
+    """Sets a call's ``path`` to the file it names, symlinks resolved inside
+    its checkout, and ``file`` to its repo-relative path. A file tool's path
+    in a linked worktree outside the main checkout counts as well."""
+    if c["path"]:
+        c["path"] = canonical_path(c["path"], (repo, checkout))
+    c["file"] = repo_rel(c["path"], repo) or checkout_rel(c["path"], checkout) or (
+        sibling_rel(c["path"], repo) if c["tool"] in FILE_TOOLS else None)
 
 
 def worktree_label(worktree: str, repo_root: str) -> str:
@@ -1347,7 +1400,7 @@ def main(argv=None) -> int:
         worktrees = {w.lower() for r, w in (resolve_location(c) for _t, c in m["cwds"])
                      if r and repo_identity(r) == ident}
         for c in m["calls"]:
-            c["file"] = repo_rel(c["path"], repo) or checkout_rel(c["path"], wt)
+            attribute_call(c, repo, wt)
         own = sorted(f for f in m["files"] if os.path.basename(f)[:-6] == sid)
         home = (own or sorted(m["files"]) or [f.split("/subagents/", 1)[0] for f in sorted(m["subagent_files"])])[0]
         cwd_prefix = os.path.relpath(cwd, wt) if cwd.lower().startswith(wt.lower()) else ""
@@ -1546,6 +1599,7 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
         files = files_by_repo.get(repo, set())
 
         def to_file(path, repo=repo, files=files, wt=s["worktree"]):
+            path = canonical_path(path, (repo, wt)) if path else path
             rel = (repo_rel(path, repo) or checkout_rel(path, wt)) if path else None
             return (rel, worktree_of(path, repo, wt) or wt) if rel in files else None
 

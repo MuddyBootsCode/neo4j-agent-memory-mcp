@@ -161,6 +161,47 @@ class TestRepoRel:
         assert replay.repo_rel("/Users/me/other/.claude/worktrees/w/src/a.py", "/Users/me/proj") is None
 
 
+class TestFileAttribution:
+    def test_a_symlink_and_its_target_are_one_file(self, tmp_path):
+        """Review finding: a link such as alias.py -> src/app.py was its own
+        file, so two sessions editing one physical file never matched."""
+        main = tmp_path / "app"
+        (main / ".git").mkdir(parents=True)
+        (main / "src").mkdir()
+        (main / "src" / "app.py").write_text("x = 1\n")
+        os.symlink("src/app.py", main / "alias.py")
+        os.symlink("src", main / "lib")
+        for name in ("alias.py", "lib/app.py", "src/app.py"):
+            call = {"tool": "Edit", "path": str(main / name)}
+            replay.attribute_call(call, str(main), str(main))
+            assert (call["path"], call["file"]) == (str(main / "src" / "app.py"), "src/app.py"), name
+        outside = tmp_path / "elsewhere.py"
+        outside.write_text("y = 2\n")
+        os.symlink(str(outside), main / "out.py")
+        assert replay.canonical_path(str(main / "out.py"), (str(main), None)) == str(main / "out.py")
+
+    def test_a_file_tool_call_in_a_linked_worktree_outside_the_main_checkout_counts(self, tmp_path):
+        """Review finding: a session in the main checkout reading a file in a
+        sibling worktree such as /tmp/app-feature got no file at all."""
+        main = tmp_path / "app"
+        (main / ".git" / "worktrees" / "feat").mkdir(parents=True)
+        ext = tmp_path / "app-feature"
+        (ext / "src").mkdir(parents=True)
+        (ext / "src" / "a.py").write_text("x = 1\n")
+        (ext / ".git").write_text(f"gitdir: {main}/.git/worktrees/feat\n")
+        path = str(ext / "src" / "a.py")
+        call = {"tool": "Read", "path": path}
+        replay.attribute_call(call, str(main), str(main))
+        assert call["file"] == "src/a.py"
+        assert replay.worktree_of(path, str(main), str(main)) == str(ext).lower()
+        other = tmp_path / "other"
+        (other / ".git").mkdir(parents=True)
+        (other / "a.py").write_text("x = 1\n")
+        call = {"tool": "Read", "path": str(other / "a.py")}
+        replay.attribute_call(call, str(main), str(main))
+        assert call["file"] is None
+
+
 ROOT = "/Users/me/proj"
 
 
