@@ -136,6 +136,24 @@ class TestFirstResolution:
         ]
         assert replay.first_resolution(calls, 0) is None
 
+    def test_a_success_that_began_before_the_failure_came_back_does_not_resolve_it(self):
+        """Review finding: a concurrent success counted as the way past a
+        failure that had not happened yet."""
+        calls = [
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 10 * MIN},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 1 * MIN, "rts": 2 * MIN},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 11 * MIN, "rts": 12 * MIN},
+        ]
+        assert replay.first_resolution(calls, 0) == 2
+
+    def test_the_first_to_finish_among_later_successes_resolves(self):
+        calls = [
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 2 * MIN, "rts": 9 * MIN},
+            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 3 * MIN, "rts": 4 * MIN},
+        ]
+        assert replay.first_resolution(calls, 0) == 2
+
 
 def _touch(ts, sid, wt, f):
     return {"ts": ts, "sid": sid, "worktree": wt, "file": f}
@@ -156,6 +174,17 @@ class TestFileWindowHits:
     def test_the_same_worktree_is_no_hit(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
         assert replay.file_window_hits(events, 15 * MIN) == []
+
+    def test_a_touch_is_timed_by_its_result_and_a_call_without_one_is_left_out(self):
+        """Review finding: touches were timed by the call's start, and calls
+        that never returned counted. A hook sees a touch when its result comes."""
+        assert replay.touch_ts({"ts": 0.0, "rts": 2 * MIN}) == 2 * MIN
+        assert replay.touch_ts({"ts": 0.0, "rts": None}) is None
+        long_call = replay.touch_ts({"ts": 0.0, "rts": 20 * MIN})
+        quick_call = replay.touch_ts({"ts": 1 * MIN, "rts": 2 * MIN})
+        events = [_touch(long_call, "a", "wt1", "src/x.py"), _touch(quick_call, "b", "wt2", "src/x.py")]
+        hits = replay.file_window_hits(events, 60 * MIN)
+        assert [(h["event"]["sid"], h["other"]["sid"]) for h in hits] == [("a", "b")]
 
     def test_related_files_hit_through_the_relation(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt2", "src/y.py")]
@@ -379,6 +408,25 @@ class TestReadOnly:
             "def load_all(root):\n    return []\n\ndef path_governed_by(f, onts):\n    return False\n")
         monkeypatch.setattr(replay, "PLUGIN_ONTOLOGY_LIB", str(plugin))
         assert replay.ontology_rules(str(repo), {"src/a.py"}) == ({}, "plugin 0.1.0")
+        assert not marker.exists()
+
+
+class TestGitRunsNoRepoCode:
+    def test_a_configured_fsmonitor_hook_never_runs(self, tmp_path):
+        """Review finding: git ls-files ran a repo's core.fsmonitor hook."""
+        import subprocess
+        repo = tmp_path / "r"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "a.py").write_text("x = 1\n")
+        subprocess.run(["git", "-C", str(repo), "add", "a.py"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"],
+                       check=True)
+        marker = tmp_path / "hook-ran"
+        hook = tmp_path / "hook.sh"
+        hook.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        hook.chmod(0o755)
+        subprocess.run(["git", "-C", str(repo), "config", "core.fsmonitor", str(hook)], check=True)
+        assert "a.py" in replay.repo_file_set(str(repo), "2000-01-01")
         assert not marker.exists()
 
 

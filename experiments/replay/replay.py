@@ -31,7 +31,8 @@ connected set of linked sessions.
 
 Moment 3 (with a tool result). A touch by agent B is a hit when another agent
 A in the same run had touched the same file, or a related file, in the window
-before it. A touch is a file tool call (Read, Edit, Write, MultiEdit,
+before it. Touches are timed by their result, when a hook would see them, and
+a call whose result never came back is left out. A touch is a file tool call (Read, Edit, Write, MultiEdit,
 NotebookEdit) on a repo file; a second count adds every repo file a Bash
 command names, except a script the command runs as its program, and a third
 adds those scripts too. Related is tested three ways: same directory, import
@@ -305,12 +306,29 @@ def same_kind(failed: dict, other: dict) -> bool:
 
 
 def first_resolution(calls: list[dict], i: int) -> int | None:
-    """Index of the first later successful call of the same kind as calls[i]."""
+    """Index of the successful call of the same kind that got past calls[i]:
+    the first to finish among those that began after the failure came back.
+    Calls are in start order, so a concurrent call that started before the
+    failure was seen does not count. Without timestamps, the first later
+    success in list order."""
     failed = calls[i]
+    seen = failed.get("rts") or failed.get("ts")
+    best = None
     for j in range(i + 1, len(calls)):
-        if calls[j].get("ok") and same_kind(failed, calls[j]):
-            return j
-    return None
+        c = calls[j]
+        start = c.get("ts")
+        if seen is not None and start is not None:
+            if best is not None and start >= best[0]:
+                break
+            if start < seen:
+                continue
+        if c.get("ok") and same_kind(failed, c):
+            done = c.get("rts") or start
+            if done is None:
+                return j
+            if best is None or done < best[0]:
+                best = (done, j)
+    return best[1] if best else None
 
 
 _HOOK_BLOCK = re.compile(r"(?i)(?:pre|post)tooluse(?::[\w*]+)? hook (?:error|blocked)|\bhook\b.{0,40}\b(?:blocked|denied)")
@@ -355,6 +373,12 @@ def repeat_failure_hits(failures: list[dict], window_s: float | None = None) -> 
 
 
 # ---------------------------------------------------------------- moment 3
+
+def touch_ts(call: dict) -> float | None:
+    """When a hook would have seen a call's touch: when its result came back.
+    A call with no result never reaches a hook, so it is no touch."""
+    return call.get("rts")
+
 
 def file_window_hits(events: list[dict], window_s: float, related=None) -> list[dict]:
     """Events that another worktree's touch of the same (or a related) file preceded within the window.
@@ -913,9 +937,17 @@ def merge_scans(scans: list[dict]) -> dict[str, dict]:
 
 # ---------------------------------------------------------------- repos
 
+# A repo's own config can make a read run its code: a core.fsmonitor hook runs on
+# any index read, log.showSignature runs gpg.program on git log, and a partial
+# clone fetches missing objects over the network. All three are turned off.
+_GIT_SAFE = ("-c", "core.fsmonitor=false", "-c", "log.showSignature=false")
+
+
 def _git(repo_root: str, *args: str, input_bytes: bytes | None = None) -> bytes:
+    env = {**os.environ, "GIT_NO_LAZY_FETCH": "1", "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
     try:
-        res = subprocess.run(["git", "-C", repo_root, *args], input=input_bytes, capture_output=True, timeout=300)
+        res = subprocess.run(["git", *_GIT_SAFE, "-C", repo_root, *args], input=input_bytes, capture_output=True,
+                             timeout=300, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return b""
     return res.stdout if res.returncode == 0 else b""
@@ -1445,7 +1477,11 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
             mix["file tool calls on a path outside the repo"] += c["tool"] in FILE_TOOLS and not c["file"]
             if c["blocked"]:
                 continue
-            base = {"ts": c["ts"], "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
+            ts = touch_ts(c)
+            if ts is None:
+                mix["calls with no result"] += 1
+                continue
+            base = {"ts": ts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
                     "repo": repo, "call": f"{s['sid']}:{k}", "tool": c["tool"]}
             if c["tool"] in FILE_TOOLS and c["file"]:
                 file_events[rid].append({**base, "file": c["file"], "edit": c["tool"] in EDIT_TOOLS})
