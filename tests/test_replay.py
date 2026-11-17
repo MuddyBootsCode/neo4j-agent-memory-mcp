@@ -201,6 +201,22 @@ class TestCommandFiles:
         named, _ = replay.command_touches("cat src/a.ts && cat /Users/me/proj/.worktrees/b/src/a.ts", ROOT, to_file)
         assert named == [("src/a.ts", ROOT.lower()), ("src/a.ts", ROOT.lower() + "/.worktrees/b")]
 
+    def test_git_dash_c_sets_the_directory_of_its_own_segment(self):
+        """Review finding: git -C was ignored, so a diff in another worktree
+        counted in the main checkout, and a subdirectory target resolved to
+        the root file of the same name."""
+        def to_file(path):
+            rel = replay.repo_rel(path, ROOT) if path else None
+            return (rel, replay.worktree_of(path, ROOT, None)) if rel == "src/x.py" else None
+        named, _ = replay.command_touches(f"git -C {ROOT}/.worktrees/b diff -- src/x.py", ROOT, to_file)
+        assert named == [("src/x.py", ROOT.lower() + "/.worktrees/b")]
+        files = {"package.json", "packages/web/package.json"}
+        assert touches("git -C packages/web diff -- package.json", files)[0] == ["packages/web/package.json"]
+        assert touches("git -C packages -C web log -p package.json", files)[0] == ["packages/web/package.json"]
+        assert touches("git -c core.pager=cat -C packages/web diff package.json", files)[0] == [
+            "packages/web/package.json"]
+        assert touches("git -C packages/web status && cat package.json", files)[0] == ["package.json"]
+
     def test_a_script_run_as_the_program_is_executed_not_worked_on(self):
         """Every agent runs the same gate script; that is using a tool, not
         working on the file, and it would make every pair of agents collide."""

@@ -674,6 +674,30 @@ def _shell_payload(toks: list[str]) -> str | None:
     return _shell_command_string(toks[1:])
 
 
+# git options before the subcommand that take a separate value.
+_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
+
+
+def _segment_dir(toks: list[str], current: str) -> str:
+    """The directory a segment resolves its paths from: ``current``, or for
+    git each ``-C <path>`` before the subcommand in turn, a relative one from
+    the one before, as git does. It holds for that segment only."""
+    while toks and _ENV_ASSIGN.match(toks[0]):
+        toks = toks[1:]
+    toks = _strip_wrappers(toks)
+    if not toks or os.path.basename(toks[0]) != "git":
+        return current
+    here, i = current, 1
+    while i < len(toks) and toks[i].startswith("-"):
+        if toks[i] in _GIT_VALUE_OPTS and i + 1 < len(toks):
+            if toks[i] == "-C" and toks[i + 1]:
+                here = os.path.normpath(os.path.join(here, os.path.expanduser(toks[i + 1])))
+            i += 2
+        else:
+            i += 1
+    return here
+
+
 def _absolute(tok: str, current: str) -> str | None:
     """The absolute path a path-like token names from ``current``, else None."""
     tok = _clean_token(tok)
@@ -689,10 +713,11 @@ def command_touches(command: str, cwd: str, to_file, _depth: int = 0) -> tuple[l
     program (``program_tokens``), which is using a tool rather than working on
     the file. A file a segment runs and another segment reads is a touch.
     Each segment resolves its relative paths from the directory the command's
-    ``cd`` had moved to, starting from the call's own cwd, and a shell's
-    ``-c`` string the same way from the directory that shell starts in.
-    ``to_file`` maps an absolute path to a ``(repo file, worktree)`` pair, or
-    None. The same rule as ``swarm_memory.rules.command_files``."""
+    ``cd`` had moved to, starting from the call's own cwd, a git segment from
+    where its ``-C`` options point, and a shell's ``-c`` string the same way
+    from the directory that shell starts in. ``to_file`` maps an absolute
+    path to a ``(repo file, worktree)`` pair, or None. The same rule as
+    ``swarm_memory.rules.command_files``."""
     named: list = []
     plain: set = set()
     current = cwd
@@ -708,9 +733,10 @@ def command_touches(command: str, cwd: str, to_file, _depth: int = 0) -> tuple[l
             plain |= {f for f, _wt in more} - ran
             continue
         text = shlex.join(toks)
-        ran = {hit[0] for hit in (to_file(_absolute(tok, current) or "") for tok in program_tokens(text)) if hit}
+        here = _segment_dir(toks, current)
+        ran = {hit[0] for hit in (to_file(_absolute(tok, here) or "") for tok in program_tokens(text)) if hit}
         for raw in _TOKEN_SPLIT.findall(text):
-            hit = to_file(_absolute(raw, current) or "")
+            hit = to_file(_absolute(raw, here) or "")
             if hit:
                 if hit not in named:
                     named.append(hit)
