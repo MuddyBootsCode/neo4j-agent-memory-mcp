@@ -242,6 +242,29 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
 
 
 _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+_SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
+_SHORT_OPTS = re.compile(r"-[A-Za-z]+")
+# Task runners whose next word names the script, so npm run test and npm run
+# lint are different commands.
+_TASK_RUNNERS = {("npm", "run"), ("npm", "run-script"), ("pnpm", "run"), ("yarn", "run"), ("bun", "run"),
+                 ("deno", "task")}
+
+
+def _shell_command_string(args: list[str]) -> str | None:
+    """The command string a shell runs with ``-c``, also when ``c`` sits in an
+    option cluster such as ``-lc`` or ``-ec``: the first argument after the
+    options. None when the shell runs a script or reads its input."""
+    want, skip = False, False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in _SHELL_OPT_VALUE:
+            skip = True
+        elif a.startswith(("-", "+")) and len(a) > 1:
+            want = want or bool(_SHORT_OPTS.fullmatch(a) and "c" in a)
+        else:
+            return a if want else None
+    return None
 
 
 def program_tokens(command: str) -> list[str]:
@@ -263,8 +286,9 @@ def program_tokens(command: str) -> list[str]:
             continue
         out.append(toks[0])
         prog, args = os.path.basename(toks[0]), toks[1:]
-        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
-            out += program_tokens(args[args.index("-c") + 1])
+        inner = _shell_command_string(args) if prog in _SHELLS else None
+        if inner is not None:
+            out += program_tokens(inner)
         elif _INTERPRETERS.match(prog):
             inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
             script = next((a for a in args if a in inline or not a.startswith("-")), None)
@@ -275,7 +299,8 @@ def program_tokens(command: str) -> list[str]:
 
 def cmd_prefix(command: str) -> str:
     """Program plus first non-flag argument of the first command that is not
-    a cd, export or similar; wrappers such as ``uv run`` are stripped."""
+    a cd, export or similar; wrappers such as ``uv run`` are stripped. A task
+    runner keeps the script name too (``npm run test``)."""
     if not isinstance(command, str) or not command.strip():
         return ""
     first_head = ""
@@ -292,8 +317,9 @@ def cmd_prefix(command: str) -> str:
         if not toks:
             continue
         prog, args = os.path.basename(toks[0]), toks[1:]
-        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
-            inner = cmd_prefix(args[args.index("-c") + 1])
+        inner_cmd = _shell_command_string(args) if prog in _SHELLS else None
+        if inner_cmd is not None:
+            inner = cmd_prefix(inner_cmd)
             if inner:
                 return inner
         if prog == "git":
@@ -307,7 +333,8 @@ def cmd_prefix(command: str) -> str:
                     kept.append(a)
             args = kept
         rest = [a for a in args if not a.startswith("-")]
-        return " ".join([prog] + [r[:60] for r in rest[:1]])
+        words = 2 if rest and (prog, rest[0]) in _TASK_RUNNERS else 1
+        return " ".join([prog] + [r[:60] for r in rest[:words]])
     return first_head
 
 
@@ -315,6 +342,31 @@ def command_program(command: str) -> str:
     """The program a command runs, without its arguments."""
     prefix = cmd_prefix(command)
     return prefix.split(" ", 1)[0] if prefix else ""
+
+
+def command_dir(command: str, cwd: str | None) -> str | None:
+    """The directory a command's first program runs in: ``cwd`` moved by any
+    ``cd`` before it, also inside ``sh -c``. None when neither is known.
+    The replay's rule."""
+    current = cwd or ""
+    for toks in _segments(command or ""):
+        while toks and _ENV_ASSIGN.match(toks[0]):
+            toks = toks[1:]
+        if not toks:
+            continue
+        if toks[0] == "cd":
+            if len(toks) >= 2:
+                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
+            continue
+        if os.path.basename(toks[0]) in _SKIP_HEADS:
+            continue
+        toks = _strip_wrappers(toks)
+        if toks and os.path.basename(toks[0]) in _SHELLS:
+            inner = _shell_command_string(toks[1:])
+            if inner is not None:
+                return command_dir(inner, current)
+        break
+    return current or None
 
 
 def prefix_key(command: str) -> str:
@@ -395,8 +447,7 @@ def _shell_payload(toks: list[str]) -> str | None:
     toks = _strip_wrappers(toks)
     if not toks or os.path.basename(toks[0]) not in _SHELLS:
         return None
-    args = toks[1:]
-    return args[args.index("-c") + 1] if "-c" in args and args.index("-c") + 1 < len(args) else None
+    return _shell_command_string(toks[1:])
 
 
 def command_files(command: str, cwd: str, _depth: int = 0) -> list[str]:
@@ -470,11 +521,15 @@ def scrub(text: str) -> str:
 def failure_signature(error_text: str) -> str | None:
     """The F4 signature of a failed call's output, or None for F4 noise. The
     diagnostic line is redacted before it is normalised, because the signature
-    is stored and printed like the error head."""
+    is stored and printed like the error head. A line whose credential may
+    not be redacted whole gives no signature."""
     ln = diag_line(error_text or "")
     if not ln or NOISE.search(ln):
         return None
-    sig = norm(redact(ln))
+    red = redact(ln)
+    if red == REDACTED_TEXT:
+        return None
+    sig = norm(red)
     return scrub(sig) if len(sig) >= 15 else None
 
 
@@ -512,8 +567,16 @@ _AUTH_VALUE = re.compile(
 # user:password after curl's -u/--user or -U/--proxy-user, attached or not. A
 # bare value needs the colon, so git push -u origin and python -u keep theirs.
 _USER_FLAG = re.compile(r"(?<![\w-])(--(?:proxy-)?user(?:=|\s+)|-[uU]\s*)(" + _QUOTED + r"|[^\s:'\"]+:\S+)")
-_URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
+# The userinfo runs to the last @ before the host, so a password holding @ goes whole.
+_URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]*:[^/\s]*@", re.I)
 HEAD_CHARS = 160
+# A redaction is whole when each matched value ends where its argument ends:
+# whitespace, a comma or closing bracket, or the end of the text. A quote,
+# backslash or letter right after it means the shell argument goes on
+# ('a'\''b', "a"b), so part of the credential may follow.
+_VALUE_END = re.compile(r"[\s,;)\]}>]|\Z")
+_VALUE_PATTERNS = (_AUTH_VALUE, _SECRET_FLAG, _USER_FLAG, _SECRET_VALUE)
+REDACTED_TEXT = "<line with a credential removed>"
 
 
 def exit_code(error_text: str) -> int | None:
@@ -522,11 +585,21 @@ def exit_code(error_text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def redaction_is_whole(text: str) -> bool:
+    """False when a credential pattern matched a value that may run on past
+    the match, so redacting the match could leave part of the secret."""
+    return all(_VALUE_END.match(text, m.end()) for p in _VALUE_PATTERNS for m in p.finditer(text))
+
+
 def redact(text: str) -> str:
     """Credentials replaced: ``user:password@`` in URLs, the whole
     ``Authorization`` value whatever its scheme, the value after a flag such
     as ``--password``, ``user:password`` after ``curl -u``, Bearer tokens,
-    and the value after ``password=``, ``token:`` and similar keys."""
+    and the value after ``password=``, ``token:`` and similar keys. It fails
+    closed: when a matched value may run on past the match, the whole text
+    becomes ``REDACTED_TEXT``."""
+    if not redaction_is_whole(text):
+        return REDACTED_TEXT
     text = _URL_CREDENTIALS.sub(r"\1<redacted>@", text)
     text = _AUTH_VALUE.sub(lambda m: m.group(1) + "<redacted>", text)
     text = _SECRET_FLAG.sub(lambda m: m.group(1) + "<redacted>", text)
@@ -538,11 +611,18 @@ def redact(text: str) -> str:
 def error_head(error_text: str, limit: int = HEAD_CHARS) -> str:
     """A short redacted head of a failed call's output: the ``Exit code`` line
     dropped, whitespace flattened, the home directory shortened to ``~``, and
-    credentials, long tokens and emails replaced."""
+    credentials, long tokens and emails replaced. A line whose credential
+    may not be redacted whole is replaced by ``REDACTED_TEXT``."""
     lines = [ln for ln in (error_text or "").splitlines() if ln.strip()]
     if lines and _EXIT_LINE.match(lines[0]):
         lines = lines[1:]
-    head = " ".join(" ".join(lines).split())[: limit * 3]
+    kept, size = [], 0
+    for ln in lines:
+        if size > limit * 3:
+            break
+        kept.append(ln if redaction_is_whole(ln) else REDACTED_TEXT)
+        size += len(ln) + 1
+    head = " ".join(" ".join(kept).split())[: limit * 3]
     home = os.path.expanduser("~")
     if home and home != "/":
         head = head.replace(home, "~")

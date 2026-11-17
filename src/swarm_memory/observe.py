@@ -287,17 +287,18 @@ def _describe(call: Call) -> dict:
         if path and not os.path.isabs(path) and call.cwd:
             path = os.path.join(call.cwd, path)
         fl = rules.file_location(path) if path else None
-        # A file outside every checkout is no activity, but it keeps its own
-        # identity, so a failure on it is resolved only by the same file.
-        key = rules.file_key(fl[0], fl[3]) if fl else (rules.path_key(path) if path else None)
+        # Resolution keys on the physical file, so the same repo file in two
+        # worktrees, or a file outside every checkout, stays apart. Links and
+        # notices keep the shared repo-relative file.
         return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read",
-                "program": None, "prefix_key": None, "file": key}
+                "program": None, "prefix_key": None, "file": rules.path_key(path) if path else None, "where": None}
     if tool in rules.SHELL_TOOLS:
         cmd = ti.get("command") if isinstance(ti.get("command"), str) else ""
         files = [fl for fl in (rules.file_location(p) for p in rules.command_files(cmd, call.cwd)) if fl]
+        where = rules.command_dir(cmd, call.cwd)
         return {"files": files, "action": "mention", "program": rules.command_program(cmd) or None,
-                "prefix_key": rules.prefix_key(cmd), "file": None}
-    return {"files": [], "action": None, "program": None, "prefix_key": None, "file": None}
+                "prefix_key": rules.prefix_key(cmd), "file": None, "where": rules.path_key(where) if where else None}
+    return {"files": [], "action": None, "program": None, "prefix_key": None, "file": None, "where": None}
 
 
 def _links(call: Call, desc: dict) -> list:
@@ -347,8 +348,10 @@ def _same_file_edit(con, call: Call, files, ts: float) -> None:
 
 
 def _resolve(con, call: Call, desc: dict, ts: float) -> int:
-    """Resolve open failures of the same kind in this session. Like the
-    replay's ``first_resolution``, a success counts only if it began after the
+    """Resolve open failures of the same kind in this session: the same
+    command prefix run in the same directory, or the same tool on the same
+    physical file (the replay's ``same_kind``). Like the replay's
+    ``first_resolution``, a success counts only if it began after the
     failure came back: a concurrent call that started first is not the way
     past it. The start is the result time less ``duration_ms``; a success
     without it resolves nothing, since an overlapping call cannot be told
@@ -371,7 +374,7 @@ def _resolve(con, call: Call, desc: dict, ts: float) -> int:
             continue
         fi = json.loads(info) if info else {}
         if call.tool in rules.SHELL_TOOLS:
-            same = fi.get("prefix_key") == desc["prefix_key"]
+            same = fi.get("prefix_key") == desc["prefix_key"] and fi.get("where") == desc["where"]
         elif call.tool in rules.FILE_TOOLS:
             same = desc["file"] is not None and fi.get("file") == desc["file"]
         else:
@@ -393,7 +396,7 @@ def _on_tool_failure(con, call: Call, session, ts: float) -> dict:
     desc = _describe(call)
     sig = rules.failure_signature(err)
     info = {"head": rules.error_head(err), "exit": rules.exit_code(err), "sig": sig, "program": desc["program"],
-            "prefix_key": desc["prefix_key"], "file": desc["file"]}
+            "prefix_key": desc["prefix_key"], "file": desc["file"], "where": desc["where"]}
     frid = store.add_record(con, "failure", ts, call.sid, agent_id=call.agent_id, tool=call.tool,
                             action=rules.failure_kind(err), status="open", tool_use_id=call.tool_use_id,
                             info={k: v for k, v in info.items() if v is not None})

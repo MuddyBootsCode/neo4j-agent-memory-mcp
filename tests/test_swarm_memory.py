@@ -175,6 +175,10 @@ class TestReplayParity:
         "bash -c 'python3 -m ruff check src'",
         "agent-test-budget run -- pytest -x",
         "export A=1; cd /tmp",
+        "bash -lc 'npm run test -- --ci'",
+        "npm run lint",
+        "sh -ec 'cd sub && make build'",
+        "yarn run build --prod",
     ]
 
     PROGRAMS = [
@@ -185,7 +189,18 @@ class TestReplayParity:
         "timeout 60 npm test",
         "agent-test-budget run -- /bin/zsh -c 'cd /x && cat src/a.ts && bash -e scripts/run.sh'",
         "python3 -c \"print(open('src/a.ts').read())\" && node -e 'require(\"./b.js\")' && ruby -w tools/c.rb",
+        "bash -lc 'cat src/a.ts'",
+        "zsh -xec 'node scripts/gate.mjs src/a.ts'",
+        "bash -o pipefail -c 'make lint'",
     ]
+
+    def test_command_dirs_match_the_replay(self):
+        cases = [("make build", "/p"), ("cd /x && make", "/p"), ("bash -lc 'cd sub && make'", "/p"),
+                 ("agent-test-budget run -- /bin/zsh -c 'cd /wt/a && pytest -q'", "/p"), ("npm test", None),
+                 ("cd .. && cd q && ls", "/p/r")]
+        for cmd, cwd in cases:
+            assert rules.command_dir(cmd, cwd) == replay.command_dir(cmd, cwd), cmd
+        assert rules.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
 
     def test_program_tokens_match_the_replay(self):
         for cmd in self.PROGRAMS:
@@ -259,6 +274,12 @@ class TestCommandFiles:
         wrapped = f"agent-test-budget run -- /bin/zsh -c 'cd {b} && cat src/app.py'"
         assert rules.command_files(wrapped, str(a)) == [str(b / "src" / "app.py")]
         assert rules.command_files(f"bash -c 'cd {b}' && cat README.md", str(a)) == [str(a / "README.md")]
+
+    def test_a_shell_option_cluster_string_is_read_from_its_own_directory(self, repo):
+        """Review finding: only a standalone -c was read as a command string."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        assert rules.command_files(f"bash -lc 'cd {b} && cat README.md'", str(a)) == [str(b / "README.md")]
+        assert rules.command_files("sh -ec 'cat src/app.py'", str(a)) == [str(a / "src" / "app.py")]
 
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
@@ -445,6 +466,34 @@ class TestFailures:
         edit(db, "s1", repo, T + 2, app, "t3")
         assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
         tool_ok(db, "s1", repo, T + 3, "Write", {"file_path": app}, "t4")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
+    def test_the_same_repo_file_in_another_worktree_does_not_resolve_it(self, db, repo):
+        """Review finding: a failed Edit in one worktree was resolved by an Edit
+        of the same repo file in another."""
+        a_app, b_app = wt(repo, "a") / "src" / "app.py", wt(repo, "b") / "src" / "app.py"
+        tool_fail(db, "s1", repo, T, "Edit", {"file_path": str(a_app)}, "EACCES: permission denied, open", "t1")
+        edit(db, "s1", repo, T + 1, b_app, "t2")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        edit(db, "s1", repo, T + 2, a_app, "t3")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
+    def test_the_same_command_in_another_directory_does_not_resolve_it(self, db, repo):
+        """Review finding: shell resolution ignored where the command ran."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        tool_fail(db, "s1", a, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
+        tool_ok(db, "s1", b, T + 1, "Bash", {"command": "make build"}, "t2")
+        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"cd {b} && make build"}, "t3")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 3, "Bash", {"command": f"bash -lc 'cd {a} && make build'"}, "t4")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
+    def test_a_later_lint_does_not_resolve_failed_tests(self, db, repo):
+        """Review finding: npm run test and npm run lint shared the prefix npm run."""
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "npm run test"}, "Exit code 1\nError: 3 tests failed", "t1")
+        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "npm run lint"}, "t2")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": "npm run test -- --ci"}, "t3")
         assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
 
     def test_files_outside_any_repo_resolve_only_their_own_failures(self, db, repo, tmp_path):
@@ -684,6 +733,27 @@ class TestSafety:
         text = (stored + report.build(db)).lower()
         for secret in secrets:
             assert secret not in text
+
+    def test_a_credential_that_may_not_be_redacted_whole_drops_its_line(self, db, repo):
+        """Review finding: in --password 'prefix'\\''secret' only 'prefix' was
+        redacted. Fail closed: a line whose value may run on past the match is
+        dropped from the head and gives no signature."""
+        secrets = ("grommetpw", "fluxwidget", "snorkpass", "quibbleish")
+        errors = ["Exit code 1\nerror: login --password 'prefix'\\''grommetpw' was refused",
+                  "Exit code 1\nerror: dbcli --password \"a\"'fluxwidget' failed to connect",
+                  "Exit code 1\nfatal: could not connect to https://app:snorkpass@quibbleish@db.internal/main"]
+        for n, err in enumerate(errors):
+            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
+        heads = [json.loads(i)["head"] for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure' ORDER BY id")]
+        assert heads[:2] == [rules.REDACTED_TEXT, rules.REDACTED_TEXT]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(1,)]
+        stored = "\n".join(str(row) for table in ("event", "record", "link")
+                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        text = (stored + report.build(db)).lower()
+        for secret in secrets:
+            assert secret not in text
+        head = rules.error_head("Exit code 1\nfirst line\nerror: --password 'a'\\''grommetpw' refused\nlast line")
+        assert head == f"first line {rules.REDACTED_TEXT} last line"
 
     def test_curl_user_credentials_reach_no_stored_field_and_no_report(self, db, repo):
         """Review finding: an echoed ``curl -u app:password`` kept the password."""
