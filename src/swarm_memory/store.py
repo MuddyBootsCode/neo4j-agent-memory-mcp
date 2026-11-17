@@ -7,23 +7,25 @@ Three tables (MUD-850 "Data store"):
   naming the records it would have shown, and one ``hook_error`` row per
   exception.
 * ``record``: what was observed. ``session`` (one per session, ``ts_end`` is the
-  last time a hook saw it), ``activity`` (a tool call that touched repo files)
-  and ``failure`` (a failed tool call).
+  last time a hook saw it), ``activity`` (a file tool call on a repo file) and
+  ``failure`` (a failed tool call).
 * ``link``: record to the objects it is about, by type and key: ``repo`` (git
   common dir), ``worktree``, ``file`` (``<repo>::<repo-relative path>``),
-  ``program``, ``signature`` (the keyed hash), ``ticket`` and ``session``, plus
-  ``touched_repo`` from a session to a repo it touched from outside it. ``ts`` copies the
-  record's time so a lookup by key can range on time. This table is the graph.
+  ``signature`` (the keyed hash), ``ticket`` and ``session``, plus
+  ``touched_repo`` from a session to a repo it touched from outside it. ``ts``
+  copies the record's time so a lookup by key can range on time. This table is
+  the graph.
 
 No text from a tool's output is stored. A failure keeps its signature only as
 an HMAC under a random key kept beside the store (``<store>.key``, mode 0600),
 so repeats still match and the hash cannot be checked against a guess. If the
 key file goes missing while the store holds hashes, the next failure makes a
 new key and logs a ``signature_key_new`` event: hashes from before it no longer
-match those after it. A store that held text (schema version 1), or values an
-older rule let through (version 4), is migrated, then rewritten on a session
-hook with VACUUM and a TRUNCATE checkpoint, so the replaced text is gone from
-the file's bytes as well as its rows.
+match those after it. A store that held text (schema version 1), values an
+older rule let through (version 4), or anything read from shell command text
+(versions 4 to 6), is migrated, then rewritten on a session hook with VACUUM
+and a TRUNCATE checkpoint, so the replaced text is gone from the file's bytes as
+well as its rows.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
 lock up front; if it is not free within ``BUSY_TIMEOUT_MS`` the hook skips and
@@ -45,8 +47,9 @@ ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
 # 2: failures keep only a keyed signature hash; 3: the file holds no old text; 4: no recovery;
-# 5: stored values meet today's rules; 6: the file holds none of the values replaced at 5.
-SCHEMA_VERSION = 6
+# 5: stored values meet the run 10 rules; 6: the file holds none of the values replaced at 5;
+# 7: nothing read from shell command text; 8: the file holds none of the values removed at 7.
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS event (
@@ -219,13 +222,17 @@ def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
 HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows; the file may still hold the old bytes
 PURGED_VERSION = 3  # the file rewritten; failures still carry the fields recovery matching used
 RECOVERY_DROPPED_VERSION = 4  # no recovery fields; values older rules let through may remain
-RULES_APPLIED_VERSION = 5  # stored values meet today's rules; the file may still hold the old bytes
+RULES_APPLIED_VERSION = 5  # stored values meet the run 10 rules; the file may still hold the old bytes
+RULES_PURGED_VERSION = 6  # the file rewritten after 5
+SHELL_DROPPED_VERSION = 7  # nothing read from shell command text; the file may still hold the old bytes
 # A version whose rows a migration rewrote, and the one its file reaches once rewritten too.
-_PURGE_NEXT = {HASH_ONLY_VERSION: PURGED_VERSION, RULES_APPLIED_VERSION: SCHEMA_VERSION}
+_PURGE_NEXT = {HASH_ONLY_VERSION: PURGED_VERSION, RULES_APPLIED_VERSION: RULES_PURGED_VERSION,
+               SHELL_DROPPED_VERSION: SCHEMA_VERSION}
+SHELL_TOOLS = ("Bash", "PowerShell")  # whose command text earlier versions read
 
 
 def purge_freed_text(con: sqlite3.Connection) -> bool:
-    """Version 2 to 3, and 5 to 6: rewrite the file so the text a migration
+    """Version 2 to 3, 5 to 6 and 7 to 8: rewrite the file so the text a migration
     replaced is gone from its bytes, not only from its rows. SQLite leaves a
     replaced value in the page's free space and in older WAL frames. VACUUM
     writes a fresh copy of the database, and a TRUNCATE checkpoint moves it
@@ -296,9 +303,9 @@ def apply_current_rules(con: sqlite3.Connection) -> dict:
 
     A bare word an older rule took from after a wrapper option
     (``sudo -u alice id``) cannot be told from a program without the command,
-    which was never stored, so it stays. It runs in one write transaction and
-    only while the store is still at version 4. ``purge_freed_text()`` then
-    rewrites the file on a session hook. Returns counts."""
+    which was never stored, so it stays here; ``drop_shell_records()`` then
+    removes every program. It runs in one write transaction and only while the
+    store is still at version 4. Returns counts."""
     con.execute("BEGIN IMMEDIATE")
     try:
         if con.execute("PRAGMA user_version").fetchone()[0] != RECOVERY_DROPPED_VERSION:
@@ -340,6 +347,76 @@ def apply_current_rules(con: sqlite3.Connection) -> dict:
         raise
 
 
+def drop_shell_records(con: sqlite3.Connection) -> dict:
+    """Version 5 or 6 to 7: remove what earlier versions read from shell
+    command text, since what a command touched cannot be told from its text.
+
+    * Every stored program, in records and in links.
+    * Activity records of shell commands (``mention``) and their links.
+    * A failed shell command's file, repo and worktree links, which came from
+      the paths its command named. It takes its session's repo and worktree
+      instead, as a failure that names no file does.
+    * ``touched_repo`` links, rebuilt from the file tool activity that is left.
+    * The activity and file counts an ``observed`` row logged for a shell
+      command.
+
+    It runs in one write transaction and only while the store is at version 5
+    or 6. ``purge_freed_text()`` then rewrites the file on a session hook.
+    Returns counts."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        if con.execute("PRAGMA user_version").fetchone()[0] not in (RULES_APPLIED_VERSION, RULES_PURGED_VERSION):
+            con.execute("ROLLBACK")
+            return {}
+        counts = {"mentions": 0, "mention_links": 0, "programs": 0, "program_links": 0, "shell_failures": 0,
+                  "touched_repo_links_before": 0, "touched_repo_links_after": 0, "observed_rows": 0}
+        mentions = con.execute("SELECT id FROM record WHERE kind = 'activity' AND (action = 'mention' OR tool IN (?, ?))",
+                               SHELL_TOOLS).fetchall()
+        for (rid,) in mentions:
+            counts["mention_links"] += con.execute("DELETE FROM link WHERE record_id = ?", (rid,)).rowcount
+            con.execute("DELETE FROM record WHERE id = ?", (rid,))
+        counts["mentions"] = len(mentions)
+        for rid, info in con.execute("SELECT id, info FROM record WHERE info IS NOT NULL").fetchall():
+            data = json.loads(info)
+            if "program" in data:
+                del data["program"]
+                con.execute("UPDATE record SET info = ? WHERE id = ?", (_json(data or None), rid))
+                counts["programs"] += 1
+        counts["program_links"] = con.execute("DELETE FROM link WHERE type = 'program'").rowcount
+        failed = con.execute(
+            "SELECT r.id, r.session_id, r.ts FROM record r WHERE r.kind = 'failure' AND r.tool IN (?, ?)"
+            " AND EXISTS (SELECT 1 FROM link l WHERE l.record_id = r.id AND l.type = 'file')", SHELL_TOOLS).fetchall()
+        for rid, sid, ts in failed:
+            con.execute("DELETE FROM link WHERE record_id = ? AND type IN ('file', 'repo', 'worktree')", (rid,))
+            con.execute(
+                "INSERT OR IGNORE INTO link (record_id, type, key, ts) SELECT ?, l.type, l.key, ? FROM link l"
+                " JOIN record s ON s.id = l.record_id WHERE s.kind = 'session' AND s.session_id = ?"
+                " AND l.type IN ('repo', 'worktree')", (rid, ts, sid))
+        counts["shell_failures"] = len(failed)
+        counts["touched_repo_links_before"] = con.execute("DELETE FROM link WHERE type = 'touched_repo'").rowcount
+        counts["touched_repo_links_after"] = con.execute(
+            "INSERT OR IGNORE INTO link (record_id, type, key, ts)"
+            " SELECT s.id, 'touched_repo', ar.key, min(a.ts) FROM record s"
+            " JOIN record a ON a.kind = 'activity' AND a.session_id = s.session_id"
+            " JOIN link ar ON ar.record_id = a.id AND ar.type = 'repo'"
+            " WHERE s.kind = 'session' AND NOT EXISTS (SELECT 1 FROM link own WHERE own.record_id = s.id"
+            " AND own.type = 'repo' AND own.key = ar.key) GROUP BY s.id, ar.key").rowcount
+        observed = con.execute("SELECT id, detail FROM event WHERE kind = 'observed' AND tool IN (?, ?)"
+                               " AND detail IS NOT NULL", SHELL_TOOLS).fetchall()
+        for eid, detail in observed:
+            data = json.loads(detail)
+            kept = {k: v for k, v in data.items() if k not in ("activity", "files")}
+            if kept != data:
+                con.execute("UPDATE event SET detail = ? WHERE id = ?", (_json(kept or None), eid))
+                counts["observed_rows"] += 1
+        con.execute(f"PRAGMA user_version={SHELL_DROPPED_VERSION}")
+        con.execute("COMMIT")
+        return counts
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
 def connect(path: str) -> sqlite3.Connection:
     """Open the store, creating it (mode 0600) and its schema on first use."""
     folder = os.path.dirname(path)
@@ -351,7 +428,7 @@ def connect(path: str) -> sqlite3.Connection:
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version in (0, 1, PURGED_VERSION, RECOVERY_DROPPED_VERSION):
+    if version in (0, 1, PURGED_VERSION, RECOVERY_DROPPED_VERSION, RULES_APPLIED_VERSION, RULES_PURGED_VERSION):
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
@@ -362,7 +439,9 @@ def connect(path: str) -> sqlite3.Connection:
             else:
                 if version == PURGED_VERSION:
                     drop_recovery(con)  # to version 4
-                apply_current_rules(con)  # to version 5; purge_freed_text() takes it to 6
+                if version in (PURGED_VERSION, RECOVERY_DROPPED_VERSION):
+                    apply_current_rules(con)  # to version 5
+                drop_shell_records(con)  # to version 7; purge_freed_text() takes it to 8
         except sqlite3.OperationalError as exc:
             con.close()
             if _is_busy(exc):

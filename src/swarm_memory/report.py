@@ -93,10 +93,10 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
                              ", ".join(_repo_name(k) for k in links[rid]["touched_repo"]),
                              info.get("branch"), ", ".join(links[rid]["ticket"]), _clock(ts), _clock(ts_end), status))
         elif kind == "activity":
-            activity.append((rid, _clock(ts), _short(sid), _short(agent), tool, action, files_of(rid), info.get("program")))
+            activity.append((rid, _clock(ts), _short(sid), _short(agent), tool, action, files_of(rid)))
         elif kind == "failure":
             sig_hash = info.get("sig_hash")
-            failures.append((rid, _clock(ts), sid, tuid, tool, info.get("program"), action, info.get("exit"),
+            failures.append((rid, _clock(ts), sid, tuid, tool, action, info.get("exit"),
                              sig_hash[:12] if sig_hash else None))
 
     def describe(rid):
@@ -130,9 +130,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
     out = [f"# swarm_memory store {db}", ""]
     out.append(_table("Sessions", ["session", "repo (cwd)", "worktree", "touched repos", "branch", "ticket",
                                    "first seen", "last seen", "status"], sessions))
-    out.append(_table("Activity", ["record", "time", "session", "subagent", "tool", "action", "files", "program"], activity))
+    out.append(_table("Activity", ["record", "time", "session", "subagent", "tool", "action", "files"], activity))
     out.append(_table("Failures (the store keeps no error text: find one in its session's transcript by tool_use_id)",
-                      ["record", "time", "session", "tool_use_id", "tool", "program", "kind", "exit",
+                      ["record", "time", "session", "tool_use_id", "tool", "kind", "exit",
                        "signature hash"], failures))
     out.append(_table("Would deliver", ["time", "moment", "session", "would show", "detail"], deliver))
     out.append(_table("Hook time in the hook process (ms, from start of hook.py to commit)",

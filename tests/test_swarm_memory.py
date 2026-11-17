@@ -190,162 +190,28 @@ class TestReplayParity:
         "Permission for this action was denied",
         "Exit code 1\nerror: login failed password" + "=hunterpw for user app",
     ]
-    PROGRAMS = [
-        "echo hi && /opt/homebrew/bin/python3 -I -S /x/report.py --minutes 15",
-        "env A=1 timeout 60 .venv/bin/python -m pytest tests/test_x.py",
-        "bash -c 'node scripts/gate.mjs --check src/a.ts' | tee out.log",
-        "cd sub && ./run.sh a.py; uv run python tools/x.py b.py",
-        "timeout 60 npm test",
-        "agent-test-budget run -- /bin/zsh -c 'cd /x && cat src/a.ts && bash -e scripts/run.sh'",
-        "python3 -c \"print(open('src/a.ts').read())\" && node -e 'require(\"./b.js\")' && ruby -w tools/c.rb",
-        "bash -lc 'cat src/a.ts'",
-        "zsh -xec 'node scripts/gate.mjs src/a.ts'",
-        "bash -o pipefail -c 'make lint'",
-    ]
-
-    def test_program_tokens_match_the_replay(self):
-        for cmd in self.PROGRAMS:
-            assert rules.program_tokens(cmd) == replay.program_tokens(cmd), cmd
-
     def test_signatures_and_kinds_match_the_replay(self):
         for text in self.ERRORS:
             assert rules.failure_signature(text) == replay.failure_signature(text), text
             assert rules.failure_kind(text) == replay.failure_kind(text), text
 
-    def test_command_files_match_the_replay(self, repo):
-        """Both copies resolve a Bash command's paths the same way: each
-        segment from the directory its cd moved to, starting from the call's
-        cwd, a git segment from where its -C options point, and a file a
-        segment only runs is no touch."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        (repo / "src" / "util.py").write_text("y = 2\n")
-        (repo / "src" / "README.md").write_text("inner\n")
-        cmds = ["cat src/app.py README.md", f"cd {b} && cat README.md", "bash -lc 'cd src && cat app.py' && cat README.md",
-                f"agent-test-budget run -- /bin/zsh -c 'cd {a} && bash scripts/run.sh src/app.py'",
-                "cd src && cat app.py util.py", "bash scripts/run.sh && cat scripts/run.sh",
-                f"git -C {b} diff -- src/app.py", "git -C src diff -- README.md", f"git -C {a} -C src log app.py",
-                "GIT_PAGER=cat git -c core.pager=cat -C src show README.md && cat README.md"]
-
-        def to_file(path):
-            return (path, None) if path and os.path.isfile(path) else None
-
-        for cmd in cmds:
-            named, executed = replay.command_touches(cmd, str(repo), to_file)
-            assert sorted(rules.command_files(cmd, str(repo))) == sorted(f for f, _ in named if f not in executed), cmd
+    def test_path_tokens_are_cleaned_like_the_replay(self):
+        """Both copies find the paths a prompt or brief names with one token
+        cleaner. Regression: it stripped a leading dot, so ``./x`` became ``/x``
+        and ``.env`` became ``env`` (fixed in both copies)."""
+        for tok in ("./x/y.py", "../y.py", ".env", "src/a.py.", "`src/a.py`", "src/a.py:12", "src/a.py#L3-L9"):
+            assert rules._clean_token(tok) == replay._clean_token(tok), tok
+        assert replay._clean_token("./x/y.py") == "x/y.py" and rules._clean_token(".env") == ".env"
 
 
-class TestCommandProgram:
-    """The program a shell command runs, linked from its activity and failures."""
+class TestNamedFiles:
+    """Existing files a prompt or a brief names."""
 
-    def test_the_program_is_the_first_real_command_after_wrappers(self):
-        cases = {"cd src && uv run pytest tests/test_x.py -q": "pytest", "git -C /x/y status --short": "git",
-                 "FOO=1 npm run build": "npm", "bash -c 'python3 -m ruff check src'": "ruff",
-                 "agent-test-budget run -- /bin/zsh -c 'cd /x && make lint'": "make",
-                 "bash -lc 'npm run test -- --ci'": "npm", "timeout 60 npm test": "npm",
-                 "bash -x scripts/run.sh -c x": "bash", "export A=1; cd /tmp": "export", "": "",
-                 "/opt/homebrew/bin/python3 -I x.py": "python3"}
-        for cmd, prog in cases.items():
-            assert rules.command_program(cmd) == prog, cmd
-
-    def test_anything_but_one_bare_name_stores_no_program(self):
-        """Review finding: env -S carried a whole command, credential included,
-        into the program. Only one bare name is ever a program."""
-        for cmd in ("env -S 'curl --user alice" + ":hunterpw' https://example.invalid", "npx create-react-app@latest app",
-                    "'my tool' --flag", "x" * 65):
-            assert rules.command_program(cmd) == "", cmd
-
-    def test_a_word_after_a_wrapper_option_is_not_the_program(self):
-        """It may be the option's value: a user, a package, a signal."""
-        for cmd in ("sudo -u alice id", "uv run --with hunterpw ruff check", "npx -p hunterpw cowsay",
-                    "timeout -s KILL 5 make", "env -u HOMEBREW_GITHUB_API_TOKEN brew list"):
-            assert rules.command_program(cmd) == "", cmd
-        cases = {"env -i PATH=/usr/bin make": "make", "sudo -- make install": "make", "timeout 5 make": "make",
-                 "python3 -m pytest -q": "pytest"}
-        for cmd, prog in cases.items():
-            assert rules.command_program(cmd) == prog, cmd
-
-
-class TestCommandFiles:
-    def test_existing_relative_and_absolute_paths_count(self, repo):
-        cwd = str(wt(repo, "a"))
-        found = rules.command_files(f"cat src/app.py && wc -l {repo / 'README.md'} missing.txt", cwd)
-        assert found == [os.path.join(cwd, "src", "app.py"), str(repo / "README.md")]
-
-    def test_dot_relative_paths_and_dotfiles_count(self, repo):
-        """Regression: the replay's token cleaner stripped the leading dot, so
-        ``./x`` became ``/x`` and ``.env`` became ``env`` (fixed in both copies)."""
+    def test_relative_absolute_dot_relative_and_dotfile_paths_count(self, repo):
         (repo / ".env.sample").write_text("A=1\n")
         cwd = str(wt(repo, "a"))
-        found = rules.command_files(f"cat ./README.md ../../.env.sample && head {repo}/src/app.py.", cwd)
+        found = rules.named_files(f"see ./README.md, ../../.env.sample, missing.txt and {repo}/src/app.py.", [cwd])
         assert found == [os.path.join(cwd, "README.md"), str(repo / ".env.sample"), str(repo / "src" / "app.py")]
-        for tok in ("./x/y.py", "../y.py", ".env", "src/a.py.", "`src/a.py`"):
-            assert rules._clean_token(tok) == replay._clean_token(tok)
-        assert replay._clean_token("./x/y.py") == "x/y.py"
-
-    def test_a_program_is_never_a_file_mention(self, repo, tmp_path):
-        """Regression (live store, 2026-11-16): /opt/homebrew is a git checkout,
-        so the interpreter running report.py was logged as a mention of
-        ``bin/python3`` in a repo named homebrew. A segment's program, bare or
-        absolute, before or after wrappers, is never a mention."""
-        brew = tmp_path / "homebrew"
-        git("init", "-q", "-b", "main", str(brew))
-        (brew / "bin").mkdir()
-        py = brew / "bin" / "python3"
-        py.write_text("#!/bin/sh\n")
-        venv_py = repo / ".venv" / "bin" / "python"
-        venv_py.parent.mkdir(parents=True)
-        venv_py.write_text("#!/bin/sh\n")
-        outside, readme = str(tmp_path), str(repo / "README.md")
-        assert rules.command_files(f"echo hi && {py} -I -S {repo}/src/app.py --minutes 15", outside) == []
-        assert rules.command_files(f"env A=1 {py} {repo}/src/app.py", outside) == []
-        assert rules.command_files(f"bash -c '{py} {repo}/src/app.py {readme}'", outside) == [readme]
-        assert rules.command_files("timeout 60 ./scripts/run.sh src/app.py", str(repo)) == [str(repo / "src" / "app.py")]
-        assert rules.command_files(".venv/bin/python -m pytest README.md", str(repo)) == [readme]
-
-    def test_each_segment_resolves_from_the_directory_its_cd_moved_to(self, repo):
-        """Review finding: the starting directory won when both had the file."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        assert rules.command_files(f"cd {b} && cat README.md", str(a)) == [str(b / "README.md")]
-        assert rules.command_files(f"cat README.md && cd {b} && cat src/app.py", str(a)) == [
-            str(a / "README.md"), str(b / "src" / "app.py")]
-
-    def test_a_cd_inside_a_shell_c_string_moves_only_that_string(self, repo):
-        """Review finding: the cd inside ``bash -c '...'`` was ignored, so its
-        paths resolved from the outer directory. Every agent-test-budget run
-        has this shape."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        assert rules.command_files(f"bash -c 'cd {b} && cat README.md'", str(a)) == [str(b / "README.md")]
-        wrapped = f"agent-test-budget run -- /bin/zsh -c 'cd {b} && cat src/app.py'"
-        assert rules.command_files(wrapped, str(a)) == [str(b / "src" / "app.py")]
-        assert rules.command_files(f"bash -c 'cd {b}' && cat README.md", str(a)) == [str(a / "README.md")]
-
-    def test_a_shell_option_cluster_string_is_read_from_its_own_directory(self, repo):
-        """Review finding: only a standalone -c was read as a command string."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        assert rules.command_files(f"bash -lc 'cd {b} && cat README.md'", str(a)) == [str(b / "README.md")]
-        assert rules.command_files("sh -ec 'cat src/app.py'", str(a)) == [str(a / "src" / "app.py")]
-
-    def test_git_dash_c_sets_the_directory_of_its_own_segment(self, repo):
-        """Review finding: git -C was ignored, so a diff in another worktree
-        resolved in the starting one, and a subdirectory target resolved to the
-        file of the same name above it."""
-        b = wt(repo, "b")
-        assert rules.command_files(f"git -C {b} diff -- src/app.py", str(repo)) == [str(b / "src" / "app.py")]
-        (repo / "src" / "README.md").write_text("inner\n")
-        assert rules.command_files("git -C src diff -- README.md", str(repo)) == [str(repo / "src" / "README.md")]
-        assert rules.command_files(f"git -C {repo} -C src log -p README.md", str(b)) == [
-            str(repo / "src" / "README.md")]
-        assert rules.command_files("git -c core.pager=cat -C src diff README.md", str(repo)) == [
-            str(repo / "src" / "README.md")]
-        assert rules.command_files("git -C src status && cat README.md", str(repo)) == [str(repo / "README.md")]
-
-    def test_a_path_after_cd_resolves_from_that_directory(self, repo):
-        assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
-
-    def test_the_script_a_command_runs_is_not_counted(self, repo):
-        assert rules.command_files("bash scripts/run.sh src/app.py", str(repo)) == [str(repo / "src" / "app.py")]
-        os.chmod(repo / "scripts" / "run.sh", 0o755)
-        assert rules.command_files("./scripts/run.sh", str(repo)) == []
 
 
 class TestActivity:
@@ -360,12 +226,12 @@ class TestActivity:
         assert links(db, rows[0][0], "repo") == [key]
         assert links(db, rows[0][0], "worktree") == [os.path.realpath(a)]
 
-    def test_a_shell_command_that_names_repo_files_is_a_mention_with_its_program(self, db, repo):
+    def test_a_shell_command_adds_no_activity_whatever_it_names(self, db, repo):
+        """What a command touched cannot be told from its text, so the hook
+        does not read it (D18 reversed)."""
         tool_ok(db, "s1", repo, T, "Bash", {"command": "grep -n x src/app.py README.md"}, "t1")
-        (rid, action, info), = q(db, "SELECT id, action, info FROM record WHERE kind = 'activity'")
-        assert action == "mention" and json.loads(info) == {"program": "grep"}
-        assert [k.split("::")[1] for k in links(db, rid, "file")] == ["README.md", "src/app.py"]
-        assert links(db, rid, "program") == ["grep"]
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
+        assert sorted(t for (t,) in q(db, "SELECT type FROM link")) == ["repo", "session", "worktree"]
 
     def test_calls_that_touch_no_repo_file_write_no_activity(self, db, repo, tmp_path):
         tool_ok(db, "s1", repo, T, "Bash", {"command": "echo hello"}, "t1")
@@ -374,21 +240,6 @@ class TestActivity:
         tool_ok(db, "s1", repo, T, "Grep", {"pattern": "x", "path": str(repo)}, "t3")
         assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
         assert q(db, "SELECT count(*) FROM event WHERE kind = 'observed'") == [(3,)]
-
-    def test_the_interpreter_running_a_command_is_not_activity(self, db, repo, tmp_path):
-        """The live row through the whole hook: no activity, and the session
-        borrows no repo from the interpreter's checkout."""
-        brew = tmp_path / "homebrew"
-        git("init", "-q", "-b", "main", str(brew))
-        (brew / "bin").mkdir()
-        (brew / "bin" / "python3").write_text("#!/bin/sh\n")
-        outside = tmp_path / "projects"
-        outside.mkdir()
-        cmd = f"echo hi && {brew}/bin/python3 -I -S {repo}/src/app.py --minutes 15"
-        tool_ok(db, "lead", outside, T, "Bash", {"command": cmd}, "t1")
-        assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
-        rid, _, _ = session_record(db, "lead")
-        assert links(db, rid, "repo") == [] and links(db, rid, "touched_repo") == []
 
     def test_a_tool_call_is_recorded_once(self, db, repo):
         edit(db, "s1", repo, T, repo / "src" / "app.py", "t1")
@@ -462,7 +313,7 @@ class TestSession:
 
 
 class TestFailures:
-    def test_a_failure_keeps_only_program_exit_kind_and_a_keyed_signature_hash(self, db, repo):
+    def test_a_failure_keeps_only_exit_kind_and_a_keyed_signature_hash(self, db, repo):
         cmd = "psql postgresql://app" + ":hunter2pw@db.internal/main -c 'select 1'"
         err = "Exit code 2\npsql: error: connection to server failed: password" + "=hunter2pw for user app"
         tool_fail(db, "s1", repo, T, "Bash", {"command": cmd}, err, "t1")
@@ -471,9 +322,10 @@ class TestFailures:
         with open(store.key_path(db), "rb") as fh:
             expected = store.signature_hash(fh.read(), replay.failure_signature(err))
         assert action == "command or tool failure" and status is None and ts_end is None
-        assert json.loads(info) == {"exit": 2, "sig_hash": expected, "program": "psql"}
+        assert json.loads(info) == {"exit": 2, "sig_hash": expected}
         assert links(db, rid, "signature") == [expected]
-        assert links(db, rid, "program") == ["psql"]
+        assert sorted(t for (t,) in q(db, "SELECT type FROM link WHERE record_id = ?", (rid,))) == [
+            "repo", "session", "signature", "worktree"]
 
     def test_the_same_failure_in_another_session_links_to_the_same_signature(self, db, repo):
         """The exact part kept when recovery matching was removed: the same
@@ -538,9 +390,10 @@ class TestWouldDeliver:
         assert sid == "s2" and records == sorted([session_record(db, "s1")[0], activity])
         assert detail == {"tickets": ["ABC-101"], "files": ["src/app.py"]}
 
-    def test_a_swarm_brief_file_is_looked_up_when_the_worker_reads_it(self, db, repo):
+    def test_a_brief_in_the_working_directory_is_looked_up_at_the_first_prompt(self, db, repo):
         """ollama-swarm and epic-squad workers get "Read ./SWARM_BRIEF.md ..." as
-        their prompt, so the brief's ticket and files only appear when it is read."""
+        their prompt and may read it with any tool, so the hook reads the brief
+        itself at the first prompt, and only once."""
         a = wt(repo, "a")
         start(db, "s1", a, T)
         edit(db, "s1", a, T + MIN, a / "src" / "app.py", "t1")
@@ -548,44 +401,40 @@ class TestWouldDeliver:
         start(db, "w1", repo, T + 2 * MIN)
         fire(db, "UserPromptSubmit", "w1", repo, T + 2 * MIN, prompt="Read ./SWARM_BRIEF.md in this directory and follow it exactly.")
         assert delivered(db, "first_prompt") == []
-        for n in (1, 2):
-            tool_ok(db, "w1", repo, T + 3 * MIN, "Read", {"file_path": str(repo / "SWARM_BRIEF.md")}, f"r{n}")
         (sid, _, records, detail), = delivered(db, "brief_file")
         activity = q(db, "SELECT id FROM record WHERE tool_use_id = 't1'")[0][0]
         assert sid == "w1" and records == sorted([session_record(db, "s1")[0], activity])
         assert detail == {"tickets": ["ABC-101"], "files": ["src/app.py"]}
         rid, info, _ = session_record(db, "w1")
         assert links(db, rid, "ticket") == ["ABC-101"] and json.loads(info)["ticket_from"] == "brief"
+        for n in (1, 2):
+            tool_ok(db, "w1", repo, T + 3 * MIN, "Read", {"file_path": str(repo / "SWARM_BRIEF.md")}, f"r{n}")
+        assert len(delivered(db, "brief_file")) == 1
 
-    def test_a_brief_read_with_a_shell_command_counts_too(self, db, repo):
+    def test_a_brief_read_with_a_shell_command_is_still_looked_up(self, db, repo):
+        """The lookup does not depend on how the worker reads its brief."""
         a = wt(repo, "a")
         start(db, "s1", a, T)
         (repo / "EPIC_BRIEF.md").write_text("Slice of ABC-101.\n")
         start(db, "w1", repo, T + MIN)
+        fire(db, "UserPromptSubmit", "w1", repo, T + MIN, prompt="Run cat ./EPIC_BRIEF.md and follow it.")
         tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": "cat ./EPIC_BRIEF.md"}, "t1")
         (sid, _, records, detail), = delivered(db, "brief_file")
         assert sid == "w1" and records == [session_record(db, "s1")[0]] and detail["tickets"] == ["ABC-101"]
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
 
-    def test_a_brief_read_after_cd_is_that_directorys_brief(self, db, repo):
-        """Review finding: with a brief in both places, the starting directory's
-        brief was opened instead of the one the command read."""
+    def test_a_brief_elsewhere_is_looked_up_at_its_first_read_and_only_once(self, db, repo):
+        """No brief in the working directory: the first Read of one is the
+        trigger, and a session's later briefs add nothing."""
         a, b = wt(repo, "a"), wt(repo, "b")
         start(db, "s1", a, T)
-        (repo / "SWARM_BRIEF.md").write_text("Nothing to do here.\n")
         (b / "SWARM_BRIEF.md").write_text("Slice of ABC-101.\n")
+        (b / "EPIC_BRIEF.md").write_text("Slice of ABC-102.\n")
         start(db, "w1", repo, T + MIN)
-        tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": f"cd {b} && cat SWARM_BRIEF.md"}, "t1")
-        (_, _, records, detail), = delivered(db, "brief_file")
-        assert detail["tickets"] == ["ABC-101"] and records == [session_record(db, "s1")[0]]
-
-    def test_a_brief_read_after_a_cd_inside_a_shell_c_string_is_that_directorys_brief(self, db, repo):
-        """Review finding: the wrong brief was opened and marked read for good."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        start(db, "s1", a, T)
-        (repo / "SWARM_BRIEF.md").write_text("Nothing to do here.\n")
-        (b / "SWARM_BRIEF.md").write_text("Slice of ABC-101.\n")
-        start(db, "w1", repo, T + MIN)
-        tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": f"zsh -c 'cd {b} && cat SWARM_BRIEF.md'"}, "t1")
+        fire(db, "UserPromptSubmit", "w1", repo, T + MIN, prompt="Read the brief in worktree b, then begin.")
+        assert delivered(db, "brief_file") == []
+        tool_ok(db, "w1", repo, T + 2 * MIN, "Read", {"file_path": str(b / "SWARM_BRIEF.md")}, "t1")
+        tool_ok(db, "w1", repo, T + 3 * MIN, "Read", {"file_path": str(b / "EPIC_BRIEF.md")}, "t2")
         (_, _, records, detail), = delivered(db, "brief_file")
         assert detail["tickets"] == ["ABC-101"] and records == [session_record(db, "s1")[0]]
 
@@ -625,7 +474,7 @@ class TestWouldDeliver:
         os.symlink(str(outside), a / "out.py")
         assert rules.file_location(str(a / "out.py")) is None
 
-    def test_an_old_edit_a_read_or_a_mention_is_not_a_same_file_edit(self, db, repo):
+    def test_an_old_edit_a_read_or_a_shell_command_is_not_a_same_file_edit(self, db, repo):
         a, b = wt(repo, "a"), wt(repo, "b")
         edit(db, "s1", a, T, a / "src" / "app.py", "t1")
         tool_ok(db, "s1", a, T + 62 * MIN, "Read", {"file_path": str(a / "src" / "app.py")}, "t2")
@@ -644,12 +493,12 @@ class TestSafety:
 
     def test_the_hook_script_runs_isolated_and_silent(self, db, repo):
         script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "src", "swarm_memory", "hook.py")
-        payload = {"hook_event_name": "PostToolUse", "session_id": "s1", "cwd": str(repo), "tool_name": "Bash",
-                   "tool_input": {"command": "cat README.md"}, "tool_use_id": "t1"}
+        payload = {"hook_event_name": "PostToolUse", "session_id": "s1", "cwd": str(repo), "tool_name": "Read",
+                   "tool_input": {"file_path": str(repo / "README.md")}, "tool_use_id": "t1"}
         res = subprocess.run([sys.executable, "-I", "-S", script, "--db", db], input=json.dumps(payload).encode(),
                              capture_output=True, timeout=30)
         assert (res.returncode, res.stdout) == (0, b"")
-        assert q(db, "SELECT action FROM record WHERE kind = 'activity'") == [("mention",)]
+        assert q(db, "SELECT action FROM record WHERE kind = 'activity'") == [("read",)]
 
     def test_a_package_that_will_not_load_still_exits_0_and_is_counted(self, db, tmp_path):
         import shutil
@@ -725,7 +574,7 @@ class TestSafety:
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
         infos = [json.loads(i) for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure'")]
         assert len(infos) == len(errors)
-        assert all(set(i) <= {"exit", "sig_hash", "program"} for i in infos)
+        assert all(set(i) <= {"exit", "sig_hash"} for i in infos)
         keys = q(db, "SELECT key FROM link WHERE type = 'signature'")
         assert len(keys) == sum(replay.failure_signature(e) is not None for e in errors)
         assert all(re.fullmatch(r"[0-9a-f]{32}", k) for (k,) in keys)
@@ -851,7 +700,7 @@ class TestSafety:
         assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
         assert b"zorkmarker" not in raw_bytes(db)
         store.connect(db).close()
-        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         start(db, "s1", repo, T + 2)
         assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         fresh = str(tmp_path / "fresh" / "observe.sqlite3")
@@ -862,7 +711,8 @@ class TestSafety:
         """Version 3 matched a failure to the call that got past it. Opening it
         with this code clears the status, the resolving call and its time, and
         the hashed command, path and directory, and drops the open-failure
-        index. A record without them is left as it is."""
+        index. The program goes too, since shell command text is no longer
+        read. A record without them is left as it is."""
         con = sqlite3.connect(db, isolation_level=None)
         con.executescript(store.SCHEMA)
         con.execute("CREATE INDEX record_open_failures ON record(session_id) WHERE kind = 'failure' AND status = 'open'")
@@ -879,11 +729,11 @@ class TestSafety:
         store.connect(db).close()
         assert {rid: (json.loads(i), status, ts_end) for rid, i, status, ts_end in
                 q(db, "SELECT id, info, status, ts_end FROM record ORDER BY id")} == {
-            1: ({"exit": 2, "sig_hash": "a" * 32, "program": "make"}, None, None),
-            2: ({"exit": 1, "sig_hash": "b" * 32, "program": "cat"}, None, None),
-            3: ({"exit": 1, "program": "ls"}, None, None)}
+            1: ({"exit": 2, "sig_hash": "a" * 32}, None, None),
+            2: ({"exit": 1, "sig_hash": "b" * 32}, None, None),
+            3: ({"exit": 1}, None, None)}
         assert q(db, "SELECT name FROM sqlite_master WHERE name = 'record_open_failures'") == []
-        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         con = sqlite3.connect(db, isolation_level=None)
         assert store.drop_recovery(con) == {}
         con.close()
@@ -892,8 +742,9 @@ class TestSafety:
         """Review finding: a version 4 store kept a program an older rule let
         through (a whole curl command that ``env -S`` carried, its ``--user``
         value included), and the report printed it. Opening the store applies
-        today's rules to what it holds, and a session hook then rewrites the
-        file, so the text is gone from the rows, the report and the raw bytes."""
+        today's rules to what it holds, shell command activity and every
+        program included, and a session hook then rewrites the file, so the
+        text is gone from the rows, the report and the raw bytes."""
         key, root = os.path.realpath(repo / ".git"), os.path.realpath(repo)
         bad = "curl --user alice" + ":hunterpw"
         con = sqlite3.connect(db, isolation_level=None)
@@ -920,11 +771,11 @@ class TestSafety:
         other_hook.execute("SELECT count(*) FROM record").fetchone()
         con = store.connect(db)
         con.close()
-        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         assert {rid: json.loads(i) if i else None for rid, i in q(db, "SELECT id, info FROM record ORDER BY id")} == {
-            1: None, 2: {"exit": 22, "sig_hash": "a" * 32}, 3: {"program": "git"}, 4: None, 5: None}
+            2: {"exit": 22, "sig_hash": "a" * 32}, 4: None, 5: None}
         assert q(db, "SELECT record_id, type, key FROM link WHERE type IN ('program', 'file') ORDER BY record_id, type") == [
-            (1, "file", f"{key}::README.md"), (3, "program", "git"), (5, "file", f"{key}::README.md")]
+            (5, "file", f"{key}::README.md")]
         assert [json.loads(d) for (d,) in q(db, "SELECT detail FROM event WHERE kind = 'hook_error'")] == [
             {"type": "NameError"}]
         dump = "\n".join(str(row) for table in ("event", "record", "link")
@@ -936,11 +787,58 @@ class TestSafety:
         assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         assert b"hunterpw" not in raw_bytes(db)
         con = sqlite3.connect(db, isolation_level=None)
-        assert store.apply_current_rules(con) == {}
+        assert store.apply_current_rules(con) == {} and store.drop_shell_records(con) == {}
         con.close()
 
+    def test_a_version_6_store_drops_everything_read_from_shell_commands(self, db, repo, tmp_path):
+        """D18 reversed: an older store holds shell command mentions, programs,
+        a failed command's file links to the paths its text named, touched_repo
+        links those mentions made, and file counts in observed rows. Opening it
+        removes them, and a session hook rewrites the file."""
+        other = tmp_path / "other"
+        git("init", "-q", "-b", "main", str(other))
+        (other / "x.py").write_text("x = 1\n")
+        key, root = os.path.realpath(repo / ".git"), os.path.realpath(repo)
+        okey, oroot = os.path.realpath(other / ".git"), os.path.realpath(other)
+        con = sqlite3.connect(db, isolation_level=None)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(store.SCHEMA)
+        con.execute(f"PRAGMA user_version={store.RULES_PURGED_VERSION}")
+        records = [(1, "session", None, None, None, None),
+                   (2, "activity", "Bash", "mention", "t2", {"program": "zorkprog"}),
+                   (3, "failure", "Bash", "command or tool failure", "t3",
+                    {"exit": 1, "sig_hash": "a" * 32, "program": "zorkprog"}),
+                   (4, "activity", "Read", "read", "t4", None)]
+        for rid, kind, tool, action, tuid, info in records:
+            con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, tool_use_id, info)"
+                        " VALUES (?, ?, ?, 's1', ?, ?, ?, ?)",
+                        (rid, kind, T + rid, tool, action, tuid, json.dumps(info) if info else None))
+        links = [(1, "session", "s1"), (1, "repo", key), (1, "worktree", root), (1, "touched_repo", okey),
+                 (2, "session", "s1"), (2, "repo", okey), (2, "worktree", oroot), (2, "file", f"{okey}::x.py"),
+                 (2, "program", "zorkprog"), (3, "session", "s1"), (3, "repo", okey), (3, "worktree", oroot),
+                 (3, "file", f"{okey}::x.py"), (3, "program", "zorkprog"), (3, "signature", "a" * 32),
+                 (4, "session", "s1"), (4, "repo", key), (4, "worktree", root), (4, "file", f"{key}::README.md")]
+        con.executemany("INSERT INTO link VALUES (?, ?, ?, ?)", [(*row, T) for row in links])
+        con.execute("INSERT INTO event (ts, kind, hook, session_id, tool, detail)"
+                    " VALUES (?, 'observed', 'PostToolUse', 's1', 'Bash', ?)", (T, json.dumps({"activity": 1, "files": 1})))
+        con.close()
+        assert b"zorkprog" in raw_bytes(db)
+        store.connect(db).close()
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
+        assert q(db, "SELECT id, kind FROM record ORDER BY id") == [(1, "session"), (3, "failure"), (4, "activity")]
+        assert json.loads(q(db, "SELECT info FROM record WHERE id = 3")[0][0]) == {"exit": 1, "sig_hash": "a" * 32}
+        assert sorted(q(db, "SELECT type, key FROM link WHERE record_id = 3")) == sorted(
+            [("session", "s1"), ("repo", key), ("worktree", root), ("signature", "a" * 32)])
+        assert links(db, 1, "touched_repo") == [] and links(db, 4, "file") == [f"{key}::README.md"]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'program'") == [(0,)]
+        assert q(db, "SELECT detail FROM event WHERE kind = 'observed'") == [(None,)]
+        assert "zorkprog" not in report.build(db) and "x.py" not in report.build(db)
+        start(db, "s9", repo, T + 9)
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert b"zorkprog" not in raw_bytes(db)
+
     def test_the_second_rewrite_also_steps_back_and_retries(self, db):
-        """Rewriting a version 5 store never waits past the busy timeout either."""
+        """Rewriting a migrated store never waits past the busy timeout either."""
         con = sqlite3.connect(db, isolation_level=None)
         con.execute("PRAGMA journal_mode=WAL")
         con.executescript(store.SCHEMA)
@@ -954,7 +852,7 @@ class TestSafety:
         assert store.purge_freed_text(con) is False
         holder.execute("ROLLBACK")
         holder.close()
-        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         assert store.purge_freed_text(con) is True
         con.close()
         assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
@@ -967,20 +865,28 @@ class TestSafety:
         out = report.build(db)
         assert "toolu_x1" in out and sig[:12] in out and sig not in out and "make: ***" not in out
 
-    def test_a_credential_in_wrapper_arguments_reaches_no_record_link_or_report(self, db, repo):
-        """Review finding: the program of ``env -S 'curl --user ...'`` was the
-        whole quoted command, stored in records and program links and printed."""
-        cmd = "env -S 'curl --user alice" + f":hunterpw' https://example.invalid {repo}/README.md"
-        tool_ok(db, "s1", repo, T, "Bash", {"command": cmd}, "t1")
-        tool_fail(db, "s1", repo, T + 1, "Bash", {"command": cmd}, "Exit code 22\ncurl: (22) error 401", "t2")
-        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"sudo -u alice cat {repo}/README.md"}, "t3")
-        assert q(db, "SELECT kind FROM record WHERE kind != 'session' ORDER BY id") == [("activity",), ("failure",),
-                                                                                    ("activity",)]
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'program'") == [(0,)]
+    def test_a_shell_call_leaves_nothing_from_its_command(self, db, repo):
+        """The hook reads no shell command text. A Bash call whose command holds
+        a credential, repo paths, wrappers, cd, git -C or multiline quoting adds
+        no activity, and its failure keeps only the exit code, kind and
+        signature hash."""
+        cred = "alice" + ":hunterpw"
+        cmds = [f"env -S 'curl --user {cred}' https://example.invalid {repo}/README.md",
+                f"sudo -u alice cat {repo}/src/app.py && cd {wt(repo, 'b')} && git -C src diff -- app.py",
+                "export TOKEN='prefix\nhunterpw\nsuffix'\ncat README.md",
+                f"bash -lc 'cd {repo} && cat ./README.md' > /tmp/zebralog.txt"]
+        for n, cmd in enumerate(cmds):
+            tool_ok(db, "s1", repo, T + n, "Bash", {"command": cmd}, f"ok{n}")
+            tool_fail(db, "s1", repo, T + n, "Bash", {"command": cmd}, "Exit code 22\ncurl: (22) error 401", f"fail{n}")
+        assert q(db, "SELECT count(*) FROM record WHERE kind = 'activity'") == [(0,)]
+        infos = [json.loads(i) for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure'")]
+        assert len(infos) == len(cmds) and all(set(i) <= {"exit", "sig_hash"} for i in infos)
+        assert {t for (t,) in q(db, "SELECT DISTINCT type FROM link")} == {"session", "repo", "worktree", "signature"}
         dump = "\n".join(str(row) for table in ("event", "record", "link")
                          for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (dump + report.build(db)).lower()
-        assert "hunterpw" not in text and "alice" not in text and "--user" not in text
+        for word in ("hunterpw", "alice", "--user", "example.invalid", "readme", "app.py", "zebralog", "sudo", "curl"):
+            assert word not in text, word
 
     def test_a_failed_file_tool_path_that_names_no_file_is_not_stored(self, db, repo):
         """A failed Read or Edit kept its path whether or not the file existed,

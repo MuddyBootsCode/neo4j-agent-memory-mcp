@@ -8,19 +8,19 @@ Records
   Links: session, repo, worktree, and ticket from the branch name or, failing
   that, from the brief file or the first prompt. ``repo`` and ``worktree``
   come from the session's cwd only, so a session started outside any git repo
-  has none. A repo whose files it touches from elsewhere is linked as
-  ``touched_repo``: a lead running from ~/Projects still appears in that
-  repo's roster without the repo becoming its own. ``info.branch`` holds the
-  branch. ``ts_end`` is the last time any hook saw the session.
-* ``activity``: one per successful tool call that touched repo files. A file
-  tool is ``edit`` (Edit, Write, MultiEdit, NotebookEdit) or ``read`` (Read). A
-  shell command that names repo files is ``mention``, because the command does
-  not say whether it read or wrote them (D18). Links: session, repo, worktree,
-  each file, and the program for a shell command.
-* ``failure``: one per failed tool call, with the program, the exit code, the
-  kind, and the F4 signature only as a keyed hash, so the same failure seen
-  again in another session links to the same signature. Whether an agent got
-  past a failure is not tracked. Interrupts are not failures.
+  has none. A repo whose files it touches with file tools from elsewhere is
+  linked as ``touched_repo``: a lead running from ~/Projects still appears in
+  that repo's roster without the repo becoming its own. ``info.branch`` holds
+  the branch. ``ts_end`` is the last time any hook saw the session.
+* ``activity``: one per successful file tool call on an existing repo file:
+  ``edit`` (Edit, Write, MultiEdit, NotebookEdit) or ``read`` (Read). Links:
+  session, repo, worktree and the file. A shell command adds no activity: what
+  it touched cannot be told from its text, so the hook does not read it.
+* ``failure``: one per failed tool call, with the exit code, the kind, and the
+  F4 signature only as a keyed hash, so the same failure seen again in another
+  session links to the same signature. A failed shell command is one too, from
+  its error text alone. Whether an agent got past a failure is not tracked.
+  Interrupts are not failures.
 
 Would deliver (one ``event`` row each, naming the records it would have shown)
 
@@ -30,14 +30,16 @@ Would deliver (one ``event`` row each, naming the records it would have shown)
 * ``first_prompt``: at a session's first prompt, other sessions seen in the last
   60 minutes that hold a ticket the prompt names, or have edited a file it names.
 * ``brief_file``: the same lookup over a swarm brief file (``SWARM_BRIEF.md``,
-  ``EPIC_BRIEF.md``) the first time the session reads it, because a swarm
-  worker's prompt only tells it to read that file.
+  ``EPIC_BRIEF.md``), because a swarm worker's prompt only tells it to read
+  that file. It runs once per session: at the first prompt when the session's
+  working directory holds a brief, however the worker then reads it, or else
+  at the first Read of a brief elsewhere.
 * ``same_file_edit``: after an edit, another session's edit of the same file
   within 60 minutes, once per session, file and other session.
 
-Never stored: command text, prompt text, tool output. The store keeps the
-program as one bare name, the repo-relative paths of files that exist, and a
-failed call's exit code, kind and keyed signature hash.
+Never stored: anything from shell command text, prompt text or tool output.
+The store keeps the repo-relative paths of files that exist, tickets with a
+configured prefix, and a failed call's exit code, kind and keyed signature hash.
 """
 
 from __future__ import annotations
@@ -214,7 +216,9 @@ def _on_prompt(con, call: Call, session, ts: float) -> dict:
     prompt = call.payload.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
     bases = [b for b in (call.cwd, loc[2] if loc else None) if b]
-    return {"first": True, **_holders(con, call, rid, prompt, bases, ts, "first_prompt", "prompt")}
+    detail = {"first": True, **_holders(con, call, rid, prompt, bases, ts, "first_prompt", "prompt")}
+    here = next((p for p in (os.path.join(call.cwd, n) for n in BRIEF_FILES) if call.cwd and os.path.isfile(p)), None)
+    return {**detail, **_brief(con, call, rid, here, ts)}
 
 
 def _holders(con, call: Call, rid: int, text: str, bases: list, ts: float, moment: str, source: str) -> dict:
@@ -261,14 +265,10 @@ def _holders(con, call: Call, rid: int, text: str, bases: list, ts: float, momen
     return {"tickets": len(tickets), "files": len(files), "held": len(set(shown))}
 
 
-def _brief(con, call: Call, rid: int, desc: dict, ts: float) -> dict:
+def _brief(con, call: Call, rid: int, path: str | None, ts: float) -> dict:
     """A swarm worker's prompt only says to read its brief file (ollama-swarm
-    SWARM_BRIEF.md, epic-squad EPIC_BRIEF.md), so its brief is looked up the
-    first time the session reads one."""
-    if desc["action"] not in ("read", "mention"):
-        return {}
-    path = next((os.path.join(wt, rel) for _k, _n, wt, rel in desc["files"]
-                 if os.path.basename(rel) in BRIEF_FILES), None)
+    SWARM_BRIEF.md, epic-squad EPIC_BRIEF.md), so the hook reads the brief
+    itself and runs the Moment 2 lookup over it, once per session."""
     key = f"brief_file|{call.sid}"
     if path is None or con.execute("SELECT 1 FROM event WHERE dedupe = ?", (key,)).fetchone():
         return {}
@@ -286,7 +286,7 @@ def _brief(con, call: Call, rid: int, desc: dict, ts: float) -> dict:
 # ---------------------------------------------------------------- tool calls
 
 def _describe(call: Call) -> dict:
-    """Files, action and program of a tool call."""
+    """Files and action of a file tool call. Any other call has neither."""
     tool = call.tool or ""
     ti = call.tool_input
     if tool in rules.FILE_TOOLS:
@@ -296,20 +296,14 @@ def _describe(call: Call) -> dict:
             path = os.path.join(call.cwd, path)
         # Only a file that exists: a failed call can name any text as its path.
         fl = rules.file_location(path) if path and os.path.isfile(path) else None
-        return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read", "program": None}
-    if tool in rules.SHELL_TOOLS:
-        cmd = ti.get("command") if isinstance(ti.get("command"), str) else ""
-        files = [fl for fl in (rules.file_location(p) for p in rules.command_files(cmd, call.cwd)) if fl]
-        return {"files": files, "action": "mention", "program": rules.command_program(cmd) or None}
-    return {"files": [], "action": None, "program": None}
+        return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read"}
+    return {"files": [], "action": None}
 
 
 def _links(call: Call, desc: dict) -> list:
     pairs = [("session", call.sid)]
     for repo_key, _name, worktree, rel in desc["files"]:
         pairs += [("repo", repo_key), ("worktree", worktree), ("file", rules.file_key(repo_key, rel))]
-    if desc["program"]:
-        pairs.append(("program", desc["program"]))
     return pairs
 
 
@@ -319,8 +313,7 @@ def _on_tool_success(con, call: Call, session, ts: float) -> dict:
     made = 0
     if desc["files"]:
         arid = store.add_record(con, "activity", ts, call.sid, agent_id=call.agent_id, tool=call.tool,
-                                action=desc["action"], tool_use_id=call.tool_use_id,
-                                info={"program": desc["program"]} if desc["program"] else None)
+                                action=desc["action"], tool_use_id=call.tool_use_id)
         if arid:
             made = 1
             store.add_links(con, arid, ts, _links(call, desc))
@@ -328,7 +321,9 @@ def _on_tool_success(con, call: Call, session, ts: float) -> dict:
             store.add_links(con, rid, ts, [("touched_repo", f[0]) for f in desc["files"] if f[0] != here])
             if desc["action"] == "edit":
                 _same_file_edit(con, call, desc["files"], ts)
-    return {"activity": made, "files": len(desc["files"]), **_brief(con, call, rid, desc, ts)}
+    read = next((os.path.join(wt, rel) for _k, _n, wt, rel in desc["files"]
+                 if desc["action"] == "read" and os.path.basename(rel) in BRIEF_FILES), None)
+    return {"activity": made, "files": len(desc["files"]), **_brief(con, call, rid, read, ts)}
 
 
 def _same_file_edit(con, call: Call, files, ts: float) -> None:
@@ -370,7 +365,7 @@ def _on_tool_failure(con, call: Call, session, ts: float) -> dict:
                             detail={"earlier_signatures": earlier})
     # No text from the output is kept: the exit code, the kind, and the
     # signature only as a keyed hash.
-    info = {"exit": rules.exit_code(err), "sig_hash": sig_hash, "program": desc["program"]}
+    info = {"exit": rules.exit_code(err), "sig_hash": sig_hash}
     frid = store.add_record(con, "failure", ts, call.sid, agent_id=call.agent_id, tool=call.tool,
                             action=rules.failure_kind(err), tool_use_id=call.tool_use_id,
                             info={k: v for k, v in info.items() if v is not None})

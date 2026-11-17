@@ -5,15 +5,15 @@ old package and would cost startup time on every tool call. The functions here
 are copies, and ``tests/test_swarm_memory.py`` checks them against the replay on
 the same inputs so the two cannot drift apart.
 
-Three rules differ from the replay, each because the hook runs live:
+Two rules differ from the replay, each because the hook runs live:
 
 * A file counts when it exists on disk now. The replay checked ``git ls-files``
   plus history.
 * The repo comes from reading ``.git`` and the git dir's ``commondir`` file, with
   no git subprocess.
-* In a shell command, each segment's relative paths resolve from the directory
-  a ``cd`` earlier in the command moved to, as the shell would. The replay
-  could only match such a path as a unique suffix.
+
+Neither copy reads shell command text: what a command touched cannot be told
+from its text.
 
 The failure signature is the replay's, unchanged. The store keeps only its
 keyed hash (``store.signature_hash``), so no text from a tool's output is kept.
@@ -24,11 +24,9 @@ from __future__ import annotations
 import functools
 import os
 import re
-import shlex
 
 FILE_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
-SHELL_TOOLS = frozenset({"Bash", "PowerShell"})
 MAX_NAMED_FILES = 25
 MAX_TOKENS = 400
 
@@ -178,171 +176,7 @@ def branch_ticket(name: str | None, keys=()) -> str | None:
     return m.group(0).upper() if m else None
 
 
-# ---------------------------------------------------------------- shell commands (replay rules)
-
-_SHELL_OPS = {"&&", "||", ";", "|", "&", ";;", "|&", "(", ")"}
-_SKIP_HEADS = {"cd", "export", "source", ".", "set", "pushd", "popd", "unset", "true", ":", "trap", "ulimit"}
-_WRAPPERS = {"sudo", "time", "env", "command", "nohup", "exec", "npx", "bunx", "pnpx", "xargs", "timeout"}
-_RUNNERS = {("uv", "run"), ("poetry", "run"), ("pnpm", "exec"), ("npm", "exec"), ("pipenv", "run"),
-            ("bundle", "exec"), ("agent-test-budget", "run"), ("yarn", "dlx"), ("pdm", "run"),
-            ("hatch", "run"), ("rye", "run")}
-_SHELLS = {"bash", "zsh", "sh"}
-_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
-_JS_INLINE = {"-e", "--eval", "-p", "--print"}
-_INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": _JS_INLINE, "ts-node": _JS_INLINE,
-                "ruby": {"-e"}, "perl": {"-e", "-E"}}
-
-
-def _segments(command: str) -> list[list[str]]:
-    segs: list[list[str]] = []
-    for line in command.replace("\\\n", " ").splitlines():
-        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        try:
-            toks = list(lex)
-        except ValueError:
-            toks = line.split()
-        cur: list[str] = []
-        for t in toks:
-            if t in _SHELL_OPS:
-                if cur:
-                    segs.append(cur)
-                cur = []
-            else:
-                cur.append(t)
-        if cur:
-            segs.append(cur)
-    return segs
-
-
-def _strip_wrappers(toks: list[str]) -> list[str]:
-    return _unwrap(toks)[0]
-
-
-def _unwrap(toks: list[str]) -> tuple[list[str], bool]:
-    """``toks`` without its wrappers, and whether the word now first came
-    right after a wrapper option, so it may be that option's value
-    (``sudo -u alice id``) rather than the program."""
-    after_option = False
-    changed = True
-    while toks and changed:
-        changed = False
-        head = os.path.basename(toks[0])
-        if head in _WRAPPERS:
-            toks, changed = toks[1:], True
-        elif len(toks) >= 2 and (head, toks[1]) in _RUNNERS:
-            toks, changed = toks[2:], True
-        elif re.fullmatch(r"python[\d.]*", head) and len(toks) >= 3 and toks[1] == "-m":
-            toks, changed = toks[2:], True
-        if changed:
-            after_option = False
-            while toks and (toks[0].startswith("-") or _ENV_ASSIGN.match(toks[0])):
-                after_option = toks[0].startswith("-") and toks[0] != "--"
-                toks = toks[1:]
-            if head == "timeout" and toks and _DURATION.match(toks[0]):
-                toks, after_option = toks[1:], False
-    return toks, after_option
-
-
-_DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
-_SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
-_SHORT_OPTS = re.compile(r"-[A-Za-z]+")
-
-
-def _shell_command_string(args: list[str]) -> str | None:
-    """The command string a shell runs with ``-c``, also when ``c`` sits in an
-    option cluster such as ``-lc`` or ``-ec``: the first argument after the
-    options. None when the shell runs a script or reads its input."""
-    want, skip = False, False
-    for a in args:
-        if skip:
-            skip = False
-        elif a in _SHELL_OPT_VALUE:
-            skip = True
-        elif a.startswith(("-", "+")) and len(a) > 1:
-            want = want or bool(_SHORT_OPTS.fullmatch(a) and "c" in a)
-        else:
-            return a if want else None
-    return None
-
-
-def program_tokens(command: str) -> list[str]:
-    """Tokens a command runs as programs rather than works on: each segment's
-    first word, its program once wrappers such as ``env``, ``timeout 60`` or
-    ``uv run`` are stripped, and the script an interpreter runs (``node x.mjs``,
-    ``bash x.sh``). A shell's ``-c '...'`` string is parsed as commands, and
-    code passed inline (``python -c``, ``node -e``) names no script. A bare
-    name and an absolute path such as ``/opt/homebrew/bin/python3`` are alike."""
-    out: list[str] = []
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        out.append(toks[0])
-        toks = _strip_wrappers(toks)
-        if not toks:
-            continue
-        out.append(toks[0])
-        prog, args = os.path.basename(toks[0]), toks[1:]
-        inner = _shell_command_string(args) if prog in _SHELLS else None
-        if inner is not None:
-            out += program_tokens(inner)
-        elif _INTERPRETERS.match(prog):
-            inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
-            script = next((a for a in args if a in inline or not a.startswith("-")), None)
-            if script and script not in inline:
-                out.append(script)
-    return out
-
-
-# A stored program is one bare name. Anything else, such as a whole command a
-# wrapper option carried (a curl command and its --user value, after env -S), is
-# not stored at all.
-_BARE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
-
-
-def bare_name(value) -> str | None:
-    """``value`` when it is one bare name (letters, digits, ``.``, ``_``,
-    ``+``, ``-``, at most 64), else None."""
-    return value if isinstance(value, str) and _BARE_NAME.fullmatch(value) else None
-
-
-def command_program(command: str) -> str:
-    """The program a command runs, without its arguments: the first command
-    that is not a cd, export or similar, with wrappers such as ``uv run``
-    stripped and a shell's ``-c`` string read as commands of its own. Empty
-    when that is not one bare name, or when the word follows a wrapper option
-    and may be its value, so a wrapper argument is never stored."""
-    return bare_name(_first_program(command)) or ""
-
-
-def _first_program(command: str) -> str:
-    if not isinstance(command, str) or not command.strip():
-        return ""
-    first_head = ""
-    for toks in _segments(command):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        head = os.path.basename(toks[0])
-        first_head = first_head or head
-        if head in _SKIP_HEADS:
-            continue
-        toks, after_option = _unwrap(toks)
-        if not toks:
-            continue
-        if after_option:
-            return ""
-        prog = os.path.basename(toks[0])
-        inner = _shell_command_string(toks[1:]) if prog in _SHELLS else None
-        if inner is not None and _first_program(inner):
-            return _first_program(inner)
-        return prog
-    return first_head
-
+# ---------------------------------------------------------------- names in prompt and brief text
 
 _TOKEN_SPLIT = re.compile(r"[^\s`'\"()<>\[\]{},;|*!?=]+")
 _HAS_EXT = re.compile(r"\.[A-Za-z][\w]{0,7}$")
@@ -367,14 +201,13 @@ def _candidates(tok: str, bases: list[str]) -> list[str]:
     return [os.path.normpath(os.path.join(b, tok)) for b in bases]
 
 
-def named_files(text: str, bases: list[str], exclude: set | None = None) -> list[str]:
-    """Absolute paths of existing files that a prompt or command names.
+def named_files(text: str, bases: list[str]) -> list[str]:
+    """Absolute paths of existing files that a prompt or a brief names.
 
     A token counts when it has a ``/`` or a file extension and resolves to a
     regular file, absolute or relative to one of ``bases`` in order.
     """
     found: list[str] = []
-    exclude = exclude or set()
     for n, raw in enumerate(_TOKEN_SPLIT.findall(text or "")):
         if n >= MAX_TOKENS or len(found) >= MAX_NAMED_FILES:
             break
@@ -383,98 +216,20 @@ def named_files(text: str, bases: list[str], exclude: set | None = None) -> list
             continue
         for cand in _candidates(tok, bases):
             if os.path.isfile(cand):
-                if cand not in found and cand not in exclude:
+                if cand not in found:
                     found.append(cand)
                 break
     return found
 
 
-def executed_files(command: str, bases: list[str]) -> set[str]:
-    """Existing files a command runs as a program (``program_tokens``), which
-    is using a tool rather than working on the file."""
-    out: set[str] = set()
-    for tok in program_tokens(command):
-        tok = _clean_token(tok)
-        if not tok or not ("/" in tok or _HAS_EXT.search(tok)):
-            continue
-        for cand in _candidates(tok, bases):
-            if os.path.isfile(cand):
-                out.add(cand)
-                break
-    return out
+# A stored value that must be one bare name, such as an exception's type.
+_BARE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 
 
-MAX_SEGMENTS = 200
-MAX_SHELL_DEPTH = 3
-
-
-def _shell_payload(toks: list[str]) -> str | None:
-    """The ``-c`` string of a segment that runs a shell, wrappers stripped."""
-    while toks and _ENV_ASSIGN.match(toks[0]):
-        toks = toks[1:]
-    toks = _strip_wrappers(toks)
-    if not toks or os.path.basename(toks[0]) not in _SHELLS:
-        return None
-    return _shell_command_string(toks[1:])
-
-
-# git options before the subcommand that take a separate value.
-_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
-
-
-def _segment_dir(toks: list[str], current: str) -> str:
-    """The directory a segment resolves its paths from: ``current``, or for
-    git each ``-C <path>`` before the subcommand in turn, a relative one from
-    the one before, as git does. It holds for that segment only."""
-    while toks and _ENV_ASSIGN.match(toks[0]):
-        toks = toks[1:]
-    toks = _strip_wrappers(toks)
-    if not toks or os.path.basename(toks[0]) != "git":
-        return current
-    here, i = current, 1
-    while i < len(toks) and toks[i].startswith("-"):
-        if toks[i] in _GIT_VALUE_OPTS and i + 1 < len(toks):
-            if toks[i] == "-C" and toks[i + 1]:
-                here = os.path.normpath(os.path.join(here, os.path.expanduser(toks[i + 1])))
-            i += 2
-        else:
-            i += 1
-    return here
-
-
-def command_files(command: str, cwd: str, _depth: int = 0) -> list[str]:
-    """Absolute paths of existing files a shell command names, except what it
-    runs as a program (MUD-850 D18, replay rule). Each segment resolves its
-    relative paths from the directory the command's ``cd`` had moved to by
-    then, as the shell would, and a git segment from where its ``-C`` options
-    point. A shell's ``-c`` string is read the same way, from the directory
-    that shell starts in, so its ``cd`` moves only its own commands."""
-    if not isinstance(command, str) or not command.strip() or not cwd:
-        return []
-    found: list[str] = []
-    current = cwd
-    for toks in _segments(command)[:MAX_SEGMENTS]:
-        if toks and toks[0] == "cd":
-            if len(toks) >= 2:
-                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
-            continue
-        inner = _shell_payload(toks) if _depth < MAX_SHELL_DEPTH else None
-        if inner is not None:
-            names = command_files(inner, current, _depth + 1)
-        else:
-            text = shlex.join(toks)
-            here = _segment_dir(toks, current)
-            try:
-                executed = executed_files(text, [here])
-            except Exception:
-                executed = set()
-            names = named_files(text, [here], exclude=executed)
-        for f in names:
-            if f not in found:
-                found.append(f)
-                if len(found) >= MAX_NAMED_FILES:
-                    return found
-    return found
+def bare_name(value) -> str | None:
+    """``value`` when it is one bare name (letters, digits, ``.``, ``_``,
+    ``+``, ``-``, at most 64), else None."""
+    return value if isinstance(value, str) and _BARE_NAME.fullmatch(value) else None
 
 
 # ---------------------------------------------------------------- failures (F4, unchanged)
