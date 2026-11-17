@@ -20,9 +20,10 @@ an HMAC under a random key kept beside the store (``<store>.key``, mode 0600),
 so repeats still match and the hash cannot be checked against a guess. If the
 key file goes missing while the store holds hashes, the next failure makes a
 new key and logs a ``signature_key_new`` event: hashes from before it no longer
-match those after it. A store that held text (schema version 1) is migrated,
-then rewritten on a session hook with VACUUM and a TRUNCATE checkpoint, so the
-replaced text is gone from the file's bytes as well as its rows.
+match those after it. A store that held text (schema version 1), or values an
+older rule let through (version 4), is migrated, then rewritten on a session
+hook with VACUUM and a TRUNCATE checkpoint, so the replaced text is gone from
+the file's bytes as well as its rows.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
 lock up front; if it is not free within ``BUSY_TIMEOUT_MS`` the hook skips and
@@ -43,7 +44,9 @@ from swarm_memory import rules
 ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
-SCHEMA_VERSION = 4  # 2: failures keep only a keyed signature hash; 3: the file holds no old text; 4: no recovery
+# 2: failures keep only a keyed signature hash; 3: the file holds no old text; 4: no recovery;
+# 5: stored values meet today's rules; 6: the file holds none of the values replaced at 5.
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS event (
@@ -215,25 +218,30 @@ def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
 
 HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows; the file may still hold the old bytes
 PURGED_VERSION = 3  # the file rewritten; failures still carry the fields recovery matching used
+RECOVERY_DROPPED_VERSION = 4  # no recovery fields; values older rules let through may remain
+RULES_APPLIED_VERSION = 5  # stored values meet today's rules; the file may still hold the old bytes
+# A version whose rows a migration rewrote, and the one its file reaches once rewritten too.
+_PURGE_NEXT = {HASH_ONLY_VERSION: PURGED_VERSION, RULES_APPLIED_VERSION: SCHEMA_VERSION}
 
 
 def purge_freed_text(con: sqlite3.Connection) -> bool:
-    """Version 2 to 3: rewrite the file so the text the migration replaced is
-    gone from its bytes, not only from its rows. SQLite leaves a replaced value
-    in the page's free space and in older WAL frames. VACUUM writes a fresh
-    copy of the database, and a TRUNCATE checkpoint moves it into the file and
-    empties the WAL.
+    """Version 2 to 3, and 5 to 6: rewrite the file so the text a migration
+    replaced is gone from its bytes, not only from its rows. SQLite leaves a
+    replaced value in the page's free space and in older WAL frames. VACUUM
+    writes a fresh copy of the database, and a TRUNCATE checkpoint moves it
+    into the file and empties the WAL.
 
     It needs the write lock, and no other connection may still be reading an
-    older snapshot. When either is busy it stops, leaves the store at version
-    2, and a later session hook tries again. True when the file was rewritten."""
-    if con.execute("PRAGMA user_version").fetchone()[0] != HASH_ONLY_VERSION:
+    older snapshot. When either is busy it stops, leaves the version as it
+    was, and a later session hook tries again. True when the file was rewritten."""
+    target = _PURGE_NEXT.get(con.execute("PRAGMA user_version").fetchone()[0])
+    if target is None:
         return False
     try:
         con.execute("VACUUM")
         if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
             return False
-        con.execute(f"PRAGMA user_version={PURGED_VERSION}")
+        con.execute(f"PRAGMA user_version={target}")
         con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return True
     except sqlite3.OperationalError as exc:
@@ -267,7 +275,64 @@ def drop_recovery(con: sqlite3.Connection) -> dict:
                             (_json(kept or None), rid))
                 counts["changed"] += 1
         con.execute("DROP INDEX IF EXISTS record_open_failures")
-        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute(f"PRAGMA user_version={RECOVERY_DROPPED_VERSION}")
+        con.execute("COMMIT")
+        return counts
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
+def apply_current_rules(con: sqlite3.Connection) -> dict:
+    """Version 4 to 5: bring values stored under older rules to today's.
+
+    * A program that is not one bare name leaves its record and its link. An
+      older rule could store a wrapper's whole argument there
+      (``env -S 'curl --user ...'``).
+    * A failed file tool call's file link goes when no file is at that path in
+      a worktree the record links. An older rule kept the path whether or not
+      the file existed, so any text given as a path was stored.
+    * A ``hook_error`` keeps the exception's type, not its message.
+
+    A bare word an older rule took from after a wrapper option
+    (``sudo -u alice id``) cannot be told from a program without the command,
+    which was never stored, so it stays. It runs in one write transaction and
+    only while the store is still at version 4. ``purge_freed_text()`` then
+    rewrites the file on a session hook. Returns counts."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        if con.execute("PRAGMA user_version").fetchone()[0] != RECOVERY_DROPPED_VERSION:
+            con.execute("ROLLBACK")
+            return {}
+        counts = {"programs": 0, "program_links": 0, "file_links": 0, "hook_errors": 0}
+        rows = con.execute("SELECT id, info FROM record WHERE kind IN ('activity', 'failure') AND info IS NOT NULL")
+        for rid, info in rows.fetchall():
+            data = json.loads(info)
+            if "program" in data and not rules.bare_name(data["program"]):
+                del data["program"]
+                con.execute("UPDATE record SET info = ? WHERE id = ?", (_json(data or None), rid))
+                counts["programs"] += 1
+        for rid, key in con.execute("SELECT record_id, key FROM link WHERE type = 'program'").fetchall():
+            if not rules.bare_name(key):
+                con.execute("DELETE FROM link WHERE record_id = ? AND type = 'program' AND key = ?", (rid, key))
+                counts["program_links"] += 1
+        tools = sorted(rules.FILE_TOOLS)
+        failed = con.execute("SELECT id FROM record WHERE kind = 'failure' AND tool IN (%s)" % ",".join("?" * len(tools)),
+                             tools).fetchall()
+        for (rid,) in failed:
+            roots = [k for (k,) in con.execute("SELECT key FROM link WHERE record_id = ? AND type = 'worktree'", (rid,))]
+            for (key,) in con.execute("SELECT key FROM link WHERE record_id = ? AND type = 'file'", (rid,)).fetchall():
+                rel = key.split("::", 1)[1] if "::" in key else ""
+                if not (rel and any(os.path.isfile(os.path.join(root, rel)) for root in roots)):
+                    con.execute("DELETE FROM link WHERE record_id = ? AND type = 'file' AND key = ?", (rid, key))
+                    counts["file_links"] += 1
+        for eid, detail in con.execute("SELECT id, detail FROM event WHERE kind = 'hook_error'").fetchall():
+            data = json.loads(detail) if detail else {}
+            kept = {"type": rules.bare_name(data.get("type"))}
+            if kept != data:
+                con.execute("UPDATE event SET detail = ? WHERE id = ?", (_json(kept if kept["type"] else None), eid))
+                counts["hook_errors"] += 1
+        con.execute(f"PRAGMA user_version={RULES_APPLIED_VERSION}")
         con.execute("COMMIT")
         return counts
     except BaseException:
@@ -286,16 +351,18 @@ def connect(path: str) -> sqlite3.Connection:
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version in (0, 1, PURGED_VERSION):
+    if version in (0, 1, PURGED_VERSION, RECOVERY_DROPPED_VERSION):
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
-            if version == 1:
-                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() takes it to 3
-            elif version == PURGED_VERSION:
-                drop_recovery(con)
-            else:
+            if version == 0:
                 con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")  # a new store never held text
+            elif version == 1:
+                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() takes it to 3
+            else:
+                if version == PURGED_VERSION:
+                    drop_recovery(con)  # to version 4
+                apply_current_rules(con)  # to version 5; purge_freed_text() takes it to 6
         except sqlite3.OperationalError as exc:
             con.close()
             if _is_busy(exc):

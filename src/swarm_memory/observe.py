@@ -54,7 +54,7 @@ BRIEF_FILES = ("SWARM_BRIEF.md", "EPIC_BRIEF.md")
 BRIEF_MAX_BYTES = 64 * 1024
 HOOKS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "SessionEnd")
 TOOL_HOOKS = ("PostToolUse", "PostToolUseFailure")
-# A store migrated from version 1 is rewritten on a session hook, so the
+# A store whose rows a migration rewrote is rewritten on a session hook, so the
 # rewrite never delays a tool call; when the store is busy a later one retries.
 PURGE_HOOKS = ("SessionStart", "SessionEnd")
 

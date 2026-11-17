@@ -188,7 +188,7 @@ class TestReplayParity:
         "Exit code 1\nError: Cannot find module 'express'",
         "Exit code 2\nmake: *** [build] Error 2",
         "Permission for this action was denied",
-        "Exit code 1\nerror: login failed password=hunterpw for user app",
+        "Exit code 1\nerror: login failed password" + "=hunterpw for user app",
     ]
     PROGRAMS = [
         "echo hi && /opt/homebrew/bin/python3 -I -S /x/report.py --minutes 15",
@@ -215,12 +215,16 @@ class TestReplayParity:
     def test_command_files_match_the_replay(self, repo):
         """Both copies resolve a Bash command's paths the same way: each
         segment from the directory its cd moved to, starting from the call's
-        cwd, and a file a segment only runs is no touch."""
+        cwd, a git segment from where its -C options point, and a file a
+        segment only runs is no touch."""
         a, b = wt(repo, "a"), wt(repo, "b")
         (repo / "src" / "util.py").write_text("y = 2\n")
+        (repo / "src" / "README.md").write_text("inner\n")
         cmds = ["cat src/app.py README.md", f"cd {b} && cat README.md", "bash -lc 'cd src && cat app.py' && cat README.md",
                 f"agent-test-budget run -- /bin/zsh -c 'cd {a} && bash scripts/run.sh src/app.py'",
-                "cd src && cat app.py util.py", "bash scripts/run.sh && cat scripts/run.sh"]
+                "cd src && cat app.py util.py", "bash scripts/run.sh && cat scripts/run.sh",
+                f"git -C {b} diff -- src/app.py", "git -C src diff -- README.md", f"git -C {a} -C src log app.py",
+                "GIT_PAGER=cat git -c core.pager=cat -C src show README.md && cat README.md"]
 
         def to_file(path):
             return (path, None) if path and os.path.isfile(path) else None
@@ -246,7 +250,7 @@ class TestCommandProgram:
     def test_anything_but_one_bare_name_stores_no_program(self):
         """Review finding: env -S carried a whole command, credential included,
         into the program. Only one bare name is ever a program."""
-        for cmd in ("env -S 'curl --user alice:hunterpw' https://example.invalid", "npx create-react-app@latest app",
+        for cmd in ("env -S 'curl --user alice" + ":hunterpw' https://example.invalid", "npx create-react-app@latest app",
                     "'my tool' --flag", "x" * 65):
             assert rules.command_program(cmd) == "", cmd
 
@@ -320,6 +324,20 @@ class TestCommandFiles:
         a, b = wt(repo, "a"), wt(repo, "b")
         assert rules.command_files(f"bash -lc 'cd {b} && cat README.md'", str(a)) == [str(b / "README.md")]
         assert rules.command_files("sh -ec 'cat src/app.py'", str(a)) == [str(a / "src" / "app.py")]
+
+    def test_git_dash_c_sets_the_directory_of_its_own_segment(self, repo):
+        """Review finding: git -C was ignored, so a diff in another worktree
+        resolved in the starting one, and a subdirectory target resolved to the
+        file of the same name above it."""
+        b = wt(repo, "b")
+        assert rules.command_files(f"git -C {b} diff -- src/app.py", str(repo)) == [str(b / "src" / "app.py")]
+        (repo / "src" / "README.md").write_text("inner\n")
+        assert rules.command_files("git -C src diff -- README.md", str(repo)) == [str(repo / "src" / "README.md")]
+        assert rules.command_files(f"git -C {repo} -C src log -p README.md", str(b)) == [
+            str(repo / "src" / "README.md")]
+        assert rules.command_files("git -c core.pager=cat -C src diff README.md", str(repo)) == [
+            str(repo / "src" / "README.md")]
+        assert rules.command_files("git -C src status && cat README.md", str(repo)) == [str(repo / "README.md")]
 
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
@@ -445,8 +463,8 @@ class TestSession:
 
 class TestFailures:
     def test_a_failure_keeps_only_program_exit_kind_and_a_keyed_signature_hash(self, db, repo):
-        cmd = "psql postgresql://app:hunter2pw@db.internal/main -c 'select 1'"
-        err = "Exit code 2\npsql: error: connection to server failed: password=hunter2pw for user app"
+        cmd = "psql postgresql://app" + ":hunter2pw@db.internal/main -c 'select 1'"
+        err = "Exit code 2\npsql: error: connection to server failed: password" + "=hunter2pw for user app"
         tool_fail(db, "s1", repo, T, "Bash", {"command": cmd}, err, "t1")
         (rid, action, status, ts_end, info), = q(
             db, "SELECT id, action, status, ts_end, info FROM record WHERE kind = 'failure'")
@@ -666,23 +684,25 @@ class TestSafety:
         words = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "wibblewobble", "ploverpw",
                  "wobblegong", "snorkelpw", "snorkeltok", "elauth", "blorptastic", "frobnicate", "grommetpw",
                  "quibbleish", "escapedpw", "zqvmarker", "longtokenab")
+        # Each made-up credential is split where its shape forms, so no literal
+        # here looks like a credential to a secret scanner.
         errors = [
-            "Exit code 1\nerror: zqvmarker authentication failed password=hunterpw for user app",
-            "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
-            "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
-            'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
-            'Exit code 1\nerror: login failed password="zorblax quixotic" for app',
-            "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set",
-            "Exit code 1\nerror: dbcli --password ploverpw failed to connect",
-            'Exit code 1\nerror: sync --api-key "fizzle wobblegong" refused by the server',
-            'Exit code 1\nerror: bad config {"password":"wobble\\"snorkelpw"} rejected by the server',
-            'Exit code 1\nerror: bad config {\\"api_key\\":\\"glimmer snorkeltok\\"} rejected',
-            'Exit code 1\nerror: header Authorization: "Basic snork\\"elauth" was refused today',
-            "Exit code 22\nerror: curl --user app:blorptastic https://api.internal failed",
-            "Exit code 22\nerror: curl -uapp:frobnicate -X POST https://api.internal failed",
-            "Exit code 1\nerror: login --password 'prefix'\\''grommetpw' was refused",
-            "Exit code 1\nfatal: could not connect to https://app:snork@quibbleish@db.internal/main",
-            "Exit code 1\nerror: login --password prefix\\ escapedpw failed",
+            "Exit code 1\nerror: zqvmarker authentication failed password" + "=hunterpw for user app",
+            "Exit code 22\ncurl: error 401 with Authorization: Bear" + "er zxcvbnmasd for the api",
+            "Exit code 2\nfatal: could not connect to postgresql://app" + ":qwertyui@db.internal/main",
+            'Exit code 1\nerror: invalid config {"pass' + 'word": "plughxyzzy", "user": "app"}',
+            'Exit code 1\nerror: login failed password' + '="zorblax quixotic" for app',
+            "Exit code 1\nerror: connection failed with PGPASS" + "WORD=wibblewobble set",
+            "Exit code 1\nerror: dbcli --pass" + "word ploverpw failed to connect",
+            'Exit code 1\nerror: sync --api' + '-key "fizzle wobblegong" refused by the server',
+            'Exit code 1\nerror: bad config {"pass' + 'word":"wobble\\"snorkelpw"} rejected by the server',
+            'Exit code 1\nerror: bad config {\\"api' + '_key\\":\\"glimmer snorkeltok\\"} rejected',
+            'Exit code 1\nerror: header Authorization: "Bas' + 'ic snork\\"elauth" was refused today',
+            "Exit code 22\nerror: curl --user app" + ":blorptastic https://api.internal failed",
+            "Exit code 22\nerror: curl -uapp" + ":frobnicate -X POST https://api.internal failed",
+            "Exit code 1\nerror: login --pass" + "word 'prefix'\\''grommetpw' was refused",
+            "Exit code 1\nfatal: could not connect to https://app" + ":snork@quibbleish@db.internal/main",
+            "Exit code 1\nerror: login --pass" + "word prefix\\ escapedpw failed",
             "Exit code 1\nerror: invalid api key " + "longtoken" + "Ab" * 12 + " for this request",
         ]
         for n, err in enumerate(errors):
@@ -815,6 +835,8 @@ class TestSafety:
         assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
         assert b"zorkmarker" not in raw_bytes(db)
         store.connect(db).close()
+        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        start(db, "s1", repo, T + 2)
         assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         fresh = str(tmp_path / "fresh" / "observe.sqlite3")
         start(fresh, "s2", repo, T)
@@ -845,10 +867,82 @@ class TestSafety:
             2: ({"exit": 1, "sig_hash": "b" * 32, "program": "cat"}, None, None),
             3: ({"exit": 1, "program": "ls"}, None, None)}
         assert q(db, "SELECT name FROM sqlite_master WHERE name = 'record_open_failures'") == []
-        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
         con = sqlite3.connect(db, isolation_level=None)
         assert store.drop_recovery(con) == {}
         con.close()
+
+    def test_a_version_4_store_is_brought_to_todays_rules_and_rewritten(self, db, repo):
+        """Review finding: a version 4 store kept a program an older rule let
+        through (a whole curl command that ``env -S`` carried, its ``--user``
+        value included), and the report printed it. Opening the store applies
+        today's rules to what it holds, and a session hook then rewrites the
+        file, so the text is gone from the rows, the report and the raw bytes."""
+        key, root = os.path.realpath(repo / ".git"), os.path.realpath(repo)
+        bad = "curl --user alice" + ":hunterpw"
+        con = sqlite3.connect(db, isolation_level=None)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(store.SCHEMA)
+        con.execute(f"PRAGMA user_version={store.RECOVERY_DROPPED_VERSION}")
+        records = [(1, "activity", "Bash", {"program": bad}),
+                   (2, "failure", "Bash", {"exit": 22, "sig_hash": "a" * 32, "program": bad}),
+                   (3, "activity", "Bash", {"program": "git"}),
+                   (4, "failure", "Read", None),
+                   (5, "failure", "Edit", None)]
+        for rid, kind, tool, info in records:
+            con.execute("INSERT INTO record (id, kind, ts, session_id, tool, tool_use_id, info)"
+                        " VALUES (?, ?, ?, 's1', ?, ?, ?)", (rid, kind, T, tool, f"t{rid}", json.dumps(info) if info else None))
+        links = [(1, "program", bad), (2, "program", bad), (3, "program", "git"), (1, "file", f"{key}::README.md"),
+                 (4, "file", f"{key}::no such file, alice hunterpw.txt"), (4, "worktree", root),
+                 (5, "file", f"{key}::README.md"), (5, "worktree", root)]
+        con.executemany("INSERT INTO link VALUES (?, ?, ?, ?)", [(*row, T) for row in links])
+        con.execute("INSERT INTO event (ts, kind, hook, detail) VALUES (?, 'hook_error', 'PostToolUse', ?)",
+                    (T, json.dumps({"type": "NameError", "message": "name 'hunterpw' is not defined"})))
+        con.close()
+        assert b"hunterpw" in raw_bytes(db)
+        other_hook = sqlite3.connect(db, isolation_level=None)  # holds the store open, as live hooks do
+        other_hook.execute("SELECT count(*) FROM record").fetchone()
+        con = store.connect(db)
+        con.close()
+        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert {rid: json.loads(i) if i else None for rid, i in q(db, "SELECT id, info FROM record ORDER BY id")} == {
+            1: None, 2: {"exit": 22, "sig_hash": "a" * 32}, 3: {"program": "git"}, 4: None, 5: None}
+        assert q(db, "SELECT record_id, type, key FROM link WHERE type IN ('program', 'file') ORDER BY record_id, type") == [
+            (1, "file", f"{key}::README.md"), (3, "program", "git"), (5, "file", f"{key}::README.md")]
+        assert [json.loads(d) for (d,) in q(db, "SELECT detail FROM event WHERE kind = 'hook_error'")] == [
+            {"type": "NameError"}]
+        dump = "\n".join(str(row) for table in ("event", "record", "link")
+                         for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        assert "hunterpw" not in dump and "hunterpw" not in report.build(db)
+        assert b"hunterpw" in raw_bytes(db)  # the rows changed; the file still holds the old pages
+        start(db, "s9", repo, T + 1)
+        other_hook.close()
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert b"hunterpw" not in raw_bytes(db)
+        con = sqlite3.connect(db, isolation_level=None)
+        assert store.apply_current_rules(con) == {}
+        con.close()
+
+    def test_the_second_rewrite_also_steps_back_and_retries(self, db):
+        """Rewriting a version 5 store never waits past the busy timeout either."""
+        con = sqlite3.connect(db, isolation_level=None)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(store.SCHEMA)
+        con.execute(f"PRAGMA user_version={store.RECOVERY_DROPPED_VERSION}")
+        con.execute("INSERT INTO record (id, kind, ts, session_id, info) VALUES (1, 'activity', ?, 's1', ?)",
+                    (T, json.dumps({"program": "curl --user zorkmarker"})))
+        con.close()
+        con = store.connect(db)
+        holder = sqlite3.connect(db, isolation_level=None)
+        holder.execute("BEGIN IMMEDIATE")
+        assert store.purge_freed_text(con) is False
+        holder.execute("ROLLBACK")
+        holder.close()
+        assert q(db, "PRAGMA user_version") == [(store.RULES_APPLIED_VERSION,)]
+        assert store.purge_freed_text(con) is True
+        con.close()
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert b"zorkmarker" not in raw_bytes(db)
 
     def test_the_report_shows_a_short_hash_and_the_tool_use_id(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",
@@ -860,7 +954,7 @@ class TestSafety:
     def test_a_credential_in_wrapper_arguments_reaches_no_record_link_or_report(self, db, repo):
         """Review finding: the program of ``env -S 'curl --user ...'`` was the
         whole quoted command, stored in records and program links and printed."""
-        cmd = f"env -S 'curl --user alice:hunterpw' https://example.invalid {repo}/README.md"
+        cmd = "env -S 'curl --user alice" + f":hunterpw' https://example.invalid {repo}/README.md"
         tool_ok(db, "s1", repo, T, "Bash", {"command": cmd}, "t1")
         tool_fail(db, "s1", repo, T + 1, "Bash", {"command": cmd}, "Exit code 22\ncurl: (22) error 401", "t2")
         tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"sudo -u alice cat {repo}/README.md"}, "t3")

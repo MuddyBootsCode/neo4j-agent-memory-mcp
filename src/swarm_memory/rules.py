@@ -293,7 +293,8 @@ def program_tokens(command: str) -> list[str]:
 
 
 # A stored program is one bare name. Anything else, such as a whole command a
-# wrapper option carried (env -S 'curl --user a:b'), is not stored at all.
+# wrapper option carried (a curl command and its --user value, after env -S), is
+# not stored at all.
 _BARE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
 
 
@@ -412,13 +413,37 @@ def _shell_payload(toks: list[str]) -> str | None:
     return _shell_command_string(toks[1:])
 
 
+# git options before the subcommand that take a separate value.
+_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
+
+
+def _segment_dir(toks: list[str], current: str) -> str:
+    """The directory a segment resolves its paths from: ``current``, or for
+    git each ``-C <path>`` before the subcommand in turn, a relative one from
+    the one before, as git does. It holds for that segment only."""
+    while toks and _ENV_ASSIGN.match(toks[0]):
+        toks = toks[1:]
+    toks = _strip_wrappers(toks)
+    if not toks or os.path.basename(toks[0]) != "git":
+        return current
+    here, i = current, 1
+    while i < len(toks) and toks[i].startswith("-"):
+        if toks[i] in _GIT_VALUE_OPTS and i + 1 < len(toks):
+            if toks[i] == "-C" and toks[i + 1]:
+                here = os.path.normpath(os.path.join(here, os.path.expanduser(toks[i + 1])))
+            i += 2
+        else:
+            i += 1
+    return here
+
+
 def command_files(command: str, cwd: str, _depth: int = 0) -> list[str]:
     """Absolute paths of existing files a shell command names, except what it
     runs as a program (MUD-850 D18, replay rule). Each segment resolves its
     relative paths from the directory the command's ``cd`` had moved to by
-    then, as the shell would. A shell's ``-c`` string is read the same way,
-    from the directory that shell starts in, so its ``cd`` moves only its own
-    commands."""
+    then, as the shell would, and a git segment from where its ``-C`` options
+    point. A shell's ``-c`` string is read the same way, from the directory
+    that shell starts in, so its ``cd`` moves only its own commands."""
     if not isinstance(command, str) or not command.strip() or not cwd:
         return []
     found: list[str] = []
@@ -433,11 +458,12 @@ def command_files(command: str, cwd: str, _depth: int = 0) -> list[str]:
             names = command_files(inner, current, _depth + 1)
         else:
             text = shlex.join(toks)
+            here = _segment_dir(toks, current)
             try:
-                executed = executed_files(text, [current])
+                executed = executed_files(text, [here])
             except Exception:
                 executed = set()
-            names = named_files(text, [current], exclude=executed)
+            names = named_files(text, [here], exclude=executed)
         for f in names:
             if f not in found:
                 found.append(f)
