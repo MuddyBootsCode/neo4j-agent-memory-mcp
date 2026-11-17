@@ -200,8 +200,10 @@ _INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": 
                 "ruby": {"-e"}, "perl": {"-e", "-E"}}
 
 
-def _segments(command: str) -> list[list[str]]:
-    segs: list[list[str]] = []
+def _segments_ops(command: str) -> list[tuple[list[str], str]]:
+    """Each segment of a command with the operator that ends it; a line ends
+    like ``;``."""
+    segs: list[tuple[list[str], str]] = []
     for line in command.replace("\\\n", " ").splitlines():
         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
@@ -213,13 +215,17 @@ def _segments(command: str) -> list[list[str]]:
         for t in toks:
             if t in _SHELL_OPS:
                 if cur:
-                    segs.append(cur)
+                    segs.append((cur, t))
                 cur = []
             else:
                 cur.append(t)
         if cur:
-            segs.append(cur)
+            segs.append((cur, ";"))
     return segs
+
+
+def _segments(command: str) -> list[list[str]]:
+    return [toks for toks, _op in _segments_ops(command)]
 
 
 def _strip_wrappers(toks: list[str]) -> list[str]:
@@ -344,10 +350,45 @@ def command_program(command: str) -> str:
     return prefix.split(" ", 1)[0] if prefix else ""
 
 
+def cmd_identity(command: str) -> str:
+    """What a failed command is matched on: the prefix of every segment that
+    is not a cd, export or similar, with the operators between them. Which
+    segment of ``git status && npm test`` failed is unknown, so only the same
+    compound command resolves it, never ``git status`` alone. A shell's
+    ``-c`` string counts as its own segments. The replay's rule."""
+    parts: list[str] = []
+    for toks, op in _segments_ops(command or ""):
+        while toks and _ENV_ASSIGN.match(toks[0]):
+            toks = toks[1:]
+        if not toks or os.path.basename(toks[0]) in _SKIP_HEADS:
+            continue
+        stripped = _strip_wrappers(toks)
+        inner = _shell_command_string(stripped[1:]) if stripped and os.path.basename(stripped[0]) in _SHELLS else None
+        parts += [cmd_identity(inner) if inner is not None else cmd_prefix(shlex.join(toks)), op]
+    return " ".join(parts[:-1]) if parts else cmd_prefix(command or "")
+
+
+def _git_dir(args: list[str], current: str) -> str:
+    """The directory git works in: ``current`` moved by each ``-C`` before the
+    subcommand, a relative one from the one before it, as git reads them."""
+    skip = False
+    for k, a in enumerate(args):
+        if skip:
+            skip = False
+        elif a == "-C" and k + 1 < len(args):
+            current = os.path.normpath(os.path.join(current, os.path.expanduser(args[k + 1])))
+            skip = True
+        elif a == "-c":
+            skip = True
+        elif not a.startswith("-"):
+            break
+    return current
+
+
 def command_dir(command: str, cwd: str | None) -> str | None:
     """The directory a command's first program runs in: ``cwd`` moved by any
-    ``cd`` before it, also inside ``sh -c``. None when neither is known.
-    The replay's rule."""
+    ``cd`` before it, also inside ``sh -c``, and for git by its ``-C``
+    options. None when neither is known. The replay's rule."""
     current = cwd or ""
     for toks in _segments(command or ""):
         while toks and _ENV_ASSIGN.match(toks[0]):
@@ -365,15 +406,17 @@ def command_dir(command: str, cwd: str | None) -> str | None:
             inner = _shell_command_string(toks[1:])
             if inner is not None:
                 return command_dir(inner, current)
+        if toks and os.path.basename(toks[0]) == "git":
+            current = _git_dir(toks[1:], current)
         break
     return current or None
 
 
 def prefix_key(command: str) -> str:
-    """An opaque key for the command prefix. Failures are matched to later
-    successes on it, so the prefix itself, which can hold a secret such as a
-    connection string, is never stored."""
-    return hashlib.sha256(cmd_prefix(command).encode("utf-8", "replace")).hexdigest()[:16]
+    """An opaque key for the command (``cmd_identity``). Failures are matched
+    to later successes on it, so the command, which can hold a secret such as
+    a connection string, is never stored."""
+    return hashlib.sha256(cmd_identity(command).encode("utf-8", "replace")).hexdigest()[:16]
 
 
 _TOKEN_SPLIT = re.compile(r"[^\s`'\"()<>\[\]{},;|*!?=]+")

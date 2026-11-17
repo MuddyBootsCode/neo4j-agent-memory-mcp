@@ -197,10 +197,19 @@ class TestReplayParity:
     def test_command_dirs_match_the_replay(self):
         cases = [("make build", "/p"), ("cd /x && make", "/p"), ("bash -lc 'cd sub && make'", "/p"),
                  ("agent-test-budget run -- /bin/zsh -c 'cd /wt/a && pytest -q'", "/p"), ("npm test", None),
-                 ("cd .. && cd q && ls", "/p/r")]
+                 ("cd .. && cd q && ls", "/p/r"), ("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p"),
+                 ("cd sub && git -C ../q status", "/p")]
         for cmd, cwd in cases:
             assert rules.command_dir(cmd, cwd) == replay.command_dir(cmd, cwd), cmd
         assert rules.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
+        assert rules.command_dir("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p") == "/repo/.worktrees/a"
+
+    def test_command_identities_match_the_replay(self):
+        compound = ["git status --short && npm test", "npm test 2>&1 | tail -20", "make || make clean; make",
+                    "bash -lc 'make && make test'", "cd x && FOO=1 npm test && git status"]
+        for cmd in self.COMMANDS + self.PROGRAMS + compound:
+            assert rules.cmd_identity(cmd) == replay.cmd_identity(cmd), cmd
+        assert rules.cmd_identity("git status --short && npm test") == "git status && npm test"
 
     def test_program_tokens_match_the_replay(self):
         for cmd in self.PROGRAMS:
@@ -486,6 +495,28 @@ class TestFailures:
         tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"cd {b} && make build"}, "t3")
         assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
         tool_ok(db, "s1", repo, T + 3, "Bash", {"command": f"bash -lc 'cd {a} && make build'"}, "t4")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
+    def test_a_compound_failure_is_resolved_only_by_the_same_compound(self, db, repo):
+        """Review finding: git status --short && npm test failing was resolved
+        by a later git status. Which segment failed is unknown, so neither
+        segment alone resolves it."""
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "git status --short && npm test"},
+                  "Exit code 1\nError: 3 tests failed", "t1")
+        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "git status --short"}, "t2")
+        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": "npm test"}, "t3")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 3, "Bash", {"command": "git status && npm test"}, "t4")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
+    def test_git_dash_c_in_another_worktree_does_not_resolve_it(self, db, repo):
+        """Review finding: git -C targets collapsed into one identity."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        tool_fail(db, "s1", repo, T, "Bash", {"command": f"git -C {a} merge topic"},
+                  "Exit code 1\nerror: merge conflict in src/app.py", "t1")
+        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": f"git -C {b} merge topic"}, "t2")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", a, T + 2, "Bash", {"command": "git merge topic"}, "t3")
         assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
 
     def test_a_later_lint_does_not_resolve_failed_tests(self, db, repo):
