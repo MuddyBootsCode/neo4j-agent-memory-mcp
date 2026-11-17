@@ -35,10 +35,10 @@ connected set of linked sessions.
 Moment 3 (with a tool result). A touch by agent B is a hit when another agent
 A in the same run had touched the same file, or a related file, in the window
 before it. Touches are timed by their result, when a hook would see them, and
-a call whose result never came back is left out. A touch is a file tool call (Read, Edit, Write, MultiEdit,
-NotebookEdit) on a repo file; a second count adds every repo file a Bash
-command names, except a script the command runs as its program, and a third
-adds those scripts too. Related is tested three ways: same directory, import
+a call whose result never came back is left out. A touch is a file tool call
+(Read, Edit, Write, MultiEdit, NotebookEdit) on a repo file. Shell commands are
+not read, since what a command touched cannot be told from its text. Related
+is tested three ways: same directory, import
 neighbour (one hop either way, static parse of Python and JS/TS imports), and
 same ontology rule (a gate in ``ontology/*.md`` naming the file, or
 ``ontology/gates/*.json``). Paths are repo-relative, so worktrees compare,
@@ -81,7 +81,6 @@ import importlib.util
 import json
 import os
 import re
-import shlex
 import statistics
 import subprocess
 import sys
@@ -209,78 +208,6 @@ def group_runs(sessions) -> list[list[str]]:
 
 
 # ---------------------------------------------------------------- failures
-
-_SHELL_OPS = {"&&", "||", ";", "|", "&", ";;", "|&", "(", ")"}
-_WRAPPERS = {"sudo", "time", "env", "command", "nohup", "exec", "npx", "bunx", "pnpx", "xargs", "timeout"}
-_RUNNERS = {("uv", "run"), ("poetry", "run"), ("pnpm", "exec"), ("npm", "exec"), ("pipenv", "run"),
-            ("bundle", "exec"), ("agent-test-budget", "run"), ("yarn", "dlx"), ("pdm", "run"),
-            ("hatch", "run"), ("rye", "run")}
-_SHELLS = {"bash", "zsh", "sh"}
-_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
-
-def _segments(command: str) -> list[list[str]]:
-    segs: list[list[str]] = []
-    for line in command.replace("\\\n", " ").splitlines():
-        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        try:
-            toks = list(lex)
-        except ValueError:
-            toks = line.split()
-        cur: list[str] = []
-        for t in toks:
-            if t in _SHELL_OPS:
-                if cur:
-                    segs.append(cur)
-                cur = []
-            else:
-                cur.append(t)
-        if cur:
-            segs.append(cur)
-    return segs
-
-
-def _strip_wrappers(toks: list[str]) -> list[str]:
-    changed = True
-    while toks and changed:
-        changed = False
-        head = os.path.basename(toks[0])
-        if head in _WRAPPERS:
-            toks, changed = toks[1:], True
-        elif len(toks) >= 2 and (head, toks[1]) in _RUNNERS:
-            toks, changed = toks[2:], True
-        elif re.fullmatch(r"python[\d.]*", head) and len(toks) >= 3 and toks[1] == "-m":
-            toks, changed = toks[2:], True
-        if changed:
-            while toks and (toks[0].startswith("-") or _ENV_ASSIGN.match(toks[0])):
-                toks = toks[1:]
-            if head == "timeout" and toks and _DURATION.match(toks[0]):
-                toks = toks[1:]
-    return toks
-
-
-_DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
-_SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
-_SHORT_OPTS = re.compile(r"-[A-Za-z]+")
-
-
-def _shell_command_string(args: list[str]) -> str | None:
-    """The command string a shell runs with ``-c``, also when ``c`` sits in an
-    option cluster such as ``-lc`` or ``-ec``: the first argument after the
-    options. None when the shell runs a script or reads its input."""
-    want, skip = False, False
-    for a in args:
-        if skip:
-            skip = False
-        elif a in _SHELL_OPT_VALUE:
-            skip = True
-        elif a.startswith(("-", "+")) and len(a) > 1:
-            want = want or bool(_SHORT_OPTS.fullmatch(a) and "c" in a)
-        else:
-            return a if want else None
-    return None
-
 
 _HOOK_BLOCK = re.compile(r"(?i)(?:pre|post)tooluse(?::[\w*]+)? hook (?:error|blocked)|\bhook\b.{0,40}\b(?:blocked|denied)")
 _INPUT_REJECTED = re.compile(r"(?i)inputvalidationerror|does not match this schema|invalid tool input|tool_use_error")
@@ -625,128 +552,6 @@ def prompt_paths(text: str, files, cwd_prefix: str = "", repo_root: str | None =
     return found
 
 
-_INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
-_JS_INLINE = {"-e", "--eval", "-p", "--print"}
-_INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": _JS_INLINE, "ts-node": _JS_INLINE,
-                "ruby": {"-e"}, "perl": {"-e", "-E"}}
-
-
-def program_tokens(command: str) -> list[str]:
-    """Tokens a command runs as programs rather than works on: each segment's
-    first word, its program once wrappers such as ``env``, ``timeout 60`` or
-    ``uv run`` are stripped, and the script an interpreter runs (``node x.mjs``,
-    ``bash x.sh``). A shell's ``-c '...'`` string is parsed as commands, and
-    code passed inline (``python -c``, ``node -e``) names no script. A bare
-    name and an absolute path such as ``/opt/homebrew/bin/python3`` are alike.
-    The same rule as ``swarm_memory.rules.program_tokens`` (MUD-850 Phase 2)."""
-    out: list[str] = []
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        out.append(toks[0])
-        toks = _strip_wrappers(toks)
-        if not toks:
-            continue
-        out.append(toks[0])
-        prog, args = os.path.basename(toks[0]), toks[1:]
-        inner = _shell_command_string(args) if prog in _SHELLS else None
-        if inner is not None:
-            out += program_tokens(inner)
-        elif _INTERPRETERS.match(prog):
-            inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
-            script = next((a for a in args if a in inline or not a.startswith("-")), None)
-            if script and script not in inline:
-                out.append(script)
-    return out
-
-
-MAX_SEGMENTS = 200
-MAX_SHELL_DEPTH = 3
-
-
-def _shell_payload(toks: list[str]) -> str | None:
-    """The ``-c`` string of a segment that runs a shell, wrappers stripped."""
-    while toks and _ENV_ASSIGN.match(toks[0]):
-        toks = toks[1:]
-    toks = _strip_wrappers(toks)
-    if not toks or os.path.basename(toks[0]) not in _SHELLS:
-        return None
-    return _shell_command_string(toks[1:])
-
-
-# git options before the subcommand that take a separate value.
-_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
-
-
-def _segment_dir(toks: list[str], current: str) -> str:
-    """The directory a segment resolves its paths from: ``current``, or for
-    git each ``-C <path>`` before the subcommand in turn, a relative one from
-    the one before, as git does. It holds for that segment only."""
-    while toks and _ENV_ASSIGN.match(toks[0]):
-        toks = toks[1:]
-    toks = _strip_wrappers(toks)
-    if not toks or os.path.basename(toks[0]) != "git":
-        return current
-    here, i = current, 1
-    while i < len(toks) and toks[i].startswith("-"):
-        if toks[i] in _GIT_VALUE_OPTS and i + 1 < len(toks):
-            if toks[i] == "-C" and toks[i + 1]:
-                here = os.path.normpath(os.path.join(here, os.path.expanduser(toks[i + 1])))
-            i += 2
-        else:
-            i += 1
-    return here
-
-
-def _absolute(tok: str, current: str) -> str | None:
-    """The absolute path a path-like token names from ``current``, else None."""
-    tok = _clean_token(tok)
-    if not tok or not ("/" in tok or _HAS_EXT.search(tok)):
-        return None
-    if tok.startswith("~"):
-        return os.path.normpath(os.path.expanduser(tok))
-    return os.path.normpath(tok if tok.startswith("/") else os.path.join(current, tok))
-
-
-def command_touches(command: str, cwd: str, to_file, _depth: int = 0) -> tuple[list, set]:
-    """The repo files a Bash command names, and those it only runs as a
-    program (``program_tokens``), which is using a tool rather than working on
-    the file. A file a segment runs and another segment reads is a touch.
-    Each segment resolves its relative paths from the directory the command's
-    ``cd`` had moved to, starting from the call's own cwd, a git segment from
-    where its ``-C`` options point, and a shell's ``-c`` string the same way
-    from the directory that shell starts in. ``to_file`` maps an absolute
-    path to a ``(repo file, worktree)`` pair, or None. The same rule as
-    ``swarm_memory.rules.command_files``."""
-    named: list = []
-    plain: set = set()
-    current = cwd
-    for toks in _segments(command or "")[:MAX_SEGMENTS]:
-        if toks and toks[0] == "cd":
-            if len(toks) >= 2:
-                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
-            continue
-        inner = _shell_payload(toks) if _depth < MAX_SHELL_DEPTH else None
-        if inner is not None:
-            more, ran = command_touches(inner, current, to_file, _depth + 1)
-            named += [t for t in more if t not in named]
-            plain |= {f for f, _wt in more} - ran
-            continue
-        text = shlex.join(toks)
-        here = _segment_dir(toks, current)
-        ran = {hit[0] for hit in (to_file(_absolute(tok, here) or "") for tok in program_tokens(text)) if hit}
-        for raw in _TOKEN_SPLIT.findall(text):
-            hit = to_file(_absolute(raw, here) or "")
-            if hit:
-                if hit not in named:
-                    named.append(hit)
-                if hit[0] not in ran:
-                    plain.add(hit[0])
-    return named, {f for f, _wt in named} - plain
-
-
 _KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 
@@ -904,12 +709,10 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                         continue
                     args = b.get("input") if isinstance(b.get("input"), dict) else {}
                     name = b.get("name") or "tool"
-                    command = args.get("command") if name == "Bash" and isinstance(args.get("command"), str) else None
                     fpath = args.get("file_path") or args.get("notebook_path")
                     call = {"id": b.get("id"), "ts": ts, "line": line_no, "tool": name, "sub": is_sub,
                             "path": fpath if isinstance(fpath, str) else None,
                             "cwd": cwd if isinstance(cwd, str) and cwd else None,
-                            "command": command[:2000] if command else None,
                             "ok": None, "blocked": False, "rts": None, "error": None}
                     bucket["calls"].append(call)
                     if isinstance(b.get("id"), str):
@@ -969,7 +772,7 @@ def merge_scans(scans: list[dict]) -> dict[str, dict]:
             m["cwds"] += b["cwds"]
             m["branches"].update(b["branches"])
             for c in b["calls"]:
-                key = c["id"] or (c["ts"], c["tool"], c["path"], c["command"])
+                key = c["id"] or (c["ts"], c["tool"], c["path"])
                 prev = m["calls"].get(key)
                 if prev is None or (prev["ok"] is None and not prev["blocked"]):
                     m["calls"][key] = c
@@ -1501,13 +1304,11 @@ def main(argv=None) -> int:
     for r in runs:
         r["moment3_same_file_hits_60"] = m3["per_run"].get(r["run"], 0)
         r["moment3_same_or_related_hits_60"] = m3["per_run_any"].get(r["run"], 0)
-        r["moment3_same_file_hits_60_with_bash"] = m3["per_run_bash"].get(r["run"], 0)
         r["moment4_hits"] = m4["per_run"].get(r["run"], 0)
         r["start"], r["end"] = iso_minute(r["start"]), iso_minute(r["end"])
     summary["runs"]["runs_with_a_hit"] = {
         "moment 3 same file, 60 min": sum(1 for r in runs if r["moment3_same_file_hits_60"]),
         "moment 3 same or related file, 60 min": sum(1 for r in runs if r["moment3_same_or_related_hits_60"]),
-        "moment 3 same file with Bash, 60 min": sum(1 for r in runs if r["moment3_same_file_hits_60_with_bash"]),
         "moment 4, 240 min": sum(1 for r in runs if r["moment4_hits"]),
     }
 
@@ -1585,10 +1386,9 @@ def _tally_m3(events_by_run: dict, relations: dict, repo_of_run: dict, name_of_r
 
 
 def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
-    """Two definitions of a touch: a file tool call on a repo file, and that
-    plus every repo file a Bash command names."""
+    """A touch is a file tool call on a repo file. Shell commands are not
+    read: what a command touched cannot be told from its text."""
     file_events = collections.defaultdict(list)
-    bash_events = collections.defaultdict(list)
     branch_of = collections.defaultdict(set)
     mix = collections.Counter()
     for s in sessions.values():
@@ -1596,13 +1396,6 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
         if not rid:
             continue
         repo = s["repo"]
-        files = files_by_repo.get(repo, set())
-
-        def to_file(path, repo=repo, files=files, wt=s["worktree"]):
-            path = canonical_path(path, (repo, wt)) if path else path
-            rel = (repo_rel(path, repo) or checkout_rel(path, wt)) if path else None
-            return (rel, worktree_of(path, repo, wt) or wt) if rel in files else None
-
         for k, c in enumerate(s["calls"]):
             mix["tool calls in runs"] += 1
             mix["Bash calls in runs"] += c["tool"] == "Bash"
@@ -1619,21 +1412,13 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
                 file_events[rid].append({**base, "worktree": wt, "wt_name": worktree_label(wt, repo),
                                          "file": c["file"], "edit": c["tool"] in EDIT_TOOLS})
                 branch_of[(repo, c["file"])].add(s["branch"])
-            elif c["tool"] == "Bash" and c["command"]:
-                named, ran = command_touches(c["command"], c["cwd"] or s["cwd"], to_file)
-                mix["Bash calls naming a repo file"] += bool(named)
-                for f, wt in named:
-                    bash_events[rid].append({**base, "worktree": wt, "wt_name": worktree_label(wt, repo),
-                                             "file": f, "edit": False, "executed": f in ran})
-                    branch_of[(repo, f)].add(s["branch"])
     repo_of_run = {r["run"]: next(sessions[s]["repo"] for s in r["sessions"]) for r in runs}
     name_of_repo = {s["repo"]: s["repo_name"] for s in sessions.values()}
 
-    # Relations, built over the files touched in runs either way.
+    # Relations, built over the files touched in runs.
     touched = collections.defaultdict(set)
-    for by_run in (file_events, bash_events):
-        for rid, evs in by_run.items():
-            touched[repo_of_run[rid]] |= {e["file"] for e in evs}
+    for rid, evs in file_events.items():
+        touched[repo_of_run[rid]] |= {e["file"] for e in evs}
     relations = {}
     ontology_info = {}
     for repo, files in touched.items():
@@ -1678,12 +1463,6 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
                            "with_imports": sum(1 for v in imports.values() if v)}
 
     file_tools, per_run, per_run_any, example_pool = _tally_m3(file_events, relations, repo_of_run, name_of_repo)
-    run_ids = set(file_events) | set(bash_events)
-    worked = {rid: file_events.get(rid, []) + [e for e in bash_events.get(rid, []) if not e["executed"]]
-              for rid in run_ids}
-    with_bash, per_run_bash, _, _ = _tally_m3(worked, relations, repo_of_run, name_of_repo)
-    everything = {rid: file_events.get(rid, []) + bash_events.get(rid, []) for rid in run_ids}
-    with_all_bash, _, _, _ = _tally_m3(everything, relations, repo_of_run, name_of_repo)
 
     example_pool.sort(key=lambda h: (not (h["event"]["edit"] and h["other"]["edit"]), h["event"]["ts"]))
     seen_files: set = set()
@@ -1701,11 +1480,9 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
         })
     rel_meta = {name_of_repo[r]: {k: v for k, v in info.items() if k != "rels"} for r, info in relations.items()}
     return {"summary": {"by_repo": file_tools["by_repo"], "total": file_tools["total"],
-                        "top_files_same_file_60": file_tools["top_files_same_file_60"], "with_bash": with_bash,
-                        "with_all_bash": {"total": with_all_bash["total"],
-                                          "top_files_same_file_60": with_all_bash["top_files_same_file_60"]},
+                        "top_files_same_file_60": file_tools["top_files_same_file_60"],
                         "tool_mix": dict(mix), "relations": rel_meta, "ontology": ontology_info},
-            "examples": examples, "per_run": per_run, "per_run_any": per_run_any, "per_run_bash": per_run_bash}
+            "examples": examples, "per_run": per_run, "per_run_any": per_run_any}
 
 
 def moment4(sessions: dict, runs: list[dict]) -> dict:
@@ -1904,24 +1681,6 @@ def render_report(summary: dict, runs: list[dict], examples: dict, run_by_id: di
                 continue
             lines.append(f"| {rname} | {d:,} | {rel} | " + " | ".join(
                 f"{row.get(f'{rel}|{w}', 0):,} ({pct(row.get(f'{rel}|{w}', 0), d)})" for w in WINDOWS_MIN) + " |")
-    wb = m3["with_bash"]
-    lines += ["", "Touches including repo files named in Bash commands, except a script the command runs as its "
-              "program (denominator: file tool calls plus Bash calls that name a repo file):", "",
-              "| repo | calls | same file 15 / 60 / 240 min | same or any related 15 / 60 / 240 min |",
-              "|---|---|---|---|"]
-    for rname, row in sorted(wb["by_repo"].items(), key=lambda kv: -kv[1].get("calls", 0)) + \
-            [("all repos", wb["total"])]:
-        d = row.get("calls", 0)
-        lines.append(f"| {rname} | {d:,} | " + " / ".join(
-            f"{row.get(f'same file|{w}', 0):,} ({pct(row.get(f'same file|{w}', 0), d)})" for w in WINDOWS_MIN) + " | " +
-            " / ".join(f"{row.get(f'same or any related|{w}', 0):,} ({pct(row.get(f'same or any related|{w}', 0), d)})"
-                       for w in WINDOWS_MIN) + " |")
-    wa = m3["with_all_bash"]["total"]
-    lines += ["", "- Upper bound, every repo file a Bash command names, scripts it runs included: same file "
-              + " / ".join(f"{wa.get(f'same file|{w}', 0):,} ({pct(wa.get(f'same file|{w}', 0), wa.get('calls', 0))})"
-                           for w in WINDOWS_MIN) + f" of {wa.get('calls', 0):,} calls.",
-              "- Files with the most same-file hits at 60 min, Bash included: " + ", ".join(
-                  f"{t['repo']} `{t['file']}` {t['hits_60']}" for t in wb["top_files_same_file_60"][:8]) + "."]
     lines += ["", "- Edit after edit, same file: " + ", ".join(
         f"{w} min {frac(m3['total'].get(f'edit after edit|{w}', 0), m3['total'].get('edit calls', 0))}"
         for w in WINDOWS_MIN) + " of edit calls in runs.",
