@@ -69,36 +69,6 @@ class TestGroupRuns:
         assert runs == [["a", "b", "c"]]
 
 
-class TestCmdPrefix:
-    def test_a_leading_cd_is_skipped(self):
-        assert replay.cmd_prefix("cd packages/frontend && npm test") == "npm test"
-
-    def test_git_dash_c_is_dropped(self):
-        assert replay.cmd_prefix("git -C /Users/x/repo status --short") == "git status"
-
-    def test_env_assignments_and_runners_are_stripped(self):
-        assert replay.cmd_prefix("FOO=1 uv run --no-sync pytest tests/test_a.py -q") == "pytest tests/test_a.py"
-
-    def test_python_dash_m_names_the_module(self):
-        assert replay.cmd_prefix(".venv/bin/python -m pytest tests/test_a.py") == "pytest tests/test_a.py"
-
-    def test_a_command_that_is_only_cd_keeps_cd(self):
-        assert replay.cmd_prefix("cd nowhere") == "cd"
-
-    def test_a_task_runner_keeps_the_script_name(self):
-        """Review finding: npm run test and npm run lint were both npm run."""
-        assert replay.cmd_prefix("npm run test -- --ci") == "npm run test"
-        assert replay.cmd_prefix("pnpm run lint") == "pnpm run lint"
-        assert replay.cmd_prefix("npm test") == "npm test"
-
-    def test_a_shell_option_cluster_with_c_runs_its_string(self):
-        """Review finding: only a standalone -c was read as a command string."""
-        assert replay.cmd_prefix("bash -lc 'npm run test'") == "npm run test"
-        assert replay.cmd_prefix("sh -ec 'cd sub && make build'") == "make build"
-        assert replay.cmd_prefix("bash -o pipefail -c 'make lint'") == "make lint"
-        assert replay.cmd_prefix("bash -x scripts/run.sh -c x") == "bash scripts/run.sh"
-
-
 class TestFailureSignature:
     def test_bash_error_uses_the_last_error_line_with_placeholders(self):
         text = "Exit code 1\n(eval):cd:1: no such file or directory: packages/frontend/src"
@@ -115,138 +85,6 @@ class TestFailureSignature:
         a = replay.failure_signature("Exit code 1\nzsh: no such file or directory: /a/b/one.py")
         b = replay.failure_signature("Exit code 1\nzsh: no such file or directory: /c/d/two.py")
         assert a == b
-
-
-class TestSameKind:
-    def test_bash_matches_on_command_prefix(self):
-        fail = {"tool": "Bash", "command": "cd /p/x && npm test", "file": None, "cwd": "/p"}
-        ok = {"tool": "Bash", "command": "npm test -- --run", "file": None, "cwd": "/p/x"}
-        other = {"tool": "Bash", "command": "npm run build", "file": None, "cwd": "/p/x"}
-        assert replay.same_kind(fail, ok)
-        assert not replay.same_kind(fail, other)
-
-    def test_a_later_lint_does_not_resolve_failed_tests(self):
-        """Review finding: both normalised to npm run, so a successful lint
-        resolved failed tests."""
-        fail = {"tool": "Bash", "command": "npm run test", "file": None, "cwd": "/p"}
-        assert not replay.same_kind(fail, {"tool": "Bash", "command": "npm run lint", "file": None, "cwd": "/p"})
-        assert replay.same_kind(fail, {"tool": "Bash", "command": "npm run test -- --ci", "file": None, "cwd": "/p"})
-
-    def test_the_same_command_in_another_directory_is_another_kind(self):
-        """Review finding: shell resolution ignored where the command ran."""
-        fail = {"tool": "Bash", "command": "make build", "file": None, "cwd": "/p/.worktrees/a"}
-        assert not replay.same_kind(fail, {"tool": "Bash", "command": "make build", "file": None,
-                                           "cwd": "/p/.worktrees/b"})
-        assert replay.same_kind(fail, {"tool": "Bash", "command": "cd /p/.worktrees/a && make build",
-                                       "file": None, "cwd": "/p"})
-        assert replay.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
-        assert replay.command_dir("npm test", None) is None
-
-    def test_a_compound_command_is_resolved_only_by_the_same_compound(self):
-        """Review finding: git status --short && npm test failing was resolved
-        by a later git status, since only the first segment counted. Which
-        segment failed is unknown, so neither segment alone resolves it."""
-        fail = {"tool": "Bash", "command": "git status --short && npm test", "file": None, "cwd": "/p"}
-        for alone in ("git status --short", "npm test"):
-            assert not replay.same_kind(fail, {"tool": "Bash", "command": alone, "file": None, "cwd": "/p"})
-        assert replay.same_kind(fail, {"tool": "Bash", "command": "git status && npm test -- --ci", "file": None,
-                                       "cwd": "/p"})
-        assert replay.cmd_identity("cd x && npm test") == "npm test"
-        assert replay.cmd_identity("git status --short && npm test | tail -5") == "git status && npm test | tail"
-        assert replay.cmd_identity("bash -lc 'make && make test'") == "make && make test"
-
-    def test_git_dash_c_targets_are_where_git_ran(self):
-        """Review finding: git -C dropped its target, so a merge in one worktree
-        was resolved by the same merge in another."""
-        fail = {"tool": "Bash", "command": "git -C /repo/.worktrees/a merge topic", "file": None, "cwd": "/p"}
-        assert not replay.same_kind(fail, {"tool": "Bash", "command": "git -C /repo/.worktrees/b merge topic",
-                                           "file": None, "cwd": "/p"})
-        assert replay.same_kind(fail, {"tool": "Bash", "command": "git merge topic", "file": None,
-                                       "cwd": "/repo/.worktrees/a"})
-        assert replay.command_dir("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p") == "/repo/.worktrees/a"
-        assert replay.command_dir("git -C rel status", "/p") == "/p/rel"
-
-    def test_the_same_repo_file_in_two_worktrees_is_two_files(self):
-        """Review finding: a failed Edit in one worktree was resolved by an Edit
-        of the same repo file in another."""
-        fail = {"tool": "Edit", "command": None, "file": "src/app.py", "path": "/p/.worktrees/a/src/app.py"}
-        assert not replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/app.py",
-                                           "path": "/p/.worktrees/b/src/app.py"})
-        assert replay.same_kind(fail, dict(fail))
-
-    def test_file_tools_match_on_tool_and_file(self):
-        fail = {"tool": "Edit", "command": None, "file": "src/a.py"}
-        assert replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/a.py"})
-        assert not replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/b.py"})
-        assert not replay.same_kind(fail, {"tool": "Write", "command": None, "file": "src/a.py"})
-
-    def test_files_outside_any_repo_are_told_apart_by_their_paths(self):
-        """Review finding: file-tool calls outside every repo had no file, so a
-        failed Write to one file was resolved by a Write to another."""
-        fail = {"tool": "Write", "command": None, "file": None, "path": "/Users/me/.config/app/config.json"}
-        other = {"tool": "Write", "command": None, "file": None, "path": "/tmp/notes.txt"}
-        same = {"tool": "Write", "command": None, "file": None, "path": "/Users/me/.config/app/./config.json"}
-        assert not replay.same_kind(fail, other)
-        assert replay.same_kind(fail, same)
-        no_path = {"tool": "Write", "command": None, "file": None, "path": None}
-        assert not replay.same_kind(no_path, dict(no_path))
-
-
-class TestFirstResolution:
-    def test_the_first_later_success_of_the_same_kind_resolves(self):
-        calls = [
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
-            {"tool": "Read", "command": None, "file": "a.ts", "ok": True},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": True},
-        ]
-        assert replay.first_resolution(calls, 0) == 3
-
-    def test_no_later_success_means_unresolved(self):
-        calls = [
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": False},
-            {"tool": "Bash", "command": "npm run build", "file": None, "ok": True},
-        ]
-        assert replay.first_resolution(calls, 0) is None
-
-    def test_a_success_that_began_before_the_failure_came_back_does_not_resolve_it(self):
-        """Review finding: a concurrent success counted as the way past a
-        failure that had not happened yet."""
-        calls = [
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 10 * MIN},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 1 * MIN, "rts": 2 * MIN},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 11 * MIN, "rts": 12 * MIN},
-        ]
-        assert replay.first_resolution(calls, 0) == 2
-
-    def test_calls_already_in_flight_are_not_recovery_effort(self):
-        """Review finding: recovery effort counted every call started since the
-        failed one, including twenty that were running when it came back."""
-        calls = [{"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 10 * MIN}]
-        calls += [{"tool": "Read", "command": None, "file": f"f{n}", "ok": True, "ts": n, "rts": n + 1}
-                  for n in range(1, 21)]
-        calls.append({"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 11 * MIN, "rts": 12 * MIN})
-        j = replay.first_resolution(calls, 0)
-        assert (j, replay.recovery_calls(calls, 0, j)) == (21, 1)
-
-    def test_calls_begun_while_the_retry_ran_are_recovery_effort(self):
-        """Review finding: effort stopped at the retry's start, though the
-        retry got past the failure only when it finished."""
-        calls = [{"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
-                 {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 2 * MIN, "rts": 10 * MIN}]
-        calls += [{"tool": "Read", "command": None, "file": f"f{n}", "ok": True, "ts": n * MIN, "rts": n * MIN + 1}
-                  for n in range(3, 10)]
-        calls.append({"tool": "Read", "command": None, "file": "late", "ok": True, "ts": 11 * MIN, "rts": 11 * MIN + 1})
-        j = replay.first_resolution(calls, 0)
-        assert (j, replay.recovery_calls(calls, 0, j)) == (1, 8)
-
-    def test_the_first_to_finish_among_later_successes_resolves(self):
-        calls = [
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 2 * MIN, "rts": 9 * MIN},
-            {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 3 * MIN, "rts": 4 * MIN},
-        ]
-        assert replay.first_resolution(calls, 0) == 2
 
 
 def _touch(ts, sid, wt, f):
@@ -372,21 +210,30 @@ class TestSameDirectory:
 
 
 class TestRepeatFailureHits:
-    def _f(self, ts, sid, wt, sig, resolved_ts=None):
-        return {"ts": ts, "sid": sid, "worktree": wt, "sig": sig, "resolved_ts": resolved_ts}
+    def _f(self, ts, sid, wt, sig):
+        return {"ts": ts, "sid": sid, "worktree": wt, "sig": sig}
 
-    def test_a_signature_another_worktree_already_got_past_hits_with_the_fix(self):
-        fs = [self._f(0, "a", "wt1", "s", resolved_ts=2 * MIN), self._f(10 * MIN, "b", "wt2", "s")]
+    def test_a_signature_another_worktree_already_hit_is_a_hit(self):
+        fs = [self._f(0, "a", "wt1", "s"), self._f(10 * MIN, "b", "wt2", "s")]
         hits = replay.repeat_failure_hits(fs)
-        assert len(hits) == 1
-        assert hits[0]["earlier"]["sid"] == "a"
-        assert hits[0]["resolved_before"] is True
+        assert [(h["failure"]["sid"], h["earlier"]["sid"]) for h in hits] == [("b", "a")]
+        assert set(hits[0]) == {"failure", "earlier"}
 
-    def test_an_earlier_failure_not_yet_resolved_hits_without_the_fix(self):
-        fs = [self._f(0, "a", "wt1", "s", resolved_ts=30 * MIN), self._f(10 * MIN, "b", "wt2", "s")]
-        hits = replay.repeat_failure_hits(fs)
-        assert hits[0]["resolved_before"] is False
-        assert hits[0]["resolved_ever"] is True
+    def test_moment4_counts_the_same_signature_seen_again_and_nothing_about_recovery(self):
+        """The exact part kept when recovery matching was removed: a failure is
+        a hit when another worktree in the run had the same signature, and it is
+        a repeat of another session's signature."""
+        err = "Exit code 2\nmake: *** [build] Error 2"
+
+        def session(sid, wt, ts):
+            return {"sid": sid, "repo": "/r/.git", "repo_name": "r", "worktree": wt, "worktree_name": wt,
+                    "calls": [{"tool": "Bash", "ok": False, "error": err, "ts": ts, "rts": ts + 1}]}
+
+        sessions = {"a": session("a", "wt1", 0.0), "b": session("b", "wt2", 10 * MIN)}
+        total = replay.moment4(sessions, [{"run": "run001", "repo": "r", "sessions": ["a", "b"]}])["summary"]["total"]
+        assert (total["failures in runs"], total["hits|15"], total["hits|kind|command or tool failure"]) == (2, 1, 1)
+        assert total["repeats of another session's signature, all sessions"] == 1
+        assert not [k for k in total if "past it" in k]
 
     def test_the_same_worktree_or_another_signature_is_no_hit(self):
         fs = [self._f(0, "a", "wt1", "s"), self._f(5 * MIN, "b", "wt1", "s"), self._f(6 * MIN, "c", "wt2", "t")]
@@ -549,33 +396,6 @@ class TestReadOnly:
         monkeypatch.setattr(replay, "PLUGIN_ONTOLOGY_LIB", str(plugin))
         assert replay.ontology_rules(str(repo), {"src/a.py"}) == ({}, "plugin 0.1.0")
         assert not marker.exists()
-
-
-class TestBackgroundLaunch:
-    def test_a_background_launch_has_no_known_outcome_and_resolves_nothing(self, tmp_path):
-        """Review finding: a background launch's acknowledgement counted as the
-        way past a failure, even if the command later failed."""
-        import json
-        sid, recs = "s-bg", []
-
-        def call(i, cmd, at, result, error=False, background=False):
-            inp = {"command": cmd, **({"run_in_background": True} if background else {})}
-            recs.append({"type": "assistant", "sessionId": sid, "timestamp": at[0], "cwd": "/tmp/x",
-                         "message": {"content": [{"type": "tool_use", "id": f"t{i}", "name": "Bash", "input": inp}]}})
-            recs.append({"type": "user", "sessionId": sid, "timestamp": at[1], "cwd": "/tmp/x",
-                         "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{i}", "content": result,
-                                                  "is_error": error}]}})
-
-        call(0, "npm test", ("2026-11-01T10:00:00Z", "2026-11-01T10:01:00Z"), "Exit code 1\nError: 3 failed", error=True)
-        call(1, "npm test", ("2026-11-01T10:02:00Z", "2026-11-01T10:02:01Z"),
-             "Command running in background with ID: b1. Output is being written to: /tmp/o", background=True)
-        call(2, "npm test", ("2026-11-01T10:05:00Z", "2026-11-01T10:06:00Z"), "ok")
-        path = tmp_path / f"{sid}.jsonl"
-        path.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
-        calls = replay.scan_transcript(str(path), 0)["sessions"][sid]["calls"]
-        assert [c["ok"] for c in calls] == [False, None, True]
-        assert replay.first_resolution(calls, 0) == 2
-        assert replay._ASYNC_LAUNCH.search("Async agent launched successfully. (internal metadata)")
 
 
 class TestGitRunsNoRepoCode:

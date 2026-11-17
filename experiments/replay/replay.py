@@ -50,12 +50,10 @@ Moment 4 (with a failure). Failures are the ``error_steps()`` rules (an
 ``is_error`` result that is not a blocked or rejected call) and the signature
 is the F4 normaliser (MUD-478 attachment ``failure-recurrence-baseline-
 2026-09-09.py``), both reused unchanged. A failure is a hit when another agent
-in the same run had failed with that signature within the window before. That
-earlier agent got past it when a later call of the same kind succeeded: same
-command prefix for Bash, same tool on the same file for file tools, same tool
-otherwise. A background launch (``run_in_background``, or an agent launched
-async) answers before its work ends, so it never counts as getting past. Hook blocks and rejected tool inputs are counted apart from
-command and tool failures.
+in the same run had failed with that signature within the window before. Only
+that exact part is measured: whether an agent got past a failure is not, since
+no rule for it held up (MUD-850). Hook blocks and rejected tool inputs are
+counted apart from command and tool failures.
 
 Moment 2 (with the prompt). A prompt is a hit when it contains a path that
 exists in the repo, a pasted error line, or a ticket key such as ``ABC-123``.
@@ -210,7 +208,6 @@ def group_runs(sessions) -> list[list[str]]:
 # ---------------------------------------------------------------- failures
 
 _SHELL_OPS = {"&&", "||", ";", "|", "&", ";;", "|&", "(", ")"}
-_SKIP_HEADS = {"cd", "export", "source", ".", "set", "pushd", "popd", "unset", "true", ":", "trap", "ulimit"}
 _WRAPPERS = {"sudo", "time", "env", "command", "nohup", "exec", "npx", "bunx", "pnpx", "xargs", "timeout"}
 _RUNNERS = {("uv", "run"), ("poetry", "run"), ("pnpm", "exec"), ("npm", "exec"), ("pipenv", "run"),
             ("bundle", "exec"), ("agent-test-budget", "run"), ("yarn", "dlx"), ("pdm", "run"),
@@ -219,10 +216,8 @@ _SHELLS = {"bash", "zsh", "sh"}
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def _segments_ops(command: str) -> list[tuple[list[str], str]]:
-    """Each segment of a command with the operator that ends it; a line ends
-    like ``;``."""
-    segs: list[tuple[list[str], str]] = []
+def _segments(command: str) -> list[list[str]]:
+    segs: list[list[str]] = []
     for line in command.replace("\\\n", " ").splitlines():
         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
@@ -234,17 +229,13 @@ def _segments_ops(command: str) -> list[tuple[list[str], str]]:
         for t in toks:
             if t in _SHELL_OPS:
                 if cur:
-                    segs.append((cur, t))
+                    segs.append(cur)
                 cur = []
             else:
                 cur.append(t)
         if cur:
-            segs.append((cur, ";"))
+            segs.append(cur)
     return segs
-
-
-def _segments(command: str) -> list[list[str]]:
-    return [toks for toks, _op in _segments_ops(command)]
 
 
 def _strip_wrappers(toks: list[str]) -> list[str]:
@@ -269,10 +260,6 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
 _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 _SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
 _SHORT_OPTS = re.compile(r"-[A-Za-z]+")
-# Task runners whose next word names the script, so npm run test and npm run
-# lint are different commands.
-_TASK_RUNNERS = {("npm", "run"), ("npm", "run-script"), ("pnpm", "run"), ("yarn", "run"), ("bun", "run"),
-                 ("deno", "task")}
 
 
 def _shell_command_string(args: list[str]) -> str | None:
@@ -292,165 +279,6 @@ def _shell_command_string(args: list[str]) -> str | None:
     return None
 
 
-@functools.lru_cache(maxsize=None)
-def cmd_prefix(command: str) -> str:
-    """Program plus first non-flag argument of the first command that is not
-    a cd, export or similar; wrappers such as ``uv run`` are stripped. A task
-    runner keeps the script name too (``npm run test``)."""
-    if not isinstance(command, str) or not command.strip():
-        return ""
-    first_head = ""
-    for toks in _segments(command):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        head = os.path.basename(toks[0])
-        first_head = first_head or head
-        if head in _SKIP_HEADS:
-            continue
-        toks = _strip_wrappers(toks)
-        if not toks:
-            continue
-        prog, args = os.path.basename(toks[0]), toks[1:]
-        inner_cmd = _shell_command_string(args) if prog in _SHELLS else None
-        if inner_cmd is not None:
-            inner = cmd_prefix(inner_cmd)
-            if inner:
-                return inner
-        if prog == "git":
-            kept, skip = [], False
-            for a in args:
-                if skip:
-                    skip = False
-                elif a in ("-C", "-c"):
-                    skip = True
-                else:
-                    kept.append(a)
-            args = kept
-        rest = [a for a in args if not a.startswith("-")]
-        words = 2 if rest and (prog, rest[0]) in _TASK_RUNNERS else 1
-        return " ".join([prog] + [r[:60] for r in rest[:words]])
-    return first_head
-
-
-@functools.lru_cache(maxsize=None)
-def cmd_identity(command: str) -> str:
-    """What a failed command is matched on: the prefix of every segment that
-    is not a cd, export or similar, with the operators between them. Which
-    segment of ``git status && npm test`` failed is unknown, so only the same
-    compound command resolves it, never ``git status`` alone. A shell's
-    ``-c`` string counts as its own segments. The same rule as
-    ``swarm_memory.rules.cmd_identity`` (MUD-850 Phase 2)."""
-    parts: list[str] = []
-    for toks, op in _segments_ops(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks or os.path.basename(toks[0]) in _SKIP_HEADS:
-            continue
-        stripped = _strip_wrappers(toks)
-        inner = _shell_command_string(stripped[1:]) if stripped and os.path.basename(stripped[0]) in _SHELLS else None
-        parts += [cmd_identity(inner) if inner is not None else cmd_prefix(shlex.join(toks)), op]
-    return " ".join(parts[:-1]) if parts else cmd_prefix(command or "")
-
-
-def _git_dir(args: list[str], current: str) -> str:
-    """The directory git works in: ``current`` moved by each ``-C`` before the
-    subcommand, a relative one from the one before it, as git reads them."""
-    skip = False
-    for k, a in enumerate(args):
-        if skip:
-            skip = False
-        elif a == "-C" and k + 1 < len(args):
-            current = os.path.normpath(os.path.join(current, os.path.expanduser(args[k + 1])))
-            skip = True
-        elif a == "-c":
-            skip = True
-        elif not a.startswith("-"):
-            break
-    return current
-
-
-def command_dir(command: str, cwd: str | None) -> str | None:
-    """The directory a command's first program runs in: ``cwd`` moved by any
-    ``cd`` before it, also inside ``sh -c``, and for git by its ``-C``
-    options. None when neither is known. The same rule as
-    ``swarm_memory.rules.command_dir`` (MUD-850 Phase 2)."""
-    current = cwd or ""
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        if toks[0] == "cd":
-            if len(toks) >= 2:
-                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
-            continue
-        if os.path.basename(toks[0]) in _SKIP_HEADS:
-            continue
-        toks = _strip_wrappers(toks)
-        if toks and os.path.basename(toks[0]) in _SHELLS:
-            inner = _shell_command_string(toks[1:])
-            if inner is not None:
-                return command_dir(inner, current)
-        if toks and os.path.basename(toks[0]) == "git":
-            current = _git_dir(toks[1:], current)
-        break
-    return current or None
-
-
-def _file_identity(call: dict):
-    """The physical file a file-tool call worked on: its own path, so the
-    same repo file in two worktrees stays apart. A call with no path falls
-    back to its repo path, and with neither it is None."""
-    path = call.get("path")
-    if isinstance(path, str) and path:
-        return ("path", os.path.normpath(path))
-    return ("repo", call["file"]) if call.get("file") else None
-
-
-def same_kind(failed: dict, other: dict) -> bool:
-    """MUD-476 resolution rule: the same command (``cmd_identity``) run in the
-    same directory, or the same tool on the same physical file. A file tool
-    with no path matches nothing."""
-    if failed.get("tool") != other.get("tool"):
-        return False
-    if failed.get("tool") == "Bash":
-        fc, oc = failed.get("command") or "", other.get("command") or ""
-        return (cmd_identity(fc) == cmd_identity(oc)
-                and command_dir(fc, failed.get("cwd")) == command_dir(oc, other.get("cwd")))
-    if failed.get("tool") in FILE_TOOLS:
-        key = _file_identity(failed)
-        return key is not None and key == _file_identity(other)
-    return True
-
-
-def first_resolution(calls: list[dict], i: int) -> int | None:
-    """Index of the successful call of the same kind that got past calls[i]:
-    the first to finish among those that began after the failure came back.
-    Calls are in start order, so a concurrent call that started before the
-    failure was seen does not count. Without timestamps, the first later
-    success in list order."""
-    failed = calls[i]
-    seen = failed.get("rts") or failed.get("ts")
-    best = None
-    for j in range(i + 1, len(calls)):
-        c = calls[j]
-        start = c.get("ts")
-        if seen is not None and start is not None:
-            if best is not None and start >= best[0]:
-                break
-            if start < seen:
-                continue
-        if c.get("ok") and same_kind(failed, c):
-            done = c.get("rts") or start
-            if done is None:
-                return j
-            if best is None or done < best[0]:
-                best = (done, j)
-    return best[1] if best else None
-
-
 _HOOK_BLOCK = re.compile(r"(?i)(?:pre|post)tooluse(?::[\w*]+)? hook (?:error|blocked)|\bhook\b.{0,40}\b(?:blocked|denied)")
 _INPUT_REJECTED = re.compile(r"(?i)inputvalidationerror|does not match this schema|invalid tool input|tool_use_error")
 
@@ -467,10 +295,9 @@ def failure_kind(error_text: str) -> str:
 def repeat_failure_hits(failures: list[dict], window_s: float | None = None) -> list[dict]:
     """Failures whose signature another worktree in the run had already hit.
 
-    ``failures``: dicts with ts, sid, worktree, sig, resolved_ts. With
-    ``window_s``, only earlier failures within that many seconds count. The
-    earlier failure reported is the latest one already got past, else the
-    latest one.
+    ``failures``: dicts with ts, sid, worktree and sig. With ``window_s``,
+    only earlier failures within that many seconds count. The earlier failure
+    reported is the latest one.
     """
     by_sig = collections.defaultdict(list)
     for f in sorted(failures, key=lambda f: f["ts"]):
@@ -480,15 +307,8 @@ def repeat_failure_hits(failures: list[dict], window_s: float | None = None) -> 
         for k, f in enumerate(group):
             earlier = [g for g in group[:k] if g["worktree"] != f["worktree"] and g["ts"] < f["ts"]
                        and (window_s is None or f["ts"] - g["ts"] <= window_s)]
-            if not earlier:
-                continue
-            fixed = [g for g in earlier if g.get("resolved_ts") is not None and g["resolved_ts"] <= f["ts"]]
-            hits.append({
-                "failure": f,
-                "earlier": fixed[-1] if fixed else earlier[-1],
-                "resolved_before": bool(fixed),
-                "resolved_ever": any(g.get("resolved_ts") is not None for g in earlier),
-            })
+            if earlier:
+                hits.append({"failure": f, "earlier": earlier[-1]})
     return sorted(hits, key=lambda h: h["failure"]["ts"])
 
 
@@ -501,25 +321,6 @@ def call_ran(call: dict) -> bool:
     if call.get("blocked"):
         return False
     return call.get("ok") is not False or failure_kind(call.get("error") or "") == "command or tool failure"
-
-
-def recovery_calls(calls: list[dict], i: int, j: int) -> int:
-    """Calls the session began after the failure at i came back and before
-    the call at j that got past it finished, j included. Calls already in
-    flight when the failure was seen are not effort spent on it, and calls
-    begun while the retry ran are."""
-    seen = calls[i].get("rts") or calls[i].get("ts")
-    done = calls[j].get("rts") or calls[j].get("ts")
-    n = 0
-    for k in range(i + 1, len(calls)):
-        start = calls[k].get("ts")
-        if k <= j:
-            n += seen is None or start is None or start >= seen
-        elif done is not None and start is not None and start < done:
-            n += 1
-        else:
-            break  # calls are in start order
-    return n
 
 
 def touch_ts(call: dict) -> float | None:
@@ -965,7 +766,6 @@ def prompt_error_lines(text: str) -> list[str]:
 
 # ---------------------------------------------------------------- transcript scan
 
-_ASYNC_LAUNCH = re.compile(r"Command running in background with ID|Async agent launched")
 
 
 def _new_bucket() -> dict:
@@ -1039,9 +839,7 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                     fpath = args.get("file_path") or args.get("notebook_path")
                     call = {"id": b.get("id"), "ts": ts, "line": line_no, "tool": name, "sub": is_sub,
                             "path": fpath if isinstance(fpath, str) else None,
-                            "cwd": cwd if isinstance(cwd, str) and cwd else None,
                             "command": command[:2000] if command else None,
-                            "background": bool(args.get("run_in_background")),
                             "ok": None, "blocked": False, "rts": None, "error": None}
                     bucket["calls"].append(call)
                     if isinstance(b.get("id"), str):
@@ -1065,10 +863,7 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                             if flat:
                                 call["error"] = text if len(text) <= 4000 else text[:1500] + "\n" + text[-2500:]
                         else:
-                            # A background launch answers before its work ends, so
-                            # its outcome is unknown and it cannot resolve a failure.
-                            launched = call["background"] or _ASYNC_LAUNCH.search(flat[:200])
-                            call["ok"] = None if launched else True
+                            call["ok"] = True
                 if want_prompts:
                     pid = rec.get("promptId") or rec.get("uuid") or f"{path}:{line_no}"
                     if pid in seen_prompt_ids:
@@ -1771,18 +1566,15 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
     for s in sessions.values():
         fl = []
         calls = s["calls"]
-        for i, c in enumerate(calls):
+        for c in calls:
             if c["ok"] is not False or not c["error"]:
                 continue
             sig = failure_signature(c["error"])
             if sig is None:
                 continue
-            j = first_resolution(calls, i)
             fts = c["rts"] or c["ts"]
             f = {"ts": fts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
-                 "sig": sig, "tool": c["tool"], "repo": s["repo"], "kind": failure_kind(c["error"]),
-                 "resolved_ts": (calls[j]["rts"] or calls[j]["ts"]) if j is not None else None,
-                 "recovery_calls": recovery_calls(calls, i, j) if j is not None else None}
+                 "sig": sig, "tool": c["tool"], "repo": s["repo"], "kind": failure_kind(c["error"])}
             fl.append(f)
             first = sig_first_seen[s["repo"]].get(sig)
             if first is None or fts < first:
@@ -1804,8 +1596,6 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
 
     per_run = collections.Counter()
     example_pool = []
-    later_recovery = collections.defaultdict(list)
-    later_recovery_cmd: list[int] = []
     for r in runs:
         fl = [f for sid in r["sessions"] for f in failures_by_session[sid]]
         rname = r["repo"]
@@ -1823,31 +1613,14 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
         row["hits"] += len(hits)
         for h in hits:
             f = h["failure"]
-            k = f"hits|kind|{f['kind']}"
-            row[k] += 1
-            row["hits, earlier agent already past it"] += h["resolved_before"]
-            row[f"{k}|earlier agent already past it"] += h["resolved_before"]
-            row["hits, earlier agent got past it later"] += h["resolved_ever"] and not h["resolved_before"]
-            if f["recovery_calls"] is not None:
-                row["hits, later agent got past it"] += 1
-                row["hits, later agent got past it in 2 calls or fewer"] += f["recovery_calls"] <= 2
-                row[f"{k}|later agent got past it"] += 1
-                row[f"{k}|later agent got past it in 2 calls or fewer"] += f["recovery_calls"] <= 2
-                later_recovery[rname].append(f["recovery_calls"])
-                if f["kind"] == "command or tool failure":
-                    later_recovery_cmd.append(f["recovery_calls"])
+            row[f"hits|kind|{f['kind']}"] += 1
             example_pool.append({**h, "run": r["run"]})
     totals = collections.defaultdict(int)
     for row in counts.values():
         for k, v in row.items():
             totals[k] += v
-    for rname in counts:
-        counts[rname]["median calls for the later agent to get past it"] = _median(later_recovery[rname])
-    totals["median calls for the later agent to get past it"] = _median(
-        [x for v in later_recovery.values() for x in v])
-    totals["median calls for the later agent to get past it, command or tool failures"] = _median(later_recovery_cmd)
     sig_counts = collections.Counter(h["failure"]["sig"] for h in example_pool)
-    example_pool.sort(key=lambda h: (h["failure"]["kind"] != "command or tool failure", not h["resolved_before"],
+    example_pool.sort(key=lambda h: (h["failure"]["kind"] != "command or tool failure",
                                      -sig_counts[h["failure"]["sig"]], h["failure"]["ts"]))
     used: set = set()
     unique = []
@@ -1863,8 +1636,6 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
             "kind": f["kind"], "earlier": f'session {e["sid"][:8]} in {e["wt_name"]}',
             "later": f'session {f["sid"][:8]} in {f["wt_name"]}',
             "minutes_apart": round((f["ts"] - e["ts"]) / 60, 1),
-            "earlier_agent_past_it_first": h["resolved_before"],
-            "later_agent_calls_to_get_past_it": f["recovery_calls"],
             "hits_with_this_signature": sig_counts[f["sig"]], "at": iso_minute(f["ts"]),
         })
     top = collections.Counter((name_of_repo[h["failure"]["repo"]], scrub(h["failure"]["sig"]), h["failure"]["kind"])
@@ -2017,38 +1788,29 @@ def render_report(summary: dict, runs: list[dict], examples: dict, run_by_id: di
     lines += ["", "## Moment 4: an error another agent in the run already hit", "",
               "Hits are failures whose signature another worktree in the same run hit within the window before. "
               "Denominator: failures in runs. The breakdown columns are over the 240-minute hits.", "",
-              "| repo | failures in runs | hits within 15 / 60 / 240 min | 240-min hit rate | earlier agent "
-              "already past it | hits by kind (failure / hook block / input rejected) | later agent past it in "
-              "<=2 calls | repeats of another session, all sessions |", "|---|---|---|---|---|---|---|---|"]
+              "| repo | failures in runs | hits within 15 / 60 / 240 min | 240-min hit rate | hits by kind "
+              "(failure / hook block / input rejected) | repeats of another session, all sessions |",
+              "|---|---|---|---|---|---|"]
     for rname, row in sorted(m4["by_repo"].items(), key=lambda kv: -kv[1].get("failures in runs", 0)) + \
             [("all repos", m4["total"])]:
         d = row.get("failures in runs", 0)
         hits = row.get("hits", 0)
         lines.append(
             f"| {rname} | {d:,} | " + " / ".join(f"{row.get(f'hits|{w}', 0):,}" for w in WINDOWS_MIN) +
-            f" | {pct(hits, d)} | {row.get('hits, earlier agent already past it', 0):,} | " +
-            " / ".join(f"{row.get(f'hits|kind|{k}', 0):,}" for k in kinds) +
-            f" | {frac(row.get('hits, later agent got past it in 2 calls or fewer', 0), row.get('hits, later agent got past it', 0))}"
+            f" | {pct(hits, d)} | " + " / ".join(f"{row.get(f'hits|kind|{k}', 0):,}" for k in kinds) +
             f" | {frac(row.get('repeats of another session' + chr(39) + 's signature, all sessions', 0), row.get('failures, all sessions', 0))} |")
     t = m4["total"]
     lines += ["", "- Failures in runs by kind: " + ", ".join(
         f"{k} {t.get(f'failures in runs|{k}', 0):,}" for k in kinds) + ".",
               f"- Hits any time in run, no window: {t.get('hits any time in run', 0):,}.",
-              "- 240-min hits that are command or tool failures: "
-              f"{t.get('hits|kind|command or tool failure', 0):,}; earlier agent already past it "
-              f"{t.get('hits|kind|command or tool failure|earlier agent already past it', 0):,}; later agent past "
-              f"it in <=2 calls {frac(t.get('hits|kind|command or tool failure|later agent got past it in 2 calls or fewer', 0), t.get('hits|kind|command or tool failure|later agent got past it', 0))}; "
-              f"median calls {t.get('median calls for the later agent to get past it, command or tool failures')}.",
-              f"- Median calls for the later agent to get past a hit: "
-              f"{t.get('median calls for the later agent to get past it')}.", "", "Top signatures among hits:", ""]
+              f"- 240-min hits that are command or tool failures: {t.get('hits|kind|command or tool failure', 0):,}.",
+              "", "Top signatures among hits:", ""]
     for x in m4["top_hit_signatures"]:
         lines.append(f"- {x['repo']}: `{x['signature']}` ({x['kind']}, {x['hits']} hits)")
     lines += ["", "Examples:", ""]
     for x in examples["moment4"]:
         lines.append(f"- {x['repo']} {x['run']}: `{x['signature']}` ({x['tool']}, {x['kind']}). {x['earlier']} first, "
-                     f"{x['later']} {x['minutes_apart']} min later. Earlier agent past it first: "
-                     f"{x['earlier_agent_past_it_first']}. Later agent calls to get past it: "
-                     f"{x['later_agent_calls_to_get_past_it']}.")
+                     f"{x['later']} {x['minutes_apart']} min later.")
 
     m2 = summary["moment2"]
     lines += ["", "## Moment 2: the prompt names a file, an error or a ticket", "",
