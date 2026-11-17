@@ -118,6 +118,17 @@ class TestSameKind:
         assert not replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/b.py"})
         assert not replay.same_kind(fail, {"tool": "Write", "command": None, "file": "src/a.py"})
 
+    def test_files_outside_any_repo_are_told_apart_by_their_paths(self):
+        """Review finding: file-tool calls outside every repo had no file, so a
+        failed Write to one file was resolved by a Write to another."""
+        fail = {"tool": "Write", "command": None, "file": None, "path": "/Users/me/.config/app/config.json"}
+        other = {"tool": "Write", "command": None, "file": None, "path": "/tmp/notes.txt"}
+        same = {"tool": "Write", "command": None, "file": None, "path": "/Users/me/.config/app/./config.json"}
+        assert not replay.same_kind(fail, other)
+        assert replay.same_kind(fail, same)
+        no_path = {"tool": "Write", "command": None, "file": None, "path": None}
+        assert not replay.same_kind(no_path, dict(no_path))
+
 
 class TestFirstResolution:
     def test_the_first_later_success_of_the_same_kind_resolves(self):
@@ -242,6 +253,24 @@ class TestCommandFiles:
         cmd = "node scripts/verify/gate.mjs --check src/a.ts && bash tools/check.sh && pytest src/app/main.py"
         assert replay.executed_files(cmd, files, repo_root="/Users/me/proj") == {
             "scripts/verify/gate.mjs", "tools/check.sh"}
+
+    def test_a_shell_c_string_is_parsed_as_commands(self):
+        """Review finding: in ``zsh -c 'cat src/a.ts'`` the whole string was
+        taken as the script the shell runs, so the read of src/a.ts was dropped."""
+        files = {"src/a.ts", "scripts/run.sh"}
+        root = "/Users/me/proj"
+        assert replay.executed_files("zsh -c 'cat src/a.ts'", files, repo_root=root) == set()
+        wrapped = "agent-test-budget run -- /bin/zsh -c 'cd /Users/me/proj && bash scripts/run.sh src/a.ts'"
+        assert replay.executed_files(wrapped, files, repo_root=root) == {"scripts/run.sh"}
+        assert replay.command_files(wrapped, files, repo_root=root) == ["scripts/run.sh", "src/a.ts"]
+
+    def test_inline_code_names_no_script(self):
+        files = {"src/a.ts", "tools/x.py", "scripts/run.sh"}
+        root = "/Users/me/proj"
+        assert replay.executed_files("python3 -c \"print(open('src/a.ts').read())\"", files, repo_root=root) == set()
+        assert replay.executed_files("node -e \"require('./src/a.ts')\"", files, repo_root=root) == set()
+        assert replay.executed_files("python3 -u tools/x.py src/a.ts", files, repo_root=root) == {"tools/x.py"}
+        assert replay.executed_files("bash -e scripts/run.sh", files, repo_root=root) == {"scripts/run.sh"}
 
 
 class TestSameDirectory:

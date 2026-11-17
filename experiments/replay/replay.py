@@ -255,7 +255,12 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
         if changed:
             while toks and (toks[0].startswith("-") or _ENV_ASSIGN.match(toks[0])):
                 toks = toks[1:]
+            if head == "timeout" and toks and _DURATION.match(toks[0]):
+                toks = toks[1:]
     return toks
+
+
+_DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 
 
 @functools.lru_cache(maxsize=None)
@@ -297,14 +302,26 @@ def cmd_prefix(command: str) -> str:
     return first_head
 
 
+def _file_identity(call: dict):
+    """The file a file-tool call worked on: its repo path, else its own path
+    when the file is outside every repo, else None."""
+    if call.get("file"):
+        return ("repo", call["file"])
+    path = call.get("path")
+    return ("path", os.path.normpath(path)) if isinstance(path, str) and path else None
+
+
 def same_kind(failed: dict, other: dict) -> bool:
-    """MUD-476 resolution rule: same command prefix, or same tool on the same file."""
+    """MUD-476 resolution rule: same command prefix, or same tool on the same
+    file. Two files outside any repo are told apart by their paths, and a file
+    tool with no path matches nothing."""
     if failed.get("tool") != other.get("tool"):
         return False
     if failed.get("tool") == "Bash":
         return cmd_prefix(failed.get("command") or "") == cmd_prefix(other.get("command") or "")
-    if failed.get("file") or other.get("file"):
-        return failed.get("file") == other.get("file")
+    if failed.get("tool") in FILE_TOOLS:
+        key = _file_identity(failed)
+        return key is not None and key == _file_identity(other)
     return True
 
 
@@ -633,7 +650,8 @@ _HAS_EXT = re.compile(r"\.[A-Za-z][\w]{0,7}$")
 
 
 def _clean_token(tok: str) -> str:
-    tok = tok.strip(".,:;)]}>'\"`")
+    # A leading dot belongs to the path (./x, ../x, .env); only trailing dots are punctuation.
+    tok = tok.lstrip(",:;)]}>'\"`").rstrip(".,:;)]}>'\"`")
     tok = re.sub(r"(:\d+){1,2}$", "", tok)
     tok = re.sub(r"#L\d+(-L?\d+)?$", "", tok)
     tok = tok.lstrip("@")
@@ -694,26 +712,48 @@ def command_files(command: str, files, cwd_prefix: str = "", repo_root: str | No
 
 
 _INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
+_JS_INLINE = {"-e", "--eval", "-p", "--print"}
+_INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": _JS_INLINE, "ts-node": _JS_INLINE,
+                "ruby": {"-e"}, "perl": {"-e", "-E"}}
+
+
+def program_tokens(command: str) -> list[str]:
+    """Tokens a command runs as programs rather than works on: each segment's
+    first word, its program once wrappers such as ``env``, ``timeout 60`` or
+    ``uv run`` are stripped, and the script an interpreter runs (``node x.mjs``,
+    ``bash x.sh``). A shell's ``-c '...'`` string is parsed as commands, and
+    code passed inline (``python -c``, ``node -e``) names no script. A bare
+    name and an absolute path such as ``/opt/homebrew/bin/python3`` are alike.
+    The same rule as ``swarm_memory.rules.program_tokens`` (MUD-850 Phase 2)."""
+    out: list[str] = []
+    for toks in _segments(command or ""):
+        while toks and _ENV_ASSIGN.match(toks[0]):
+            toks = toks[1:]
+        if not toks:
+            continue
+        out.append(toks[0])
+        toks = _strip_wrappers(toks)
+        if not toks:
+            continue
+        out.append(toks[0])
+        prog, args = os.path.basename(toks[0]), toks[1:]
+        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
+            out += program_tokens(args[args.index("-c") + 1])
+        elif _INTERPRETERS.match(prog):
+            inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
+            script = next((a for a in args if a in inline or not a.startswith("-")), None)
+            if script and script not in inline:
+                out.append(script)
+    return out
 
 
 def executed_files(command: str, files, cwd_prefix: str = "", repo_root: str | None = None,
                    suffix_index: dict | None = None, checkout_root: str | None = None) -> set[str]:
-    """Repo files a command runs as its program (``./x.sh``, ``node x.mjs``,
-    ``bash x.sh``), which is using a tool rather than working on the file."""
+    """Repo files a command runs as a program (``program_tokens``), which is
+    using a tool rather than working on the file."""
     out: set[str] = set()
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        toks = _strip_wrappers(toks)
-        if not toks:
-            continue
-        prog = toks[0]
-        if _INTERPRETERS.match(os.path.basename(prog)):
-            args = [a for a in toks[1:] if not a.startswith("-")]
-            if not args:
-                continue
-            prog = args[0]
-        out.update(prompt_paths(prog, files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
+    for tok in program_tokens(command):
+        out.update(prompt_paths(tok, files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
                                 checkout_root=checkout_root))
     return out
 
