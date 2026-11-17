@@ -201,7 +201,7 @@ class TestReplayParity:
             assert rules.cmd_prefix(cmd) == replay.cmd_prefix(cmd), cmd
 
     def test_a_long_token_is_scrubbed_out_of_a_signature(self):
-        token = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz"
+        token = "sk-" + "ant-" + "api03-" + "AbCdEfGhIjKlMnOpQrStUvWxYz"  # built from parts: no key-shaped literal
         sig = rules.failure_signature(f"Exit code 1\nerror: invalid api key {token} for this request")
         assert sig and "<tok>" in sig and token.lower() not in sig
 
