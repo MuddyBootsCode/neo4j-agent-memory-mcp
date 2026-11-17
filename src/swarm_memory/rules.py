@@ -22,7 +22,6 @@ keyed hash (``store.signature_hash``), so no text from a tool's output is kept.
 from __future__ import annotations
 
 import functools
-import hashlib
 import os
 import re
 import shlex
@@ -130,14 +129,6 @@ def file_key(repo_key: str, rel: str) -> str:
     return f"{repo_key}::{rel}"
 
 
-def path_key(path: str) -> str:
-    """An opaque key for a file outside every checkout, so a failure on it is
-    matched only to a later success on the same file. The path is not stored."""
-    return "path::" + hashlib.sha256(os.path.normpath(path).encode("utf-8", "replace")).hexdigest()[:16]
-
-
-# ---------------------------------------------------------------- tickets
-
 _KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 
@@ -198,10 +189,8 @@ _INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": 
                 "ruby": {"-e"}, "perl": {"-e", "-E"}}
 
 
-def _segments_ops(command: str) -> list[tuple[list[str], str]]:
-    """Each segment of a command with the operator that ends it; a line ends
-    like ``;``."""
-    segs: list[tuple[list[str], str]] = []
+def _segments(command: str) -> list[list[str]]:
+    segs: list[list[str]] = []
     for line in command.replace("\\\n", " ").splitlines():
         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
@@ -213,17 +202,13 @@ def _segments_ops(command: str) -> list[tuple[list[str], str]]:
         for t in toks:
             if t in _SHELL_OPS:
                 if cur:
-                    segs.append((cur, t))
+                    segs.append(cur)
                 cur = []
             else:
                 cur.append(t)
         if cur:
-            segs.append((cur, ";"))
+            segs.append(cur)
     return segs
-
-
-def _segments(command: str) -> list[list[str]]:
-    return [toks for toks, _op in _segments_ops(command)]
 
 
 def _strip_wrappers(toks: list[str]) -> list[str]:
@@ -248,10 +233,6 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
 _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 _SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
 _SHORT_OPTS = re.compile(r"-[A-Za-z]+")
-# Task runners whose next word names the script, so npm run test and npm run
-# lint are different commands.
-_TASK_RUNNERS = {("npm", "run"), ("npm", "run-script"), ("pnpm", "run"), ("yarn", "run"), ("bun", "run"),
-                 ("deno", "task")}
 
 
 def _shell_command_string(args: list[str]) -> str | None:
@@ -301,10 +282,10 @@ def program_tokens(command: str) -> list[str]:
     return out
 
 
-def cmd_prefix(command: str) -> str:
-    """Program plus first non-flag argument of the first command that is not
-    a cd, export or similar; wrappers such as ``uv run`` are stripped. A task
-    runner keeps the script name too (``npm run test``)."""
+def command_program(command: str) -> str:
+    """The program a command runs, without its arguments: the first command
+    that is not a cd, export or similar, with wrappers such as ``uv run``
+    stripped and a shell's ``-c`` string read as commands of its own."""
     if not isinstance(command, str) or not command.strip():
         return ""
     first_head = ""
@@ -320,101 +301,12 @@ def cmd_prefix(command: str) -> str:
         toks = _strip_wrappers(toks)
         if not toks:
             continue
-        prog, args = os.path.basename(toks[0]), toks[1:]
-        inner_cmd = _shell_command_string(args) if prog in _SHELLS else None
-        if inner_cmd is not None:
-            inner = cmd_prefix(inner_cmd)
-            if inner:
-                return inner
-        if prog == "git":
-            kept, skip = [], False
-            for a in args:
-                if skip:
-                    skip = False
-                elif a in ("-C", "-c"):
-                    skip = True
-                else:
-                    kept.append(a)
-            args = kept
-        rest = [a for a in args if not a.startswith("-")]
-        words = 2 if rest and (prog, rest[0]) in _TASK_RUNNERS else 1
-        return " ".join([prog] + [r[:60] for r in rest[:words]])
+        prog = os.path.basename(toks[0])
+        inner = _shell_command_string(toks[1:]) if prog in _SHELLS else None
+        if inner is not None and command_program(inner):
+            return command_program(inner)
+        return prog
     return first_head
-
-
-def command_program(command: str) -> str:
-    """The program a command runs, without its arguments."""
-    prefix = cmd_prefix(command)
-    return prefix.split(" ", 1)[0] if prefix else ""
-
-
-def cmd_identity(command: str) -> str:
-    """What a failed command is matched on: the prefix of every segment that
-    is not a cd, export or similar, with the operators between them. Which
-    segment of ``git status && npm test`` failed is unknown, so only the same
-    compound command resolves it, never ``git status`` alone. A shell's
-    ``-c`` string counts as its own segments. The replay's rule."""
-    parts: list[str] = []
-    for toks, op in _segments_ops(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks or os.path.basename(toks[0]) in _SKIP_HEADS:
-            continue
-        stripped = _strip_wrappers(toks)
-        inner = _shell_command_string(stripped[1:]) if stripped and os.path.basename(stripped[0]) in _SHELLS else None
-        parts += [cmd_identity(inner) if inner is not None else cmd_prefix(shlex.join(toks)), op]
-    return " ".join(parts[:-1]) if parts else cmd_prefix(command or "")
-
-
-def _git_dir(args: list[str], current: str) -> str:
-    """The directory git works in: ``current`` moved by each ``-C`` before the
-    subcommand, a relative one from the one before it, as git reads them."""
-    skip = False
-    for k, a in enumerate(args):
-        if skip:
-            skip = False
-        elif a == "-C" and k + 1 < len(args):
-            current = os.path.normpath(os.path.join(current, os.path.expanduser(args[k + 1])))
-            skip = True
-        elif a == "-c":
-            skip = True
-        elif not a.startswith("-"):
-            break
-    return current
-
-
-def command_dir(command: str, cwd: str | None) -> str | None:
-    """The directory a command's first program runs in: ``cwd`` moved by any
-    ``cd`` before it, also inside ``sh -c``, and for git by its ``-C``
-    options. None when neither is known. The replay's rule."""
-    current = cwd or ""
-    for toks in _segments(command or ""):
-        while toks and _ENV_ASSIGN.match(toks[0]):
-            toks = toks[1:]
-        if not toks:
-            continue
-        if toks[0] == "cd":
-            if len(toks) >= 2:
-                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
-            continue
-        if os.path.basename(toks[0]) in _SKIP_HEADS:
-            continue
-        toks = _strip_wrappers(toks)
-        if toks and os.path.basename(toks[0]) in _SHELLS:
-            inner = _shell_command_string(toks[1:])
-            if inner is not None:
-                return command_dir(inner, current)
-        if toks and os.path.basename(toks[0]) == "git":
-            current = _git_dir(toks[1:], current)
-        break
-    return current or None
-
-
-def prefix_key(command: str) -> str:
-    """An opaque key for the command (``cmd_identity``). Failures are matched
-    to later successes on it, so the command, which can hold a secret such as
-    a connection string, is never stored."""
-    return hashlib.sha256(cmd_identity(command).encode("utf-8", "replace")).hexdigest()[:16]
 
 
 _TOKEN_SPLIT = re.compile(r"[^\s`'\"()<>\[\]{},;|*!?=]+")

@@ -95,10 +95,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
         elif kind == "activity":
             activity.append((rid, _clock(ts), _short(sid), _short(agent), tool, action, files_of(rid), info.get("program")))
         elif kind == "failure":
-            after = round(ts_end - ts, 1) if status == "resolved" and ts_end else None
             sig_hash = info.get("sig_hash")
             failures.append((rid, _clock(ts), sid, tuid, tool, info.get("program"), action, info.get("exit"),
-                             sig_hash[:12] if sig_hash else None, status, after))
+                             sig_hash[:12] if sig_hash else None))
 
     def describe(rid):
         r = rec.get(rid)
@@ -134,7 +133,7 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
     out.append(_table("Activity", ["record", "time", "session", "subagent", "tool", "action", "files", "program"], activity))
     out.append(_table("Failures (the store keeps no error text: find one in its session's transcript by tool_use_id)",
                       ["record", "time", "session", "tool_use_id", "tool", "program", "kind", "exit",
-                       "signature hash", "status", "resolved after s"], failures))
+                       "signature hash"], failures))
     out.append(_table("Would deliver", ["time", "moment", "session", "would show", "detail"], deliver))
     out.append(_table("Hook time in the hook process (ms, from start of hook.py to commit)",
                       ["hook", "n", "p50", "p95", "max"],

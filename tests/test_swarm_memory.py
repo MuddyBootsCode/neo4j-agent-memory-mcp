@@ -72,9 +72,8 @@ def start(db, sid, cwd, ts, source="startup"):
 
 
 def tool_ok(db, sid, cwd, ts, tool, tool_input, tuid, **extra):
-    """A PostToolUse event. Claude Code sends ``duration_ms`` with every one."""
     fire(db, "PostToolUse", sid, cwd, ts, tool_name=tool, tool_input=tool_input, tool_use_id=tuid,
-         **{"tool_response": {}, "duration_ms": 50, **extra})
+         **{"tool_response": {}, **extra})
 
 
 def tool_fail(db, sid, cwd, ts, tool, tool_input, error, tuid, **extra):
@@ -191,19 +190,6 @@ class TestReplayParity:
         "Permission for this action was denied",
         "Exit code 1\nerror: login failed password=hunterpw for user app",
     ]
-    COMMANDS = [
-        "cd src && uv run pytest tests/test_x.py -q",
-        "git -C /x/y status --short",
-        "FOO=1 npm run build",
-        "bash -c 'python3 -m ruff check src'",
-        "agent-test-budget run -- pytest -x",
-        "export A=1; cd /tmp",
-        "bash -lc 'npm run test -- --ci'",
-        "npm run lint",
-        "sh -ec 'cd sub && make build'",
-        "yarn run build --prod",
-    ]
-
     PROGRAMS = [
         "echo hi && /opt/homebrew/bin/python3 -I -S /x/report.py --minutes 15",
         "env A=1 timeout 60 .venv/bin/python -m pytest tests/test_x.py",
@@ -217,35 +203,27 @@ class TestReplayParity:
         "bash -o pipefail -c 'make lint'",
     ]
 
-    def test_command_dirs_match_the_replay(self):
-        cases = [("make build", "/p"), ("cd /x && make", "/p"), ("bash -lc 'cd sub && make'", "/p"),
-                 ("agent-test-budget run -- /bin/zsh -c 'cd /wt/a && pytest -q'", "/p"), ("npm test", None),
-                 ("cd .. && cd q && ls", "/p/r"), ("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p"),
-                 ("cd sub && git -C ../q status", "/p")]
-        for cmd, cwd in cases:
-            assert rules.command_dir(cmd, cwd) == replay.command_dir(cmd, cwd), cmd
-        assert rules.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
-        assert rules.command_dir("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p") == "/repo/.worktrees/a"
-
-    def test_command_identities_match_the_replay(self):
-        compound = ["git status --short && npm test", "npm test 2>&1 | tail -20", "make || make clean; make",
-                    "bash -lc 'make && make test'", "cd x && FOO=1 npm test && git status"]
-        for cmd in self.COMMANDS + self.PROGRAMS + compound:
-            assert rules.cmd_identity(cmd) == replay.cmd_identity(cmd), cmd
-        assert rules.cmd_identity("git status --short && npm test") == "git status && npm test"
-
     def test_program_tokens_match_the_replay(self):
         for cmd in self.PROGRAMS:
             assert rules.program_tokens(cmd) == replay.program_tokens(cmd), cmd
-            assert rules.cmd_prefix(cmd) == replay.cmd_prefix(cmd), cmd
-        assert rules.cmd_prefix("timeout 60 npm test") == "npm test"
 
-    def test_signatures_kinds_and_prefixes_match_the_replay(self):
+    def test_signatures_and_kinds_match_the_replay(self):
         for text in self.ERRORS:
             assert rules.failure_signature(text) == replay.failure_signature(text), text
             assert rules.failure_kind(text) == replay.failure_kind(text), text
-        for cmd in self.COMMANDS:
-            assert rules.cmd_prefix(cmd) == replay.cmd_prefix(cmd), cmd
+
+
+class TestCommandProgram:
+    """The program a shell command runs, linked from its activity and failures."""
+
+    def test_the_program_is_the_first_real_command_after_wrappers(self):
+        cases = {"cd src && uv run pytest tests/test_x.py -q": "pytest", "git -C /x/y status --short": "git",
+                 "FOO=1 npm run build": "npm", "bash -c 'python3 -m ruff check src'": "ruff",
+                 "agent-test-budget run -- /bin/zsh -c 'cd /x && make lint'": "make",
+                 "bash -lc 'npm run test -- --ci'": "npm", "timeout 60 npm test": "npm",
+                 "bash -x scripts/run.sh -c x": "bash", "export A=1; cd /tmp": "export", "": ""}
+        for cmd, prog in cases.items():
+            assert rules.command_program(cmd) == prog, cmd
 
 
 class TestCommandFiles:
@@ -431,141 +409,44 @@ class TestSession:
 
 
 class TestFailures:
-    def test_a_failure_keeps_program_exit_kind_and_a_keyed_signature_hash(self, db, repo):
+    def test_a_failure_keeps_only_program_exit_kind_and_a_keyed_signature_hash(self, db, repo):
         cmd = "psql postgresql://app:hunter2pw@db.internal/main -c 'select 1'"
         err = "Exit code 2\npsql: error: connection to server failed: password=hunter2pw for user app"
         tool_fail(db, "s1", repo, T, "Bash", {"command": cmd}, err, "t1")
-        (rid, action, status, info), = q(db, "SELECT id, action, status, info FROM record WHERE kind = 'failure'")
-        info = json.loads(info)
-        assert action == "command or tool failure" and status == "open"
-        assert info["program"] == "psql" and info["exit"] == 2 and "head" not in info and "sig" not in info
+        (rid, action, status, ts_end, info), = q(
+            db, "SELECT id, action, status, ts_end, info FROM record WHERE kind = 'failure'")
         with open(store.key_path(db), "rb") as fh:
-            assert info["sig_hash"] == store.signature_hash(fh.read(), replay.failure_signature(err))
-        assert links(db, rid, "signature") == [info["sig_hash"]]
+            expected = store.signature_hash(fh.read(), replay.failure_signature(err))
+        assert action == "command or tool failure" and status is None and ts_end is None
+        assert json.loads(info) == {"exit": 2, "sig_hash": expected, "program": "psql"}
+        assert links(db, rid, "signature") == [expected]
         assert links(db, rid, "program") == ["psql"]
 
-    def test_a_later_success_with_the_same_command_prefix_resolves_it(self, db, repo):
+    def test_the_same_failure_in_another_session_links_to_the_same_signature(self, db, repo):
+        """The exact part kept when recovery matching was removed: the same
+        error seen again elsewhere is found through its signature."""
+        err = "Exit code 2\nmake: *** [build] Error 2"
+        tool_fail(db, "s1", wt(repo, "a"), T, "Bash", {"command": "make build"}, err, "t1")
+        tool_fail(db, "s2", wt(repo, "b"), T + MIN, "Bash", {"command": "make build -j4"}, err, "t2")
+        tool_fail(db, "s2", wt(repo, "b"), T + 2 * MIN, "Bash", {"command": "make lint"},
+                  "Exit code 1\nlint: 3 problems found", "t3")
+        rows = q(db, "SELECT l.key, r.session_id FROM link l JOIN record r ON r.id = l.record_id"
+                     " WHERE l.type = 'signature' ORDER BY r.id")
+        assert rows[0][0] == rows[1][0] != rows[2][0]
+        assert [sid for _, sid in rows[:2]] == ["s1", "s2"]
+
+    def test_a_later_success_changes_no_failure(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
-        tool_ok(db, "s1", repo, T + 30, "Bash", {"command": "make build -j4"}, "t2")
-        (status, ts_end, info), = q(db, "SELECT status, ts_end, info FROM record WHERE kind = 'failure'")
-        assert status == "resolved" and ts_end == T + 30 and json.loads(info)["resolved_by"] == "t2"
+        before = q(db, "SELECT * FROM record WHERE kind = 'failure'")
+        tool_ok(db, "s1", repo, T + 30, "Bash", {"command": "make build"}, "t2")
+        assert q(db, "SELECT * FROM record WHERE kind = 'failure'") == before
 
-    def test_a_success_that_began_before_the_failure_came_back_does_not_resolve_it(self, db, repo):
-        """The replay's rule: a concurrent call that started first is not the
-        way past a failure. Its start is its result time less duration_ms."""
-        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",
-                  "t1", duration_ms=10_000)
-        tool_ok(db, "s1", repo, T + 12, "Bash", {"command": "make build"}, "t2", duration_ms=11_000)
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 20, "Bash", {"command": "make build"}, "t3", duration_ms=1_000)
-        assert q(db, "SELECT status, ts_end FROM record WHERE kind = 'failure'") == [("resolved", T + 20)]
-
-    def test_a_redelivered_success_never_resolves_a_newer_failure(self, db, repo):
-        """Review finding: the same success delivered again ran the resolution
-        again and closed a failure that came after it."""
-        tool_ok(db, "s1", repo, T, "Bash", {"command": "make build"}, "t1")
-        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t2")
-        tool_ok(db, "s1", repo, T + 20, "Bash", {"command": "make build"}, "t1")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        assert q(db, "SELECT count(*) FROM event WHERE kind = 'observed' AND detail LIKE '%duplicate%'") == [(1,)]
-
-    def test_a_background_launch_resolves_nothing(self, db, repo):
-        """The replay's rule: a launch answers before its work ends, so its
-        outcome is unknown."""
-        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
-        tool_ok(db, "s1", repo, T + 5, "Bash", {"command": "make build", "run_in_background": True}, "t2")
-        tool_ok(db, "s1", repo, T + 6, "Agent", {"prompt": "x"}, "t3", tool_response={"status": "async_launched"})
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 9, "Bash", {"command": "make build"}, "t4")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_another_prefix_another_session_or_an_interrupt_does_not_resolve(self, db, repo):
-        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "make lint"}, "t2")
-        tool_ok(db, "s2", repo, T + 2, "Bash", {"command": "make build"}, "t3")
-        tool_fail(db, "s1", repo, T + 3, "Bash", {"command": "sleep 99"}, "Interrupted", "t4", is_interrupt=True)
-        assert q(db, "SELECT session_id, status FROM record WHERE kind = 'failure'") == [("s1", "open")]
-
-    def test_a_file_tool_failure_is_resolved_by_the_same_tool_on_the_same_file(self, db, repo):
-        app = str(repo / "src" / "app.py")
-        tool_fail(db, "s1", repo, T, "Write", {"file_path": app}, "EACCES: permission denied, open", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Write", {"file_path": str(repo / "README.md")}, "t2")
-        edit(db, "s1", repo, T + 2, app, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 3, "Write", {"file_path": app}, "t4")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_the_same_repo_file_in_another_worktree_does_not_resolve_it(self, db, repo):
-        """Review finding: a failed Edit in one worktree was resolved by an Edit
-        of the same repo file in another."""
-        a_app, b_app = wt(repo, "a") / "src" / "app.py", wt(repo, "b") / "src" / "app.py"
-        tool_fail(db, "s1", repo, T, "Edit", {"file_path": str(a_app)}, "EACCES: permission denied, open", "t1")
-        edit(db, "s1", repo, T + 1, b_app, "t2")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        edit(db, "s1", repo, T + 2, a_app, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_the_same_command_in_another_directory_does_not_resolve_it(self, db, repo):
-        """Review finding: shell resolution ignored where the command ran."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        tool_fail(db, "s1", a, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
-        tool_ok(db, "s1", b, T + 1, "Bash", {"command": "make build"}, "t2")
-        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": f"cd {b} && make build"}, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 3, "Bash", {"command": f"bash -lc 'cd {a} && make build'"}, "t4")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_a_compound_failure_is_resolved_only_by_the_same_compound(self, db, repo):
-        """Review finding: git status --short && npm test failing was resolved
-        by a later git status. Which segment failed is unknown, so neither
-        segment alone resolves it."""
-        tool_fail(db, "s1", repo, T, "Bash", {"command": "git status --short && npm test"},
-                  "Exit code 1\nError: 3 tests failed", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "git status --short"}, "t2")
-        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": "npm test"}, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 3, "Bash", {"command": "git status && npm test"}, "t4")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_git_dash_c_in_another_worktree_does_not_resolve_it(self, db, repo):
-        """Review finding: git -C targets collapsed into one identity."""
-        a, b = wt(repo, "a"), wt(repo, "b")
-        tool_fail(db, "s1", repo, T, "Bash", {"command": f"git -C {a} merge topic"},
-                  "Exit code 1\nerror: merge conflict in src/app.py", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": f"git -C {b} merge topic"}, "t2")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", a, T + 2, "Bash", {"command": "git merge topic"}, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_a_later_lint_does_not_resolve_failed_tests(self, db, repo):
-        """Review finding: npm run test and npm run lint shared the prefix npm run."""
-        tool_fail(db, "s1", repo, T, "Bash", {"command": "npm run test"}, "Exit code 1\nError: 3 tests failed", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "npm run lint"}, "t2")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 2, "Bash", {"command": "npm run test -- --ci"}, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-
-    def test_files_outside_any_repo_resolve_only_their_own_failures(self, db, repo, tmp_path):
-        """Review finding: a file outside every checkout had no file key, so a
-        failed Write to one such file was resolved by a Write to another."""
-        conf, notes = tmp_path / "conf" / "app.json", tmp_path / "notes.txt"
-        conf.parent.mkdir()
-        tool_fail(db, "s1", repo, T, "Write", {"file_path": str(conf)}, "EACCES: permission denied, open", "t1")
-        tool_ok(db, "s1", repo, T + 1, "Write", {"file_path": str(notes)}, "t2")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
-        tool_ok(db, "s1", repo, T + 2, "Write", {"file_path": str(conf)}, "t3")
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
-        stored = "\n".join(str(row) for table in ("event", "record", "link")
-                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
-        assert "app.json" not in stored and "notes.txt" not in stored
-
-    def test_a_success_without_a_duration_resolves_nothing(self, db, repo):
-        """Review finding: with no ``duration_ms`` the start was taken as the
-        result time, so a call that overlapped the failure could resolve it."""
-        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
-        fire(db, "PostToolUse", "s1", repo, T + 12, tool_name="Bash", tool_input={"command": "make build"},
-             tool_use_id="t2", tool_response={})
-        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+    def test_an_interrupt_is_no_failure_and_a_redelivered_failure_is_recorded_once(self, db, repo):
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "sleep 99"}, "Interrupted", "t1", is_interrupt=True)
+        err = "Exit code 2\nmake: *** [build] Error 2"
+        tool_fail(db, "s1", repo, T + 1, "Bash", {"command": "make build"}, err, "t2")
+        tool_fail(db, "s1", repo, T + 2, "Bash", {"command": "make build"}, err, "t2")
+        assert q(db, "SELECT tool_use_id FROM record WHERE kind = 'failure'") == [("t2",)]
 
 
 class TestWouldDeliver:
@@ -773,7 +654,7 @@ class TestSafety:
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
         infos = [json.loads(i) for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure'")]
         assert len(infos) == len(errors)
-        assert all(set(i) <= {"exit", "sig_hash", "program", "prefix_key", "file", "where"} for i in infos)
+        assert all(set(i) <= {"exit", "sig_hash", "program"} for i in infos)
         keys = q(db, "SELECT key FROM link WHERE type = 'signature'")
         assert len(keys) == sum(replay.failure_signature(e) is not None for e in errors)
         assert all(re.fullmatch(r"[0-9a-f]{32}", k) for (k,) in keys)
@@ -869,7 +750,7 @@ class TestSafety:
         other_hook.close()
         data = raw_bytes(db)
         assert b"zorkmarker" not in data and b"plughmarker" not in data
-        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
         assert q(db, "SELECT count(*) FROM record WHERE kind = 'failure'") == [(2,)]
 
     def test_the_rewrite_steps_back_from_a_writer_or_a_reader_and_retries(self, db):
@@ -896,11 +777,43 @@ class TestSafety:
         tool_ok(db, "s1", repo, T, "Bash", {"command": "ls"}, "t9")
         assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
         start(db, "s1", repo, T + 1)
-        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
         assert b"zorkmarker" not in raw_bytes(db)
+        store.connect(db).close()
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         fresh = str(tmp_path / "fresh" / "observe.sqlite3")
         start(fresh, "s2", repo, T)
         assert q(fresh, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+
+    def test_a_version_3_store_drops_the_recovery_fields_and_their_index(self, db):
+        """Version 3 matched a failure to the call that got past it. Opening it
+        with this code clears the status, the resolving call and its time, and
+        the hashed command, path and directory, and drops the open-failure
+        index. A record without them is left as it is."""
+        con = sqlite3.connect(db, isolation_level=None)
+        con.executescript(store.SCHEMA)
+        con.execute("CREATE INDEX record_open_failures ON record(session_id) WHERE kind = 'failure' AND status = 'open'")
+        con.execute(f"PRAGMA user_version={store.PURGED_VERSION}")
+        rows = [(1, "resolved", T + 9, {"exit": 2, "sig_hash": "a" * 32, "program": "make", "prefix_key": "p" * 16,
+                                         "where": "w" * 16, "resolved_by": "t9"}),
+                (2, "open", None, {"exit": 1, "sig_hash": "b" * 32, "program": "cat", "file": "f" * 16}),
+                (3, None, None, {"exit": 1, "program": "ls"})]
+        for rid, status, ts_end, info in rows:
+            con.execute("INSERT INTO record (id, kind, ts, ts_end, session_id, tool, action, status, tool_use_id, info)"
+                        " VALUES (?, 'failure', ?, ?, 's1', 'Bash', 'command or tool failure', ?, ?, ?)",
+                        (rid, T, ts_end, status, f"t{rid}", json.dumps(info)))
+        con.close()
+        store.connect(db).close()
+        assert {rid: (json.loads(i), status, ts_end) for rid, i, status, ts_end in
+                q(db, "SELECT id, info, status, ts_end FROM record ORDER BY id")} == {
+            1: ({"exit": 2, "sig_hash": "a" * 32, "program": "make"}, None, None),
+            2: ({"exit": 1, "sig_hash": "b" * 32, "program": "cat"}, None, None),
+            3: ({"exit": 1, "program": "ls"}, None, None)}
+        assert q(db, "SELECT name FROM sqlite_master WHERE name = 'record_open_failures'") == []
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        con = sqlite3.connect(db, isolation_level=None)
+        assert store.drop_recovery(con) == {}
+        con.close()
 
     def test_the_report_shows_a_short_hash_and_the_tool_use_id(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",

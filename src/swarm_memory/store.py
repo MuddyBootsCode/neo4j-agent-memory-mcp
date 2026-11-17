@@ -8,7 +8,7 @@ Three tables (MUD-850 "Data store"):
   exception.
 * ``record``: what was observed. ``session`` (one per session, ``ts_end`` is the
   last time a hook saw it), ``activity`` (a tool call that touched repo files)
-  and ``failure`` (a failed tool call and its resolution).
+  and ``failure`` (a failed tool call).
 * ``link``: record to the objects it is about, by type and key: ``repo`` (git
   common dir), ``worktree``, ``file`` (``<repo>::<repo-relative path>``),
   ``program``, ``signature`` (the keyed hash), ``ticket`` and ``session``, plus
@@ -43,7 +43,7 @@ from swarm_memory import rules
 ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
-SCHEMA_VERSION = 3  # 2: a failure keeps only a keyed hash of its signature; 3: and the file holds no old text
+SCHEMA_VERSION = 4  # 2: failures keep only a keyed signature hash; 3: the file holds no old text; 4: no recovery
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS event (
@@ -79,7 +79,6 @@ CREATE TABLE IF NOT EXISTS record (
 CREATE UNIQUE INDEX IF NOT EXISTS record_one_session ON record(session_id) WHERE kind = 'session';
 CREATE UNIQUE INDEX IF NOT EXISTS record_one_per_call ON record(tool_use_id, kind) WHERE tool_use_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS record_live_sessions ON record(ts_end) WHERE kind = 'session';
-CREATE INDEX IF NOT EXISTS record_open_failures ON record(session_id) WHERE kind = 'failure' AND status = 'open';
 
 CREATE TABLE IF NOT EXISTS link (
     record_id INTEGER NOT NULL REFERENCES record(id),
@@ -215,6 +214,7 @@ def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
 
 
 HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows; the file may still hold the old bytes
+PURGED_VERSION = 3  # the file rewritten; failures still carry the fields recovery matching used
 
 
 def purge_freed_text(con: sqlite3.Connection) -> bool:
@@ -233,12 +233,45 @@ def purge_freed_text(con: sqlite3.Connection) -> bool:
         con.execute("VACUUM")
         if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
             return False
-        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute(f"PRAGMA user_version={PURGED_VERSION}")
         con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return True
     except sqlite3.OperationalError as exc:
         if _is_busy(exc):
             return False
+        raise
+
+
+RECOVERY_KEYS = ("prefix_key", "file", "where", "resolved_by")
+
+
+def drop_recovery(con: sqlite3.Connection) -> dict:
+    """Version 3 to 4. Version 3 matched a failure to the later call that got
+    past it: a failure kept a status, the call that resolved it and when, and
+    the hashed command, path and directory it was matched on. Version 4 keeps
+    none of that, and the index over open failures goes. It runs in one write
+    transaction and only while the store is still at version 3. Returns counts."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        if con.execute("PRAGMA user_version").fetchone()[0] != PURGED_VERSION:
+            con.execute("ROLLBACK")
+            return {}
+        counts = {"failures": 0, "changed": 0}
+        rows = con.execute("SELECT id, info, status, ts_end FROM record WHERE kind = 'failure'").fetchall()
+        for rid, info, status, ts_end in rows:
+            counts["failures"] += 1
+            data = json.loads(info) if info else {}
+            kept = {k: v for k, v in data.items() if k not in RECOVERY_KEYS}
+            if kept != data or status is not None or ts_end is not None:
+                con.execute("UPDATE record SET info = ?, status = NULL, ts_end = NULL WHERE id = ?",
+                            (_json(kept or None), rid))
+                counts["changed"] += 1
+        con.execute("DROP INDEX IF EXISTS record_open_failures")
+        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute("COMMIT")
+        return counts
+    except BaseException:
+        con.execute("ROLLBACK")
         raise
 
 
@@ -253,12 +286,14 @@ def connect(path: str) -> sqlite3.Connection:
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version in (0, 1):
+    if version in (0, 1, PURGED_VERSION):
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
             if version == 1:
-                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() finishes it
+                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() takes it to 3
+            elif version == PURGED_VERSION:
+                drop_recovery(con)
             else:
                 con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")  # a new store never held text
         except sqlite3.OperationalError as exc:

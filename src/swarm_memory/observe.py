@@ -18,10 +18,9 @@ Records
   not say whether it read or wrote them (D18). Links: session, repo, worktree,
   each file, and the program for a shell command.
 * ``failure``: one per failed tool call, with the program, the exit code, the
-  kind, and the F4 signature only as a keyed hash. It is resolved when a later
-  call in the same session succeeds with the same command in the same
-  directory, or with the same tool on the same file (replay rule). Interrupts
-  are not failures.
+  kind, and the F4 signature only as a keyed hash, so the same failure seen
+  again in another session links to the same signature. Whether an agent got
+  past a failure is not tracked. Interrupts are not failures.
 
 Would deliver (one ``event`` row each, naming the records it would have shown)
 
@@ -37,8 +36,8 @@ Would deliver (one ``event`` row each, naming the records it would have shown)
   within 60 minutes, once per session, file and other session.
 
 Never stored: command text, prompt text, tool output. The store keeps the
-program, repo-relative paths, and as keyed or plain hashes the command, the
-directory it ran in, a failed call's file, and its error signature.
+program, repo-relative paths, and a failed call's exit code, kind and keyed
+signature hash.
 """
 
 from __future__ import annotations
@@ -286,7 +285,7 @@ def _brief(con, call: Call, rid: int, desc: dict, ts: float) -> dict:
 # ---------------------------------------------------------------- tool calls
 
 def _describe(call: Call) -> dict:
-    """Files, action, program and resolution keys of a tool call."""
+    """Files, action and program of a tool call."""
     tool = call.tool or ""
     ti = call.tool_input
     if tool in rules.FILE_TOOLS:
@@ -295,18 +294,12 @@ def _describe(call: Call) -> dict:
         if path and not os.path.isabs(path) and call.cwd:
             path = os.path.join(call.cwd, path)
         fl = rules.file_location(path) if path else None
-        # Resolution keys on the physical file, so the same repo file in two
-        # worktrees, or a file outside every checkout, stays apart. Links and
-        # notices keep the shared repo-relative file.
-        return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read",
-                "program": None, "prefix_key": None, "file": rules.path_key(path) if path else None, "where": None}
+        return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read", "program": None}
     if tool in rules.SHELL_TOOLS:
         cmd = ti.get("command") if isinstance(ti.get("command"), str) else ""
         files = [fl for fl in (rules.file_location(p) for p in rules.command_files(cmd, call.cwd)) if fl]
-        where = rules.command_dir(cmd, call.cwd)
-        return {"files": files, "action": "mention", "program": rules.command_program(cmd) or None,
-                "prefix_key": rules.prefix_key(cmd), "file": None, "where": rules.path_key(where) if where else None}
-    return {"files": [], "action": None, "program": None, "prefix_key": None, "file": None, "where": None}
+        return {"files": files, "action": "mention", "program": rules.command_program(cmd) or None}
+    return {"files": [], "action": None, "program": None}
 
 
 def _links(call: Call, desc: dict) -> list:
@@ -333,8 +326,7 @@ def _on_tool_success(con, call: Call, session, ts: float) -> dict:
             store.add_links(con, rid, ts, [("touched_repo", f[0]) for f in desc["files"] if f[0] != here])
             if desc["action"] == "edit":
                 _same_file_edit(con, call, desc["files"], ts)
-    return {"activity": made, "files": len(desc["files"]), "resolved": _resolve(con, call, desc, ts),
-            **_brief(con, call, rid, desc, ts)}
+    return {"activity": made, "files": len(desc["files"]), **_brief(con, call, rid, desc, ts)}
 
 
 def _same_file_edit(con, call: Call, files, ts: float) -> None:
@@ -353,46 +345,6 @@ def _same_file_edit(con, call: Call, files, ts: float) -> None:
                             tool=call.tool, moment="same_file_edit", records=[a for a, _ in hits[:3]],
                             dedupe=f"same_file_edit|{call.sid}|{fk}|{other}",
                             detail={"repo": name, "file": rel, "age_s": round(ts - hits[0][1])})
-
-
-def _resolve(con, call: Call, desc: dict, ts: float) -> int:
-    """Resolve open failures of the same kind in this session: the same
-    command prefix run in the same directory, or the same tool on the same
-    physical file (the replay's ``same_kind``). Like the replay's
-    ``first_resolution``, a success counts only if it began after the
-    failure came back: a concurrent call that started first is not the way
-    past it. The start is the result time less ``duration_ms``; a success
-    without it resolves nothing, since an overlapping call cannot be told
-    apart."""
-    response = call.payload.get("tool_response")
-    response = response if isinstance(response, dict) else {}
-    if (call.tool_input.get("run_in_background") or response.get("isAsync")
-            or response.get("status") == "async_launched" or response.get("backgroundTaskId")):
-        return 0  # a background launch answers before its work ends: no known outcome
-    duration = call.payload.get("duration_ms")
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
-        return 0
-    started = ts - duration / 1000.0
-    rows = con.execute(
-        "SELECT id, tool, info, ts FROM record WHERE kind = 'failure' AND status = 'open' AND session_id = ?",
-        (call.sid,)).fetchall()
-    resolved = 0
-    for fid, tool, info, failed_at in rows:
-        if tool != call.tool or failed_at > started:
-            continue
-        fi = json.loads(info) if info else {}
-        if call.tool in rules.SHELL_TOOLS:
-            same = fi.get("prefix_key") == desc["prefix_key"] and fi.get("where") == desc["where"]
-        elif call.tool in rules.FILE_TOOLS:
-            same = desc["file"] is not None and fi.get("file") == desc["file"]
-        else:
-            same = True
-        if same:
-            con.execute("UPDATE record SET status = 'resolved', ts_end = ?,"
-                        " info = json_set(coalesce(info, '{}'), '$.resolved_by', ?) WHERE id = ?",
-                        (ts, call.tool_use_id, fid))
-            resolved += 1
-    return resolved
 
 
 def _on_tool_failure(con, call: Call, session, ts: float) -> dict:
@@ -416,10 +368,9 @@ def _on_tool_failure(con, call: Call, session, ts: float) -> dict:
                             detail={"earlier_signatures": earlier})
     # No text from the output is kept: the exit code, the kind, and the
     # signature only as a keyed hash.
-    info = {"exit": rules.exit_code(err), "sig_hash": sig_hash, "program": desc["program"],
-            "prefix_key": desc["prefix_key"], "file": desc["file"], "where": desc["where"]}
+    info = {"exit": rules.exit_code(err), "sig_hash": sig_hash, "program": desc["program"]}
     frid = store.add_record(con, "failure", ts, call.sid, agent_id=call.agent_id, tool=call.tool,
-                            action=rules.failure_kind(err), status="open", tool_use_id=call.tool_use_id,
+                            action=rules.failure_kind(err), tool_use_id=call.tool_use_id,
                             info={k: v for k, v in info.items() if v is not None})
     if frid:
         pairs = _links(call, desc) + [("signature", sig_hash)]
