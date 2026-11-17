@@ -85,6 +85,19 @@ class TestCmdPrefix:
     def test_a_command_that_is_only_cd_keeps_cd(self):
         assert replay.cmd_prefix("cd nowhere") == "cd"
 
+    def test_a_task_runner_keeps_the_script_name(self):
+        """Review finding: npm run test and npm run lint were both npm run."""
+        assert replay.cmd_prefix("npm run test -- --ci") == "npm run test"
+        assert replay.cmd_prefix("pnpm run lint") == "pnpm run lint"
+        assert replay.cmd_prefix("npm test") == "npm test"
+
+    def test_a_shell_option_cluster_with_c_runs_its_string(self):
+        """Review finding: only a standalone -c was read as a command string."""
+        assert replay.cmd_prefix("bash -lc 'npm run test'") == "npm run test"
+        assert replay.cmd_prefix("sh -ec 'cd sub && make build'") == "make build"
+        assert replay.cmd_prefix("bash -o pipefail -c 'make lint'") == "make lint"
+        assert replay.cmd_prefix("bash -x scripts/run.sh -c x") == "bash scripts/run.sh"
+
 
 class TestFailureSignature:
     def test_bash_error_uses_the_last_error_line_with_placeholders(self):
@@ -106,11 +119,36 @@ class TestFailureSignature:
 
 class TestSameKind:
     def test_bash_matches_on_command_prefix(self):
-        fail = {"tool": "Bash", "command": "cd x && npm test", "file": None}
-        ok = {"tool": "Bash", "command": "npm test -- --run", "file": None}
-        other = {"tool": "Bash", "command": "npm run build", "file": None}
+        fail = {"tool": "Bash", "command": "cd /p/x && npm test", "file": None, "cwd": "/p"}
+        ok = {"tool": "Bash", "command": "npm test -- --run", "file": None, "cwd": "/p/x"}
+        other = {"tool": "Bash", "command": "npm run build", "file": None, "cwd": "/p/x"}
         assert replay.same_kind(fail, ok)
         assert not replay.same_kind(fail, other)
+
+    def test_a_later_lint_does_not_resolve_failed_tests(self):
+        """Review finding: both normalised to npm run, so a successful lint
+        resolved failed tests."""
+        fail = {"tool": "Bash", "command": "npm run test", "file": None, "cwd": "/p"}
+        assert not replay.same_kind(fail, {"tool": "Bash", "command": "npm run lint", "file": None, "cwd": "/p"})
+        assert replay.same_kind(fail, {"tool": "Bash", "command": "npm run test -- --ci", "file": None, "cwd": "/p"})
+
+    def test_the_same_command_in_another_directory_is_another_kind(self):
+        """Review finding: shell resolution ignored where the command ran."""
+        fail = {"tool": "Bash", "command": "make build", "file": None, "cwd": "/p/.worktrees/a"}
+        assert not replay.same_kind(fail, {"tool": "Bash", "command": "make build", "file": None,
+                                           "cwd": "/p/.worktrees/b"})
+        assert replay.same_kind(fail, {"tool": "Bash", "command": "cd /p/.worktrees/a && make build",
+                                       "file": None, "cwd": "/p"})
+        assert replay.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
+        assert replay.command_dir("npm test", None) is None
+
+    def test_the_same_repo_file_in_two_worktrees_is_two_files(self):
+        """Review finding: a failed Edit in one worktree was resolved by an Edit
+        of the same repo file in another."""
+        fail = {"tool": "Edit", "command": None, "file": "src/app.py", "path": "/p/.worktrees/a/src/app.py"}
+        assert not replay.same_kind(fail, {"tool": "Edit", "command": None, "file": "src/app.py",
+                                           "path": "/p/.worktrees/b/src/app.py"})
+        assert replay.same_kind(fail, dict(fail))
 
     def test_file_tools_match_on_tool_and_file(self):
         fail = {"tool": "Edit", "command": None, "file": "src/a.py"}
@@ -283,6 +321,15 @@ class TestCommandFiles:
         wrapped = "agent-test-budget run -- /bin/zsh -c 'cd /Users/me/proj && bash scripts/run.sh src/a.ts'"
         assert replay.executed_files(wrapped, files, repo_root=root) == {"scripts/run.sh"}
         assert replay.command_files(wrapped, files, repo_root=root) == ["scripts/run.sh", "src/a.ts"]
+
+    def test_a_shell_option_cluster_string_is_parsed_as_commands(self):
+        """Review finding: for bash -lc 'cat src/a.ts' the string was taken as
+        the script, so the read of src/a.ts was dropped. The same for -ec."""
+        files = {"src/a.ts", "scripts/run.sh"}
+        root = "/Users/me/proj"
+        assert replay.executed_files("bash -lc 'cat src/a.ts'", files, repo_root=root) == set()
+        assert replay.executed_files("sh -ec 'bash scripts/run.sh src/a.ts'", files, repo_root=root) == {
+            "scripts/run.sh"}
 
     def test_inline_code_names_no_script(self):
         files = {"src/a.ts", "tools/x.py", "scripts/run.sh"}

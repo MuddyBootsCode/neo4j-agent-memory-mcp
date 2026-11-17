@@ -261,12 +261,36 @@ def _strip_wrappers(toks: list[str]) -> list[str]:
 
 
 _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
+_SHELL_OPT_VALUE = {"-o", "-O", "+o", "+O", "--rcfile", "--init-file"}
+_SHORT_OPTS = re.compile(r"-[A-Za-z]+")
+# Task runners whose next word names the script, so npm run test and npm run
+# lint are different commands.
+_TASK_RUNNERS = {("npm", "run"), ("npm", "run-script"), ("pnpm", "run"), ("yarn", "run"), ("bun", "run"),
+                 ("deno", "task")}
+
+
+def _shell_command_string(args: list[str]) -> str | None:
+    """The command string a shell runs with ``-c``, also when ``c`` sits in an
+    option cluster such as ``-lc`` or ``-ec``: the first argument after the
+    options. None when the shell runs a script or reads its input."""
+    want, skip = False, False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in _SHELL_OPT_VALUE:
+            skip = True
+        elif a.startswith(("-", "+")) and len(a) > 1:
+            want = want or bool(_SHORT_OPTS.fullmatch(a) and "c" in a)
+        else:
+            return a if want else None
+    return None
 
 
 @functools.lru_cache(maxsize=None)
 def cmd_prefix(command: str) -> str:
     """Program plus first non-flag argument of the first command that is not
-    a cd, export or similar; wrappers such as ``uv run`` are stripped."""
+    a cd, export or similar; wrappers such as ``uv run`` are stripped. A task
+    runner keeps the script name too (``npm run test``)."""
     if not isinstance(command, str) or not command.strip():
         return ""
     first_head = ""
@@ -283,8 +307,9 @@ def cmd_prefix(command: str) -> str:
         if not toks:
             continue
         prog, args = os.path.basename(toks[0]), toks[1:]
-        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
-            inner = cmd_prefix(args[args.index("-c") + 1])
+        inner_cmd = _shell_command_string(args) if prog in _SHELLS else None
+        if inner_cmd is not None:
+            inner = cmd_prefix(inner_cmd)
             if inner:
                 return inner
         if prog == "git":
@@ -298,27 +323,55 @@ def cmd_prefix(command: str) -> str:
                     kept.append(a)
             args = kept
         rest = [a for a in args if not a.startswith("-")]
-        return " ".join([prog] + [r[:60] for r in rest[:1]])
+        words = 2 if rest and (prog, rest[0]) in _TASK_RUNNERS else 1
+        return " ".join([prog] + [r[:60] for r in rest[:words]])
     return first_head
 
 
+def command_dir(command: str, cwd: str | None) -> str | None:
+    """The directory a command's first program runs in: ``cwd`` moved by any
+    ``cd`` before it, also inside ``sh -c``. None when neither is known. The
+    same rule as ``swarm_memory.rules.command_dir`` (MUD-850 Phase 2)."""
+    current = cwd or ""
+    for toks in _segments(command or ""):
+        while toks and _ENV_ASSIGN.match(toks[0]):
+            toks = toks[1:]
+        if not toks:
+            continue
+        if toks[0] == "cd":
+            if len(toks) >= 2:
+                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
+            continue
+        if os.path.basename(toks[0]) in _SKIP_HEADS:
+            continue
+        toks = _strip_wrappers(toks)
+        if toks and os.path.basename(toks[0]) in _SHELLS:
+            inner = _shell_command_string(toks[1:])
+            if inner is not None:
+                return command_dir(inner, current)
+        break
+    return current or None
+
+
 def _file_identity(call: dict):
-    """The file a file-tool call worked on: its repo path, else its own path
-    when the file is outside every repo, else None."""
-    if call.get("file"):
-        return ("repo", call["file"])
+    """The physical file a file-tool call worked on: its own path, so the
+    same repo file in two worktrees stays apart. A call with no path falls
+    back to its repo path, and with neither it is None."""
     path = call.get("path")
-    return ("path", os.path.normpath(path)) if isinstance(path, str) and path else None
+    if isinstance(path, str) and path:
+        return ("path", os.path.normpath(path))
+    return ("repo", call["file"]) if call.get("file") else None
 
 
 def same_kind(failed: dict, other: dict) -> bool:
-    """MUD-476 resolution rule: same command prefix, or same tool on the same
-    file. Two files outside any repo are told apart by their paths, and a file
-    tool with no path matches nothing."""
+    """MUD-476 resolution rule: the same command prefix run in the same
+    directory, or the same tool on the same physical file. A file tool with
+    no path matches nothing."""
     if failed.get("tool") != other.get("tool"):
         return False
     if failed.get("tool") == "Bash":
-        return cmd_prefix(failed.get("command") or "") == cmd_prefix(other.get("command") or "")
+        fc, oc = failed.get("command") or "", other.get("command") or ""
+        return cmd_prefix(fc) == cmd_prefix(oc) and command_dir(fc, failed.get("cwd")) == command_dir(oc, other.get("cwd"))
     if failed.get("tool") in FILE_TOOLS:
         key = _file_identity(failed)
         return key is not None and key == _file_identity(other)
@@ -755,8 +808,9 @@ def program_tokens(command: str) -> list[str]:
             continue
         out.append(toks[0])
         prog, args = os.path.basename(toks[0]), toks[1:]
-        if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
-            out += program_tokens(args[args.index("-c") + 1])
+        inner = _shell_command_string(args) if prog in _SHELLS else None
+        if inner is not None:
+            out += program_tokens(inner)
         elif _INTERPRETERS.match(prog):
             inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
             script = next((a for a in args if a in inline or not a.startswith("-")), None)
@@ -938,6 +992,7 @@ def scan_transcript(path: str, since_ts: float, want_prompts: bool = True) -> di
                     fpath = args.get("file_path") or args.get("notebook_path")
                     call = {"id": b.get("id"), "ts": ts, "line": line_no, "tool": name, "sub": is_sub,
                             "path": fpath if isinstance(fpath, str) else None,
+                            "cwd": cwd if isinstance(cwd, str) and cwd else None,
                             "command": command[:2000] if command else None,
                             "background": bool(args.get("run_in_background")),
                             "ok": None, "blocked": False, "rts": None, "error": None}
