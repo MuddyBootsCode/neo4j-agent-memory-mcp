@@ -129,13 +129,13 @@ def handle(con, payload: dict, ts: float, t0: float, keys=()) -> None:
         return
     store.begin(con)
     try:
-        session = _ensure_session(con, call, ts)
         call_key = f"call|{call.sid}|{call.tool_use_id}" if call.tool_use_id and call.hook in TOOL_HOOKS else None
         if call_key and con.execute("SELECT 1 FROM event WHERE dedupe = ?", (call_key,)).fetchone():
-            # The same tool call delivered again: nothing it decides may run twice.
+            # The same tool call delivered again: it changes nothing, the session included.
             detail = {"duplicate": True}
         else:
             call.dedupe = call.dedupe or call_key
+            session = _ensure_session(con, call, ts)
             detail = _HANDLERS[call.hook](con, call, session, ts)
         store.log_event(con, "observed", ts, hook=call.hook, session_id=call.sid, agent_id=call.agent_id,
                         tool=call.tool, dedupe=call.dedupe, ms=(time.perf_counter() - t0) * 1000,
@@ -161,7 +161,10 @@ def _ensure_session(con, call: Call, ts: float):
         store.add_links(con, rid, ts, [("session", call.sid), ("ticket", ticket)])
     else:
         rid = row[0]
-        con.execute("UPDATE record SET ts_end = ?, status = 'active' WHERE id = ?", (ts, rid))
+        # Only a SessionStart (resume, clear, compact, fork) brings an ended
+        # session back. A late event for an ended session leaves it ended.
+        con.execute("UPDATE record SET ts_end = ?, status = 'active' WHERE id = ? AND (status != 'ended' OR ?)",
+                    (ts, rid, call.hook == "SessionStart"))
     if loc:
         store.add_links(con, rid, ts, [("repo", loc[0]), ("worktree", os.path.realpath(loc[2]))])
     return rid, loc

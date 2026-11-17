@@ -351,6 +351,18 @@ class TestSession:
         (sid, _, records, _), = delivered(db, "session_start")
         assert (sid, records) == ("w1", [rid])
 
+    def test_only_a_session_start_brings_an_ended_session_back(self, db, repo):
+        """Review finding: a duplicate tool event after SessionEnd set the
+        session active again, putting an ended worker back in the roster."""
+        start(db, "s1", repo, T)
+        tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "cat README.md"}, "t1")
+        fire(db, "SessionEnd", "s1", repo, T + 2, reason="other")
+        tool_ok(db, "s1", repo, T + 3, "Bash", {"command": "cat README.md"}, "t1")
+        tool_ok(db, "s1", repo, T + 4, "Bash", {"command": "cat src/app.py"}, "t2")
+        assert q(db, "SELECT status, ts_end FROM record WHERE kind = 'session'") == [("ended", T + 2)]
+        start(db, "s1", repo, T + 5, source="resume")
+        assert q(db, "SELECT status, ts_end FROM record WHERE kind = 'session'") == [("active", T + 5)]
+
     def test_session_end_marks_the_session_ended(self, db, repo):
         start(db, "s1", repo, T)
         fire(db, "SessionEnd", "s1", repo, T + 5, reason="other")
@@ -591,17 +603,19 @@ class TestSafety:
         and both are stored, linked and printed. The secrets are letters only,
         so normalising digits cannot hide a leak."""
         secrets = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "quixotic", "flumph",
-                   "wibblewobble", "dxnlcmfkbwluagvyzq")
+                   "wibblewobble", "dxnlcmfkbwluagvyzq", "ploverpw", "fizzle", "wobblegong")
         errors = ["Exit code 1\nerror: authentication failed password=hunterpw for user app",
                   "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
                   "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
                   'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
                   'Exit code 1\nerror: login failed password="zorblax quixotic flumph" for app',
                   "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set",
-                  "Exit code 1\nerror: proxy said 407 for Authorization: Basic dXNlcmFkbWluaGVyZQ today"]
+                  "Exit code 1\nerror: proxy said 407 for Authorization: Basic dXNlcmFkbWluaGVyZQ today",
+                  "Exit code 1\nerror: dbcli --password ploverpw failed to connect",
+                  'Exit code 1\nerror: sync --api-key "fizzle wobblegong" refused by the server']
         for n, err in enumerate(errors):
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(7,)]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(9,)]
         stored = "\n".join(str(row) for table in ("event", "record", "link")
                            for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (stored + report.build(db)).lower()
