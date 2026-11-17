@@ -103,6 +103,12 @@ class TestFileWindowHits:
         assert replay.file_window_hits(events, 15 * MIN) == []
         assert len(replay.file_window_hits(events, 60 * MIN)) == 1
 
+    def test_a_sessions_own_touches_in_two_worktrees_are_no_hit(self):
+        """Touches are attributed to their file's worktree, so one session can
+        touch two worktrees; that is not two agents."""
+        events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "a", "wt2", "src/x.py")]
+        assert replay.file_window_hits(events, 15 * MIN) == []
+
     def test_the_same_worktree_is_no_hit(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
         assert replay.file_window_hits(events, 15 * MIN) == []
@@ -155,51 +161,75 @@ class TestRepoRel:
         assert replay.repo_rel("/Users/me/other/.claude/worktrees/w/src/a.py", "/Users/me/proj") is None
 
 
+ROOT = "/Users/me/proj"
+
+
+def touches(command, files, cwd=ROOT):
+    """The repo files a command names and those it runs, from ``cwd``."""
+    def to_file(path):
+        rel = replay.repo_rel(path, ROOT) if path else None
+        return (rel, replay.worktree_of(path, ROOT, None)) if rel in files else None
+    named, executed = replay.command_touches(command, cwd, to_file)
+    return [f for f, _wt in named], executed
+
+
 class TestCommandFiles:
     FILES = {"src/app/main.py", "tests/test_main.py"}
 
     def test_repo_files_named_in_a_command_are_touches(self):
         cmd = "cd /Users/me/proj && sed -i 's/a/b/' src/app/main.py && pytest tests/test_main.py -q"
-        assert replay.command_files(cmd, self.FILES, repo_root="/Users/me/proj") == [
-            "src/app/main.py", "tests/test_main.py"]
+        assert touches(cmd, self.FILES, cwd="/tmp") == (["src/app/main.py", "tests/test_main.py"], set())
 
     def test_a_command_naming_no_repo_file_touches_nothing(self):
-        assert replay.command_files("git status --short", self.FILES, repo_root="/Users/me/proj") == []
+        assert touches("git status --short", self.FILES) == ([], set())
+
+    def test_a_relative_path_resolves_from_the_calls_own_directory(self):
+        """Review finding: the root file won over the one in the cwd, so a
+        command run in packages/web touched the root package.json."""
+        files = {"package.json", "packages/web/package.json"}
+        assert touches("cat package.json", files, cwd=ROOT + "/packages/web")[0] == ["packages/web/package.json"]
+        assert touches("cat package.json", files)[0] == ["package.json"]
+        assert touches("cd packages/web && cat package.json", files)[0] == ["packages/web/package.json"]
+        assert touches("bash -c 'cd packages/web && cat package.json' && cat package.json", files)[0] == [
+            "packages/web/package.json", "package.json"]
+
+    def test_each_touch_has_the_worktree_its_file_is_in(self):
+        """Review finding: every touch took the session's first worktree."""
+        def to_file(path):
+            rel = replay.repo_rel(path, ROOT) if path else None
+            return (rel, replay.worktree_of(path, ROOT, None)) if rel == "src/a.ts" else None
+        named, _ = replay.command_touches("cat src/a.ts && cat /Users/me/proj/.worktrees/b/src/a.ts", ROOT, to_file)
+        assert named == [("src/a.ts", ROOT.lower()), ("src/a.ts", ROOT.lower() + "/.worktrees/b")]
 
     def test_a_script_run_as_the_program_is_executed_not_worked_on(self):
         """Every agent runs the same gate script; that is using a tool, not
         working on the file, and it would make every pair of agents collide."""
         files = {"scripts/verify/gate.mjs", "src/a.ts", "tools/check.sh", "src/app/main.py"}
         cmd = "node scripts/verify/gate.mjs --check src/a.ts && bash tools/check.sh && pytest src/app/main.py"
-        assert replay.executed_files(cmd, files, repo_root="/Users/me/proj") == {
-            "scripts/verify/gate.mjs", "tools/check.sh"}
+        assert touches(cmd, files)[1] == {"scripts/verify/gate.mjs", "tools/check.sh"}
+        assert touches("bash tools/check.sh && cat tools/check.sh", files)[1] == set()
 
     def test_a_shell_c_string_is_parsed_as_commands(self):
         """Review finding: in ``zsh -c 'cat src/a.ts'`` the whole string was
         taken as the script the shell runs, so the read of src/a.ts was dropped."""
         files = {"src/a.ts", "scripts/run.sh"}
-        root = "/Users/me/proj"
-        assert replay.executed_files("zsh -c 'cat src/a.ts'", files, repo_root=root) == set()
+        assert touches("zsh -c 'cat src/a.ts'", files) == (["src/a.ts"], set())
         wrapped = "agent-test-budget run -- /bin/zsh -c 'cd /Users/me/proj && bash scripts/run.sh src/a.ts'"
-        assert replay.executed_files(wrapped, files, repo_root=root) == {"scripts/run.sh"}
-        assert replay.command_files(wrapped, files, repo_root=root) == ["scripts/run.sh", "src/a.ts"]
+        assert touches(wrapped, files, cwd="/tmp") == (["scripts/run.sh", "src/a.ts"], {"scripts/run.sh"})
 
     def test_a_shell_option_cluster_string_is_parsed_as_commands(self):
         """Review finding: for bash -lc 'cat src/a.ts' the string was taken as
         the script, so the read of src/a.ts was dropped. The same for -ec."""
         files = {"src/a.ts", "scripts/run.sh"}
-        root = "/Users/me/proj"
-        assert replay.executed_files("bash -lc 'cat src/a.ts'", files, repo_root=root) == set()
-        assert replay.executed_files("sh -ec 'bash scripts/run.sh src/a.ts'", files, repo_root=root) == {
-            "scripts/run.sh"}
+        assert touches("bash -lc 'cat src/a.ts'", files)[1] == set()
+        assert touches("sh -ec 'bash scripts/run.sh src/a.ts'", files)[1] == {"scripts/run.sh"}
 
     def test_inline_code_names_no_script(self):
         files = {"src/a.ts", "tools/x.py", "scripts/run.sh"}
-        root = "/Users/me/proj"
-        assert replay.executed_files("python3 -c \"print(open('src/a.ts').read())\"", files, repo_root=root) == set()
-        assert replay.executed_files("node -e \"require('./src/a.ts')\"", files, repo_root=root) == set()
-        assert replay.executed_files("python3 -u tools/x.py src/a.ts", files, repo_root=root) == {"tools/x.py"}
-        assert replay.executed_files("bash -e scripts/run.sh", files, repo_root=root) == {"scripts/run.sh"}
+        assert touches("python3 -c \"print(open('src/a.ts').read())\"", files)[1] == set()
+        assert touches("node -e \"require('./src/a.ts')\"", files)[1] == set()
+        assert touches("python3 -u tools/x.py src/a.ts", files)[1] == {"tools/x.py"}
+        assert touches("bash -e scripts/run.sh", files)[1] == {"scripts/run.sh"}
 
 
 class TestSameDirectory:
