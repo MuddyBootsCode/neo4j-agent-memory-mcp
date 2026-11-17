@@ -404,11 +404,22 @@ def call_ran(call: dict) -> bool:
 
 
 def recovery_calls(calls: list[dict], i: int, j: int) -> int:
-    """Calls the session began after the failure at i came back, up to and
-    including the one at j that got past it. Calls already in flight when the
-    failure was seen are not effort spent on it."""
+    """Calls the session began after the failure at i came back and before
+    the call at j that got past it finished, j included. Calls already in
+    flight when the failure was seen are not effort spent on it, and calls
+    begun while the retry ran are."""
     seen = calls[i].get("rts") or calls[i].get("ts")
-    return sum(1 for c in calls[i + 1:j + 1] if seen is None or c.get("ts") is None or c["ts"] >= seen)
+    done = calls[j].get("rts") or calls[j].get("ts")
+    n = 0
+    for k in range(i + 1, len(calls)):
+        start = calls[k].get("ts")
+        if k <= j:
+            n += seen is None or start is None or start >= seen
+        elif done is not None and start is not None and start < done:
+            n += 1
+        else:
+            break  # calls are in start order
+    return n
 
 
 def touch_ts(call: dict) -> float | None:
@@ -449,6 +460,13 @@ def file_window_hits(events: list[dict], window_s: float, related=None) -> list[
         if best is not None:
             hits.append({"event": e, "other": best, "gap_s": e["ts"] - best["ts"]})
     return hits
+
+
+def edit_after_edit_calls(events: list[dict], window_s: float) -> set:
+    """Edit calls that another worktree's edit of the same file preceded
+    within the window, whatever reads came between: the hook's same-file
+    edit rule. ``events`` also carry ``edit`` and ``call``."""
+    return {h["event"]["call"] for h in file_window_hits([e for e in events if e["edit"]], window_s)}
 
 
 def same_directory_relation(files):
@@ -1495,8 +1513,7 @@ def _tally_m3(events_by_run: dict, relations: dict, repo_of_run: dict, name_of_r
             same = file_window_hits(evs, w * 60)
             same_calls = {h["event"]["call"] for h in same}
             row[f"same file|{w}"] += len(same_calls)
-            row[f"edit after edit|{w}"] += len(
-                {h["event"]["call"] for h in same if h["event"]["edit"] and h["other"]["edit"]})
+            row[f"edit after edit|{w}"] += len(edit_after_edit_calls(evs, w * 60))
             if w == 60:
                 per_run[rid] += len(same_calls)
                 for h in same:

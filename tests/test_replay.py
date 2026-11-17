@@ -167,6 +167,17 @@ class TestFirstResolution:
         j = replay.first_resolution(calls, 0)
         assert (j, replay.recovery_calls(calls, 0, j)) == (21, 1)
 
+    def test_calls_begun_while_the_retry_ran_are_recovery_effort(self):
+        """Review finding: effort stopped at the retry's start, though the
+        retry got past the failure only when it finished."""
+        calls = [{"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
+                 {"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 2 * MIN, "rts": 10 * MIN}]
+        calls += [{"tool": "Read", "command": None, "file": f"f{n}", "ok": True, "ts": n * MIN, "rts": n * MIN + 1}
+                  for n in range(3, 10)]
+        calls.append({"tool": "Read", "command": None, "file": "late", "ok": True, "ts": 11 * MIN, "rts": 11 * MIN + 1})
+        j = replay.first_resolution(calls, 0)
+        assert (j, replay.recovery_calls(calls, 0, j)) == (1, 8)
+
     def test_the_first_to_finish_among_later_successes_resolves(self):
         calls = [
             {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
@@ -195,6 +206,15 @@ class TestFileWindowHits:
     def test_the_same_worktree_is_no_hit(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
         assert replay.file_window_hits(events, 15 * MIN) == []
+
+    def test_a_read_between_two_edits_does_not_hide_the_edit_after_edit(self):
+        """Review finding: the latest touch was the first worktree's read-back,
+        so its earlier edit did not count, though the hook's rule fires on it."""
+        events = [{**_touch(0, "a", "wt1", "src/x.py"), "edit": True, "call": "c1"},
+                  {**_touch(1 * MIN, "a", "wt1", "src/x.py"), "edit": False, "call": "c2"},
+                  {**_touch(5 * MIN, "b", "wt2", "src/x.py"), "edit": True, "call": "c3"}]
+        assert replay.edit_after_edit_calls(events, 15 * MIN) == {"c3"}
+        assert replay.edit_after_edit_calls(events, 4 * MIN) == set()
 
     def test_a_call_that_never_ran_is_no_touch(self):
         """Review finding: an Edit a hook refused, or whose input the tool
