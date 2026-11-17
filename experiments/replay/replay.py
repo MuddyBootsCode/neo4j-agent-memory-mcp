@@ -377,6 +377,23 @@ def repeat_failure_hits(failures: list[dict], window_s: float | None = None) -> 
 
 # ---------------------------------------------------------------- moment 3
 
+def call_ran(call: dict) -> bool:
+    """Whether a call ran at all. One a hook refused before it started, or
+    whose input the tool rejected, touched nothing. A command that ran and
+    failed did run."""
+    if call.get("blocked"):
+        return False
+    return call.get("ok") is not False or failure_kind(call.get("error") or "") == "command or tool failure"
+
+
+def recovery_calls(calls: list[dict], i: int, j: int) -> int:
+    """Calls the session began after the failure at i came back, up to and
+    including the one at j that got past it. Calls already in flight when the
+    failure was seen are not effort spent on it."""
+    seen = calls[i].get("rts") or calls[i].get("ts")
+    return sum(1 for c in calls[i + 1:j + 1] if seen is None or c.get("ts") is None or c["ts"] >= seen)
+
+
 def touch_ts(call: dict) -> float | None:
     """When a hook would have seen a call's touch: when its result came back.
     A call with no result never reaches a hook, so it is no touch."""
@@ -1485,7 +1502,7 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
             mix["tool calls in runs"] += 1
             mix["Bash calls in runs"] += c["tool"] == "Bash"
             mix["file tool calls on a path outside the repo"] += c["tool"] in FILE_TOOLS and not c["file"]
-            if c["blocked"]:
+            if not call_ran(c):
                 continue
             ts = touch_ts(c)
             if ts is None:
@@ -1606,7 +1623,7 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
             f = {"ts": fts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
                  "sig": sig, "tool": c["tool"], "repo": s["repo"], "kind": failure_kind(c["error"]),
                  "resolved_ts": (calls[j]["rts"] or calls[j]["ts"]) if j is not None else None,
-                 "recovery_calls": (j - i) if j is not None else None}
+                 "recovery_calls": recovery_calls(calls, i, j) if j is not None else None}
             fl.append(f)
             first = sig_first_seen[s["repo"]].get(sig)
             if first is None or fts < first:

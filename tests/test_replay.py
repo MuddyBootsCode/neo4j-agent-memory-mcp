@@ -146,6 +146,16 @@ class TestFirstResolution:
         ]
         assert replay.first_resolution(calls, 0) == 2
 
+    def test_calls_already_in_flight_are_not_recovery_effort(self):
+        """Review finding: recovery effort counted every call started since the
+        failed one, including twenty that were running when it came back."""
+        calls = [{"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 10 * MIN}]
+        calls += [{"tool": "Read", "command": None, "file": f"f{n}", "ok": True, "ts": n, "rts": n + 1}
+                  for n in range(1, 21)]
+        calls.append({"tool": "Bash", "command": "npm test", "file": None, "ok": True, "ts": 11 * MIN, "rts": 12 * MIN})
+        j = replay.first_resolution(calls, 0)
+        assert (j, replay.recovery_calls(calls, 0, j)) == (21, 1)
+
     def test_the_first_to_finish_among_later_successes_resolves(self):
         calls = [
             {"tool": "Bash", "command": "npm test", "file": None, "ok": False, "ts": 0.0, "rts": 1 * MIN},
@@ -174,6 +184,16 @@ class TestFileWindowHits:
     def test_the_same_worktree_is_no_hit(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
         assert replay.file_window_hits(events, 15 * MIN) == []
+
+    def test_a_call_that_never_ran_is_no_touch(self):
+        """Review finding: an Edit a hook refused, or whose input the tool
+        rejected, counted as an edit of the file."""
+        denied = {"ok": False, "blocked": False, "error": "PreToolUse:Edit hook error: [gate.sh]: not allowed"}
+        rejected = {"ok": False, "blocked": False, "error": "<tool_use_error>String to replace not found</tool_use_error>"}
+        failed_run = {"ok": False, "blocked": False, "error": "Exit code 1\nError: 3 failed"}
+        assert not replay.call_ran(denied) and not replay.call_ran(rejected)
+        assert replay.call_ran(failed_run) and replay.call_ran({"ok": True, "blocked": False})
+        assert not replay.call_ran({"ok": None, "blocked": True})
 
     def test_a_touch_is_timed_by_its_result_and_a_call_without_one_is_left_out(self):
         """Review finding: touches were timed by the call's start, and calls
