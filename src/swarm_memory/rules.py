@@ -13,9 +13,11 @@ Four rules differ from the replay, each because the hook runs live:
   no git subprocess.
 * In a shell command, a relative path after ``cd <dir>`` also resolves from that
   directory. The replay could only match such a path as a unique suffix.
-* Signatures pass through ``scrub()`` as well, so a long token never reaches the
-  store. That changes a signature only when its error line holds a token of 24 or
-  more letters, digits, ``_`` or ``-``.
+* The diagnostic line is passed through ``redact()`` before it is normalised,
+  and the signature through ``scrub()`` after, so neither a credential nor a
+  long token reaches the store. That changes a signature only when its error
+  line holds a credential, or a token of 24 or more letters, digits, ``_`` or
+  ``-``.
 """
 
 from __future__ import annotations
@@ -430,11 +432,13 @@ def scrub(text: str) -> str:
 
 
 def failure_signature(error_text: str) -> str | None:
-    """The F4 signature of a failed call's output, or None for F4 noise."""
+    """The F4 signature of a failed call's output, or None for F4 noise. The
+    diagnostic line is redacted before it is normalised, because the signature
+    is stored and printed like the error head."""
     ln = diag_line(error_text or "")
     if not ln or NOISE.search(ln):
         return None
-    sig = norm(ln)
+    sig = norm(redact(ln))
     return scrub(sig) if len(sig) >= 15 else None
 
 
@@ -466,6 +470,15 @@ def exit_code(error_text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def redact(text: str) -> str:
+    """Credentials replaced: ``user:password@`` in URLs, Bearer tokens, and the
+    value after ``password=``, ``token:`` and similar. Bearer goes first, so
+    ``Authorization: Bearer <token>`` loses the token too."""
+    text = _URL_CREDENTIALS.sub(r"\1<redacted>@", text)
+    text = _BEARER.sub("bearer <redacted>", text)
+    return _SECRET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", text)
+
+
 def error_head(error_text: str, limit: int = HEAD_CHARS) -> str:
     """A short redacted head of a failed call's output: the ``Exit code`` line
     dropped, whitespace flattened, the home directory shortened to ``~``, and
@@ -477,7 +490,4 @@ def error_head(error_text: str, limit: int = HEAD_CHARS) -> str:
     home = os.path.expanduser("~")
     if home and home != "/":
         head = head.replace(home, "~")
-    head = _URL_CREDENTIALS.sub(r"\1<redacted>@", head)
-    head = _SECRET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", head)
-    head = _BEARER.sub("bearer <redacted>", head)
-    return scrub(head)[:limit]
+    return scrub(redact(head))[:limit]

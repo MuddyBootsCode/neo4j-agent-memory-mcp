@@ -15,7 +15,7 @@ import sys
 import pytest
 
 from swarm_memory import hook as hook_entry
-from swarm_memory import observe, rules, store
+from swarm_memory import observe, report, rules, store
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "experiments", "replay"))
 
@@ -537,6 +537,23 @@ class TestSafety:
         start(db, "s1", repo, T)
         assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
         assert q(db, "PRAGMA journal_mode") == [("wal",)]
+
+    def test_credentials_reach_no_stored_field_and_no_report(self, db, repo):
+        """Review finding: signatures skipped the redaction the error head got,
+        and both are stored, linked and printed. The secrets are letters only,
+        so normalising digits cannot hide a leak."""
+        secrets = ("hunterpw", "zxcvbnmasd", "qwertyui")
+        errors = ["Exit code 1\nerror: authentication failed password=hunterpw for user app",
+                  "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
+                  "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main"]
+        for n, err in enumerate(errors):
+            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(3,)]
+        stored = "\n".join(str(row) for table in ("event", "record", "link")
+                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        text = (stored + report.build(db)).lower()
+        for secret in secrets:
+            assert secret not in text
 
     def test_no_prompt_command_or_output_text_is_stored(self, db, repo):
         start(db, "s1", repo, T)
