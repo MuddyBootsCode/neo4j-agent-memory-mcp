@@ -142,6 +142,30 @@ class TestSameKind:
         assert replay.command_dir("bash -lc 'cd sub && make'", "/p") == "/p/sub"
         assert replay.command_dir("npm test", None) is None
 
+    def test_a_compound_command_is_resolved_only_by_the_same_compound(self):
+        """Review finding: git status --short && npm test failing was resolved
+        by a later git status, since only the first segment counted. Which
+        segment failed is unknown, so neither segment alone resolves it."""
+        fail = {"tool": "Bash", "command": "git status --short && npm test", "file": None, "cwd": "/p"}
+        for alone in ("git status --short", "npm test"):
+            assert not replay.same_kind(fail, {"tool": "Bash", "command": alone, "file": None, "cwd": "/p"})
+        assert replay.same_kind(fail, {"tool": "Bash", "command": "git status && npm test -- --ci", "file": None,
+                                       "cwd": "/p"})
+        assert replay.cmd_identity("cd x && npm test") == "npm test"
+        assert replay.cmd_identity("git status --short && npm test | tail -5") == "git status && npm test | tail"
+        assert replay.cmd_identity("bash -lc 'make && make test'") == "make && make test"
+
+    def test_git_dash_c_targets_are_where_git_ran(self):
+        """Review finding: git -C dropped its target, so a merge in one worktree
+        was resolved by the same merge in another."""
+        fail = {"tool": "Bash", "command": "git -C /repo/.worktrees/a merge topic", "file": None, "cwd": "/p"}
+        assert not replay.same_kind(fail, {"tool": "Bash", "command": "git -C /repo/.worktrees/b merge topic",
+                                           "file": None, "cwd": "/p"})
+        assert replay.same_kind(fail, {"tool": "Bash", "command": "git merge topic", "file": None,
+                                       "cwd": "/repo/.worktrees/a"})
+        assert replay.command_dir("git -C /repo -C .worktrees/a -c core.x=1 log -C", "/p") == "/repo/.worktrees/a"
+        assert replay.command_dir("git -C rel status", "/p") == "/p/rel"
+
     def test_the_same_repo_file_in_two_worktrees_is_two_files(self):
         """Review finding: a failed Edit in one worktree was resolved by an Edit
         of the same repo file in another."""
