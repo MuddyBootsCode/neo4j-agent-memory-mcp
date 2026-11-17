@@ -11,8 +11,9 @@ Four rules differ from the replay, each because the hook runs live:
   plus history.
 * The repo comes from reading ``.git`` and the git dir's ``commondir`` file, with
   no git subprocess.
-* In a shell command, a relative path after ``cd <dir>`` also resolves from that
-  directory. The replay could only match such a path as a unique suffix.
+* In a shell command, each segment's relative paths resolve from the directory
+  a ``cd`` earlier in the command moved to, as the shell would. The replay
+  could only match such a path as a unique suffix.
 * The diagnostic line is passed through ``redact()`` before it is normalised,
   and the signature through ``scrub()`` after, so neither a credential nor a
   long token reaches the store. That changes a signature only when its error
@@ -357,18 +358,6 @@ def named_files(text: str, bases: list[str], exclude: set | None = None) -> list
     return found
 
 
-def _command_bases(command: str, cwd: str) -> list[str]:
-    """The cwd, then each directory a ``cd`` in the command moves to."""
-    bases = [cwd]
-    current = cwd
-    for toks in _segments(command):
-        if len(toks) >= 2 and toks[0] == "cd":
-            current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
-            if current not in bases:
-                bases.append(current)
-    return bases
-
-
 def executed_files(command: str, bases: list[str]) -> set[str]:
     """Existing files a command runs as a program (``program_tokens``), which
     is using a tool rather than working on the file."""
@@ -384,17 +373,34 @@ def executed_files(command: str, bases: list[str]) -> set[str]:
     return out
 
 
+MAX_SEGMENTS = 200
+
+
 def command_files(command: str, cwd: str) -> list[str]:
-    """Absolute paths of existing files a shell command names, except a
-    script the command runs as its program (MUD-850 D18, replay rule)."""
+    """Absolute paths of existing files a shell command names, except what it
+    runs as a program (MUD-850 D18, replay rule). Each segment resolves its
+    relative paths from the directory the command's ``cd`` had moved to by
+    then, as the shell would."""
     if not isinstance(command, str) or not command.strip() or not cwd:
         return []
-    try:
-        bases = _command_bases(command, cwd)
-        executed = executed_files(command, bases)
-    except Exception:
-        bases, executed = [cwd], set()
-    return named_files(command, bases, exclude=executed)
+    found: list[str] = []
+    current = cwd
+    for toks in _segments(command)[:MAX_SEGMENTS]:
+        if toks and toks[0] == "cd":
+            if len(toks) >= 2:
+                current = os.path.normpath(os.path.join(current, os.path.expanduser(toks[1])))
+            continue
+        text = shlex.join(toks)
+        try:
+            executed = executed_files(text, [current])
+        except Exception:
+            executed = set()
+        for f in named_files(text, [current], exclude=executed):
+            if f not in found:
+                found.append(f)
+                if len(found) >= MAX_NAMED_FILES:
+                    return found
+    return found
 
 
 # ---------------------------------------------------------------- failures (F4, unchanged)
@@ -456,9 +462,11 @@ def failure_kind(error_text: str) -> str:
 
 
 _EXIT_LINE = re.compile(r"^\s*exit code (-?\d+)\s*$", re.I)
+# The key may carry a prefix (PGPASSWORD, db_password, client_secret) or a
+# closing quote ("password": ...), and a quoted value is redacted whole.
 _SECRET_VALUE = re.compile(
-    r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth[_-]?token|authorization)"
-    r"(\s*[=:]\s*)\S+")
+    r"(?i)([\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization))"
+    r"(['\"]?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)")
 _BEARER = re.compile(r"(?i)\bbearer\s+\S+")
 _URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
 HEAD_CHARS = 160

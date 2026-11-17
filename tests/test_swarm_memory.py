@@ -240,6 +240,13 @@ class TestCommandFiles:
         assert rules.command_files("timeout 60 ./scripts/run.sh src/app.py", str(repo)) == [str(repo / "src" / "app.py")]
         assert rules.command_files(".venv/bin/python -m pytest README.md", str(repo)) == [readme]
 
+    def test_each_segment_resolves_from_the_directory_its_cd_moved_to(self, repo):
+        """Review finding: the starting directory won when both had the file."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        assert rules.command_files(f"cd {b} && cat README.md", str(a)) == [str(b / "README.md")]
+        assert rules.command_files(f"cat README.md && cd {b} && cat src/app.py", str(a)) == [
+            str(a / "README.md"), str(b / "src" / "app.py")]
+
     def test_a_path_after_cd_resolves_from_that_directory(self, repo):
         assert rules.command_files("cd src && cat app.py", str(repo)) == [str(repo / "src" / "app.py")]
 
@@ -370,6 +377,16 @@ class TestFailures:
         (status, ts_end, info), = q(db, "SELECT status, ts_end, info FROM record WHERE kind = 'failure'")
         assert status == "resolved" and ts_end == T + 30 and json.loads(info)["resolved_by"] == "t2"
 
+    def test_a_success_that_began_before_the_failure_came_back_does_not_resolve_it(self, db, repo):
+        """The replay's rule: a concurrent call that started first is not the
+        way past a failure. Its start is its result time less duration_ms."""
+        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",
+                  "t1", duration_ms=10_000)
+        tool_ok(db, "s1", repo, T + 12, "Bash", {"command": "make build"}, "t2", duration_ms=11_000)
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 20, "Bash", {"command": "make build"}, "t3", duration_ms=1_000)
+        assert q(db, "SELECT status, ts_end FROM record WHERE kind = 'failure'") == [("resolved", T + 20)]
+
     def test_another_prefix_another_session_or_an_interrupt_does_not_resolve(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
         tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "make lint"}, "t2")
@@ -450,6 +467,18 @@ class TestWouldDeliver:
         tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": "cat ./EPIC_BRIEF.md"}, "t1")
         (sid, _, records, detail), = delivered(db, "brief_file")
         assert sid == "w1" and records == [session_record(db, "s1")[0]] and detail["tickets"] == ["ABC-101"]
+
+    def test_a_brief_read_after_cd_is_that_directorys_brief(self, db, repo):
+        """Review finding: with a brief in both places, the starting directory's
+        brief was opened instead of the one the command read."""
+        a, b = wt(repo, "a"), wt(repo, "b")
+        start(db, "s1", a, T)
+        (repo / "SWARM_BRIEF.md").write_text("Nothing to do here.\n")
+        (b / "SWARM_BRIEF.md").write_text("Slice of ABC-101.\n")
+        start(db, "w1", repo, T + MIN)
+        tool_ok(db, "w1", repo, T + 2 * MIN, "Bash", {"command": f"cd {b} && cat SWARM_BRIEF.md"}, "t1")
+        (_, _, records, detail), = delivered(db, "brief_file")
+        assert detail["tickets"] == ["ABC-101"] and records == [session_record(db, "s1")[0]]
 
     def test_whoever_wrote_a_brief_file_is_not_a_holder_of_it(self, db, repo):
         tool_ok(db, "lead", repo, T, "Write", {"file_path": str(repo / "EPIC_BRIEF.md"), "content": "x"}, "t1")
@@ -542,13 +571,17 @@ class TestSafety:
         """Review finding: signatures skipped the redaction the error head got,
         and both are stored, linked and printed. The secrets are letters only,
         so normalising digits cannot hide a leak."""
-        secrets = ("hunterpw", "zxcvbnmasd", "qwertyui")
+        secrets = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "quixotic", "flumph",
+                   "wibblewobble")
         errors = ["Exit code 1\nerror: authentication failed password=hunterpw for user app",
                   "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
-                  "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main"]
+                  "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
+                  'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
+                  'Exit code 1\nerror: login failed password="zorblax quixotic flumph" for app',
+                  "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set"]
         for n, err in enumerate(errors):
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(3,)]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(6,)]
         stored = "\n".join(str(row) for table in ("event", "record", "link")
                            for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (stored + report.build(db)).lower()

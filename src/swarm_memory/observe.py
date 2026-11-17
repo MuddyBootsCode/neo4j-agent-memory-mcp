@@ -333,12 +333,18 @@ def _same_file_edit(con, call: Call, files, ts: float) -> None:
 
 
 def _resolve(con, call: Call, desc: dict, ts: float) -> int:
+    """Resolve open failures of the same kind in this session. Like the
+    replay's ``first_resolution``, a success counts only if it began after the
+    failure came back: a concurrent call that started first is not the way
+    past it. The start is the result time less ``duration_ms``."""
+    duration = call.payload.get("duration_ms")
+    started = ts - duration / 1000.0 if isinstance(duration, (int, float)) and duration > 0 else ts
     rows = con.execute(
-        "SELECT id, tool, info FROM record WHERE kind = 'failure' AND status = 'open' AND session_id = ?",
+        "SELECT id, tool, info, ts FROM record WHERE kind = 'failure' AND status = 'open' AND session_id = ?",
         (call.sid,)).fetchall()
     resolved = 0
-    for fid, tool, info in rows:
-        if tool != call.tool:
+    for fid, tool, info, failed_at in rows:
+        if tool != call.tool or failed_at > started:
             continue
         fi = json.loads(info) if info else {}
         if call.tool in rules.SHELL_TOOLS:
