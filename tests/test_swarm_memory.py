@@ -7,6 +7,7 @@ pinned on a small case, against a real git repo with two linked worktrees.
 import io
 import json
 import os
+import re
 import sqlite3
 import stat
 import subprocess
@@ -167,6 +168,7 @@ class TestReplayParity:
         "Exit code 1\nError: Cannot find module 'express'",
         "Exit code 2\nmake: *** [build] Error 2",
         "Permission for this action was denied",
+        "Exit code 1\nerror: login failed password=hunterpw for user app",
     ]
     COMMANDS = [
         "cd src && uv run pytest tests/test_x.py -q",
@@ -223,11 +225,6 @@ class TestReplayParity:
             assert rules.failure_kind(text) == replay.failure_kind(text), text
         for cmd in self.COMMANDS:
             assert rules.cmd_prefix(cmd) == replay.cmd_prefix(cmd), cmd
-
-    def test_a_long_token_is_scrubbed_out_of_a_signature(self):
-        token = "sk-" + "ant-" + "api03-" + "AbCdEfGhIjKlMnOpQrStUvWxYz"  # built from parts: no key-shaped literal
-        sig = rules.failure_signature(f"Exit code 1\nerror: invalid api key {token} for this request")
-        assert sig and "<tok>" in sig and token.lower() not in sig
 
 
 class TestCommandFiles:
@@ -413,17 +410,17 @@ class TestSession:
 
 
 class TestFailures:
-    def test_a_failure_keeps_program_signature_exit_and_a_redacted_head(self, db, repo):
+    def test_a_failure_keeps_program_exit_kind_and_a_keyed_signature_hash(self, db, repo):
         cmd = "psql postgresql://app:hunter2pw@db.internal/main -c 'select 1'"
-        err = ("Exit code 2\npsql: error: connection to server failed: password=hunter2pw for user app\n"
-               "token abcdefghijklmnopqrstuvwxyz0123456789 mail ops@example.com")
+        err = "Exit code 2\npsql: error: connection to server failed: password=hunter2pw for user app"
         tool_fail(db, "s1", repo, T, "Bash", {"command": cmd}, err, "t1")
         (rid, action, status, info), = q(db, "SELECT id, action, status, info FROM record WHERE kind = 'failure'")
         info = json.loads(info)
         assert action == "command or tool failure" and status == "open"
-        assert info["program"] == "psql" and info["exit"] == 2 and info["sig"]
-        assert "hunter2pw" not in info["head"] and "<redacted>" in info["head"]
-        assert links(db, rid, "signature") == [info["sig"]]
+        assert info["program"] == "psql" and info["exit"] == 2 and "head" not in info and "sig" not in info
+        with open(store.key_path(db), "rb") as fh:
+            assert info["sig_hash"] == store.signature_hash(fh.read(), replay.failure_signature(err))
+        assert links(db, rid, "signature") == [info["sig_hash"]]
         assert links(db, rid, "program") == ["psql"]
 
     def test_a_later_success_with_the_same_command_prefix_resolves_it(self, db, repo):
@@ -724,85 +721,120 @@ class TestSafety:
         assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
         assert q(db, "PRAGMA journal_mode") == [("wal",)]
 
-    def test_credentials_reach_no_stored_field_and_no_report(self, db, repo):
-        """Review finding: signatures skipped the redaction the error head got,
-        and both are stored, linked and printed. The secrets are letters only,
-        so normalising digits cannot hide a leak."""
-        secrets = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "quixotic", "flumph",
-                   "wibblewobble", "dxnlcmfkbwluagvyzq", "ploverpw", "fizzle", "wobblegong")
-        errors = ["Exit code 1\nerror: authentication failed password=hunterpw for user app",
-                  "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
-                  "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
-                  'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
-                  'Exit code 1\nerror: login failed password="zorblax quixotic flumph" for app',
-                  "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set",
-                  "Exit code 1\nerror: proxy said 407 for Authorization: Basic dXNlcmFkbWluaGVyZQ today",
-                  "Exit code 1\nerror: dbcli --password ploverpw failed to connect",
-                  'Exit code 1\nerror: sync --api-key "fizzle wobblegong" refused by the server']
+    def test_no_part_of_a_failed_calls_output_reaches_the_store_or_report(self, db, repo):
+        """The store keeps a failed call's exit code, kind and a keyed hash of
+        its signature, and no text from its output. Each error is a shape that
+        a stored head or signature once leaked; none of its made-up words may
+        appear in the store, the links or the report."""
+        words = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "wibblewobble", "ploverpw",
+                 "wobblegong", "snorkelpw", "snorkeltok", "elauth", "blorptastic", "frobnicate", "grommetpw",
+                 "quibbleish", "escapedpw", "zqvmarker", "longtokenab")
+        errors = [
+            "Exit code 1\nerror: zqvmarker authentication failed password=hunterpw for user app",
+            "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
+            "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
+            'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
+            'Exit code 1\nerror: login failed password="zorblax quixotic" for app',
+            "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set",
+            "Exit code 1\nerror: dbcli --password ploverpw failed to connect",
+            'Exit code 1\nerror: sync --api-key "fizzle wobblegong" refused by the server',
+            'Exit code 1\nerror: bad config {"password":"wobble\\"snorkelpw"} rejected by the server',
+            'Exit code 1\nerror: bad config {\\"api_key\\":\\"glimmer snorkeltok\\"} rejected',
+            'Exit code 1\nerror: header Authorization: "Basic snork\\"elauth" was refused today',
+            "Exit code 22\nerror: curl --user app:blorptastic https://api.internal failed",
+            "Exit code 22\nerror: curl -uapp:frobnicate -X POST https://api.internal failed",
+            "Exit code 1\nerror: login --password 'prefix'\\''grommetpw' was refused",
+            "Exit code 1\nfatal: could not connect to https://app:snork@quibbleish@db.internal/main",
+            "Exit code 1\nerror: login --password prefix\\ escapedpw failed",
+            "Exit code 1\nerror: invalid api key " + "longtoken" + "Ab" * 12 + " for this request",
+        ]
         for n, err in enumerate(errors):
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(9,)]
+        infos = [json.loads(i) for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure'")]
+        assert len(infos) == len(errors)
+        assert all(set(i) <= {"exit", "sig_hash", "program", "prefix_key", "file", "where"} for i in infos)
+        keys = q(db, "SELECT key FROM link WHERE type = 'signature'")
+        assert len(keys) == sum(replay.failure_signature(e) is not None for e in errors)
+        assert all(re.fullmatch(r"[0-9a-f]{32}", k) for (k,) in keys)
         stored = "\n".join(str(row) for table in ("event", "record", "link")
                            for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (stored + report.build(db)).lower()
-        for secret in secrets:
-            assert secret not in text
+        for word in words:
+            assert word not in text, word
 
-    def test_escaped_quotes_leave_no_part_of_a_credential(self, db, repo):
-        """Review finding: a quoted value stopped at an escaped quote, so
-        {"password":"prefix\\"hunterpw"} kept hunterpw."""
-        secrets = ("snorkelpw", "snorkeltok", "glimmer", "snorkelflag", "elauth", "neverclosed")
-        errors = ['Exit code 1\nerror: bad config {"password":"wobble\\"snorkelpw"} rejected by the server',
-                  'Exit code 1\nerror: bad config {\\"api_key\\":\\"glimmer snorkeltok\\"} rejected',
-                  'Exit code 1\nerror: login --password "fizz\\"snorkelflag" was refused by the server',
-                  'Exit code 1\nerror: header Authorization: "Basic snork\\"elauth" was refused today',
-                  'Exit code 1\nerror: unterminated password="quote neverclosed by the caller']
-        for n, err in enumerate(errors):
-            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        stored = "\n".join(str(row) for table in ("event", "record", "link")
-                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
-        text = (stored + report.build(db)).lower()
-        for secret in secrets:
-            assert secret not in text
+    def test_the_signature_key_is_made_once_private_and_repeats_match(self, db, repo):
+        err = "Exit code 2\nmake: *** [build] Error 2"
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, err, "t1")
+        tool_fail(db, "s2", repo, T + 1, "Bash", {"command": "make build"}, err, "t2")
+        key_file = store.key_path(db)
+        assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600 and os.path.getsize(key_file) == store.KEY_BYTES
+        with open(key_file, "rb") as fh:
+            expected = store.signature_hash(fh.read(), replay.failure_signature(err))
+        assert q(db, "SELECT key FROM link WHERE type = 'signature'") == [(expected,), (expected,)]
 
-    def test_a_credential_that_may_not_be_redacted_whole_drops_its_line(self, db, repo):
-        """Review finding: in --password 'prefix'\\''secret' only 'prefix' was
-        redacted. Fail closed: a line whose value may run on past the match is
-        dropped from the head and gives no signature."""
-        secrets = ("grommetpw", "fluxwidget", "snorkpass", "quibbleish")
-        errors = ["Exit code 1\nerror: login --password 'prefix'\\''grommetpw' was refused",
-                  "Exit code 1\nerror: dbcli --password \"a\"'fluxwidget' failed to connect",
-                  "Exit code 1\nfatal: could not connect to https://app:snorkpass@quibbleish@db.internal/main"]
-        for n, err in enumerate(errors):
-            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        heads = [json.loads(i)["head"] for (i,) in q(db, "SELECT info FROM record WHERE kind = 'failure' ORDER BY id")]
-        assert heads[:2] == [rules.REDACTED_TEXT, rules.REDACTED_TEXT]
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(1,)]
-        stored = "\n".join(str(row) for table in ("event", "record", "link")
-                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
-        text = (stored + report.build(db)).lower()
-        for secret in secrets:
-            assert secret not in text
-        head = rules.error_head("Exit code 1\nfirst line\nerror: --password 'a'\\''grommetpw' refused\nlast line")
-        assert head == f"first line {rules.REDACTED_TEXT} last line"
+    def test_a_missing_key_makes_a_new_one_and_logs_it(self, db, repo):
+        """Hashes made under a lost key no longer match new ones, so the new key
+        is logged with the number of hashes made before it."""
+        err = "Exit code 2\nmake: *** [build] Error 2"
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, err, "t1")
+        os.remove(store.key_path(db))
+        tool_fail(db, "s1", repo, T + 1, "Bash", {"command": "make build"}, err, "t2")
+        (a,), (b,) = q(db, "SELECT key FROM link WHERE type = 'signature' ORDER BY record_id")
+        assert a != b
+        (detail,), = q(db, "SELECT detail FROM event WHERE kind = 'signature_key_new'")
+        assert json.loads(detail) == {"earlier_signatures": 1}
 
-    def test_curl_user_credentials_reach_no_stored_field_and_no_report(self, db, repo):
-        """Review finding: an echoed ``curl -u app:password`` kept the password."""
-        secrets = ("blorptastic", "frobnicate", "glorbish", "quuxly", "zibble", "zabble", "snorfle")
-        errors = ["Exit code 22\nerror: curl --user app:blorptastic https://api.internal failed",
-                  "Exit code 22\n+ curl -u app:frobnicate https://api.internal\ncurl: (22) error 401",
-                  "Exit code 22\nerror: curl -uapp:glorbish -X POST https://api.internal failed",
-                  "Exit code 22\nerror: curl --proxy-user=proxy:quuxly https://api.internal failed",
-                  'Exit code 22\nerror: curl -U "proxy:zibble zabble" https://api.internal failed',
-                  "Exit code 1\nerror: wget --user=app:snorfle failed to connect"]
-        for n, err in enumerate(errors):
-            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        stored = "\n".join(str(row) for table in ("event", "record", "link")
-                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
-        text = (stored + report.build(db)).lower()
-        for secret in secrets:
-            assert secret not in text
-        assert rules.redact("error: git push -u origin main failed") == "error: git push -u origin main failed"
+    def test_a_key_file_of_the_wrong_size_is_an_error_and_is_kept(self, db, repo):
+        start(db, "s1", repo, T)
+        with open(store.key_path(db), "wb") as fh:
+            fh.write(b"short")
+        tool_fail(db, "s1", repo, T + 1, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",
+                  "t1")
+        assert [json.loads(d)["type"] for (d,) in q(db, "SELECT detail FROM event WHERE kind = 'hook_error'")] == [
+            "ValueError"]
+        with open(store.key_path(db), "rb") as fh:
+            assert fh.read() == b"short"
+
+    def test_a_version_1_store_is_migrated_to_hash_only_once(self, db):
+        """Version 1 kept a redacted error head and the signature text. Opening
+        it with this code hashes the signature in the record and the link and
+        drops the head. A record already without text is left as it is."""
+        old_sig = "error: login failed for user <q>"
+        con = sqlite3.connect(db, isolation_level=None)
+        con.executescript(store.SCHEMA)
+        con.execute("PRAGMA user_version=1")
+        rows = [(1, {"head": "error: login failed for user 'zorkquill'", "sig": old_sig, "exit": 1,
+                     "program": "login"}),
+                (2, {"exit": 2, "program": "make"}),
+                (3, {"sig_hash": "0" * 32, "exit": 1, "program": "make"})]
+        for rid, info in rows:
+            con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, status, tool_use_id, info)"
+                        " VALUES (?, 'failure', ?, 's1', 'Bash', 'command or tool failure', 'open', ?, ?)",
+                        (rid, T, f"t{rid}", json.dumps(info)))
+        con.execute("INSERT INTO link VALUES (1, 'signature', ?, ?)", (old_sig, T))
+        con.execute("INSERT INTO link VALUES (3, 'signature', ?, ?)", ("0" * 32, T))
+        con.close()
+        store.connect(db).close()
+        with open(store.key_path(db), "rb") as fh:
+            new = store.signature_hash(fh.read(), old_sig)
+        assert {rid: json.loads(i) for rid, i in q(db, "SELECT id, info FROM record ORDER BY id")} == {
+            1: {"sig_hash": new, "exit": 1, "program": "login"}, 2: {"exit": 2, "program": "make"},
+            3: {"sig_hash": "0" * 32, "exit": 1, "program": "make"}}
+        assert q(db, "SELECT record_id, key FROM link ORDER BY record_id") == [(1, new), (3, "0" * 32)]
+        assert q(db, "PRAGMA user_version") == [(2,)]
+        con = sqlite3.connect(db, isolation_level=None)
+        assert store.migrate_to_hash_only(con, db) == {}
+        con.close()
+        dump = "\n".join(str(row) for table in ("event", "record", "link")
+                         for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        assert "zorkquill" not in dump and "login failed" not in dump
+
+    def test_the_report_shows_a_short_hash_and_the_tool_use_id(self, db, repo):
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2",
+                  "toolu_x1")
+        (sig,), = q(db, "SELECT key FROM link WHERE type = 'signature'")
+        out = report.build(db)
+        assert "toolu_x1" in out and sig[:12] in out and sig not in out and "make: ***" not in out
 
     def test_no_prompt_command_or_output_text_is_stored(self, db, repo):
         start(db, "s1", repo, T)
@@ -815,4 +847,4 @@ class TestSafety:
                          for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         for word in ("zebraprompt", "zebracommand", "zebraoutput", "zebrafail"):
             assert word not in dump
-        assert "zebraerrortail " * 12 not in dump  # 180 characters: longer than the head or the signature
+        assert "zebraerrortail" not in dump

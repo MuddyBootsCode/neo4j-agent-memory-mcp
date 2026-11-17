@@ -5,7 +5,7 @@ old package and would cost startup time on every tool call. The functions here
 are copies, and ``tests/test_swarm_memory.py`` checks them against the replay on
 the same inputs so the two cannot drift apart.
 
-Four rules differ from the replay, each because the hook runs live:
+Three rules differ from the replay, each because the hook runs live:
 
 * A file counts when it exists on disk now. The replay checked ``git ls-files``
   plus history.
@@ -14,11 +14,9 @@ Four rules differ from the replay, each because the hook runs live:
 * In a shell command, each segment's relative paths resolve from the directory
   a ``cd`` earlier in the command moved to, as the shell would. The replay
   could only match such a path as a unique suffix.
-* The diagnostic line is passed through ``redact()`` before it is normalised,
-  and the signature through ``scrub()`` after, so neither a credential nor a
-  long token reaches the store. That changes a signature only when its error
-  line holds a credential, or a token of 24 or more letters, digits, ``_`` or
-  ``-``.
+
+The failure signature is the replay's, unchanged. The store keeps only its
+keyed hash (``store.signature_hash``), so no text from a tool's output is kept.
 """
 
 from __future__ import annotations
@@ -562,18 +560,13 @@ def scrub(text: str) -> str:
 
 
 def failure_signature(error_text: str) -> str | None:
-    """The F4 signature of a failed call's output, or None for F4 noise. The
-    diagnostic line is redacted before it is normalised, because the signature
-    is stored and printed like the error head. A line whose credential may
-    not be redacted whole gives no signature."""
+    """The F4 signature of a failed call's output, or None for F4 noise: the
+    replay's rule, unchanged. The store keeps only its keyed hash."""
     ln = diag_line(error_text or "")
     if not ln or NOISE.search(ln):
         return None
-    red = redact(ln)
-    if red == REDACTED_TEXT:
-        return None
-    sig = norm(red)
-    return scrub(sig) if len(sig) >= 15 else None
+    sig = norm(ln)
+    return sig if len(sig) >= 15 else None
 
 
 _HOOK_BLOCK = re.compile(r"(?i)(?:pre|post)tooluse(?::[\w*]+)? hook (?:error|blocked)|\bhook\b.{0,40}\b(?:blocked|denied)")
@@ -590,83 +583,9 @@ def failure_kind(error_text: str) -> str:
 
 
 _EXIT_LINE = re.compile(r"^\s*exit code (-?\d+)\s*$", re.I)
-# A quoted value, also inside escaped JSON (\"...\"), runs past escaped quotes
-# to its closing quote, or to the end of the text when it never closes, so no
-# part of a credential is left behind.
-_QUOTED = r"\\*\"(?:[^\"\\]|\\.)*(?:\"|\Z)|\\*'(?:[^'\\]|\\.)*(?:'|\Z)"
-# The key may carry a prefix (PGPASSWORD, db_password, client_secret) or a
-# closing quote, escaped or not ("password": ..., \"password\": ...).
-_SECRET_VALUE = re.compile(
-    r"(?i)([\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization))"
-    r"(\\*['\"]?\s*[=:]\s*)(" + _QUOTED + r"|\S+)")
-_BEARER = re.compile(r"(?i)\bbearer\s+\S+")
-# A credential passed as a command flag with a space, as echoed in an error:
-# --password <value>, --api-key "<value>". Only flags, so prose is left alone.
-_SECRET_FLAG = re.compile(
-    r"(?i)(--?[\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\s+)(" + _QUOTED + r"|\S+)")
-# The whole Authorization value, scheme and credential: Basic, Bearer or other.
-_AUTH_VALUE = re.compile(
-    r"(?i)(authorization\\*['\"]?\s*[=:]\s*)(" + _QUOTED + r"|(?:[A-Za-z][\w-]*\s+)?\S+)")
-# user:password after curl's -u/--user or -U/--proxy-user, attached or not. A
-# bare value needs the colon, so git push -u origin and python -u keep theirs.
-_USER_FLAG = re.compile(r"(?<![\w-])(--(?:proxy-)?user(?:=|\s+)|-[uU]\s*)(" + _QUOTED + r"|[^\s:'\"]+:\S+)")
-# The userinfo runs to the last @ before the host, so a password holding @ goes whole.
-_URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]*:[^/\s]*@", re.I)
-HEAD_CHARS = 160
-# A redaction is whole when each matched value ends where its argument ends:
-# whitespace, a comma or closing bracket, or the end of the text. A quote,
-# backslash or letter right after it means the shell argument goes on
-# ('a'\''b', "a"b), so part of the credential may follow.
-_VALUE_END = re.compile(r"[\s,;)\]}>]|\Z")
-_VALUE_PATTERNS = (_AUTH_VALUE, _SECRET_FLAG, _USER_FLAG, _SECRET_VALUE)
-REDACTED_TEXT = "<line with a credential removed>"
 
 
 def exit_code(error_text: str) -> int | None:
     first = (error_text or "").lstrip().split("\n", 1)[0]
     m = _EXIT_LINE.match(first)
     return int(m.group(1)) if m else None
-
-
-def redaction_is_whole(text: str) -> bool:
-    """False when a credential pattern matched a value that may run on past
-    the match, so redacting the match could leave part of the secret."""
-    return all(_VALUE_END.match(text, m.end()) for p in _VALUE_PATTERNS for m in p.finditer(text))
-
-
-def redact(text: str) -> str:
-    """Credentials replaced: ``user:password@`` in URLs, the whole
-    ``Authorization`` value whatever its scheme, the value after a flag such
-    as ``--password``, ``user:password`` after ``curl -u``, Bearer tokens,
-    and the value after ``password=``, ``token:`` and similar keys. It fails
-    closed: when a matched value may run on past the match, the whole text
-    becomes ``REDACTED_TEXT``."""
-    if not redaction_is_whole(text):
-        return REDACTED_TEXT
-    text = _URL_CREDENTIALS.sub(r"\1<redacted>@", text)
-    text = _AUTH_VALUE.sub(lambda m: m.group(1) + "<redacted>", text)
-    text = _SECRET_FLAG.sub(lambda m: m.group(1) + "<redacted>", text)
-    text = _USER_FLAG.sub(lambda m: m.group(1) + "<redacted>", text)
-    text = _BEARER.sub("bearer <redacted>", text)
-    return _SECRET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", text)
-
-
-def error_head(error_text: str, limit: int = HEAD_CHARS) -> str:
-    """A short redacted head of a failed call's output: the ``Exit code`` line
-    dropped, whitespace flattened, the home directory shortened to ``~``, and
-    credentials, long tokens and emails replaced. A line whose credential
-    may not be redacted whole is replaced by ``REDACTED_TEXT``."""
-    lines = [ln for ln in (error_text or "").splitlines() if ln.strip()]
-    if lines and _EXIT_LINE.match(lines[0]):
-        lines = lines[1:]
-    kept, size = [], 0
-    for ln in lines:
-        if size > limit * 3:
-            break
-        kept.append(ln if redaction_is_whole(ln) else REDACTED_TEXT)
-        size += len(ln) + 1
-    head = " ".join(" ".join(kept).split())[: limit * 3]
-    home = os.path.expanduser("~")
-    if home and home != "/":
-        head = head.replace(home, "~")
-    return scrub(redact(head))[:limit]

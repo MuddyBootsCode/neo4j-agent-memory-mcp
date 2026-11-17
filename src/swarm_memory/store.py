@@ -11,9 +11,16 @@ Three tables (MUD-850 "Data store"):
   and ``failure`` (a failed tool call and its resolution).
 * ``link``: record to the objects it is about, by type and key: ``repo`` (git
   common dir), ``worktree``, ``file`` (``<repo>::<repo-relative path>``),
-  ``program``, ``signature``, ``ticket`` and ``session``, plus
+  ``program``, ``signature`` (the keyed hash), ``ticket`` and ``session``, plus
   ``touched_repo`` from a session to a repo it touched from outside it. ``ts`` copies the
   record's time so a lookup by key can range on time. This table is the graph.
+
+No text from a tool's output is stored. A failure keeps its signature only as
+an HMAC under a random key kept beside the store (``<store>.key``, mode 0600),
+so repeats still match and the hash cannot be checked against a guess. If the
+key file goes missing while the store holds hashes, the next failure makes a
+new key and logs a ``signature_key_new`` event: hashes from before it no longer
+match those after it.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
 lock up front; if it is not free within ``BUSY_TIMEOUT_MS`` the hook skips and
@@ -22,6 +29,8 @@ counts the skip in a side file, so it never holds up a tool call.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -32,7 +41,7 @@ from swarm_memory import rules
 ENV_DB = "SWARM_MEMORY_DB"
 DEFAULT_DB = os.path.join(os.path.expanduser("~"), ".local", "share", "swarm-memory", "observe.sqlite3")
 BUSY_TIMEOUT_MS = 100
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: a failure keeps only a keyed hash of its signature
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS event (
@@ -110,6 +119,99 @@ def ticket_keys(db: str) -> tuple:
     return rules.parse_ticket_keys(data.get("ticket_keys") if isinstance(data, dict) else None)
 
 
+KEY_BYTES = 32
+
+
+def key_path(db: str) -> str:
+    """The signature key beside the store: ``<store>.key``, mode 0600."""
+    return f"{db}.key"
+
+
+def signature_key(db: str) -> tuple[bytes, bool]:
+    """The store's key for signature hashes, and whether this call made it.
+
+    The key is made on first use from ``os.urandom`` and kept for the life
+    of the store, so a signature always gives the same hash and repeats
+    match. It is written to a temporary file and linked into place, so
+    hooks that race to make it all end up with the one that won. A key file
+    of the wrong size raises rather than being replaced."""
+    path = key_path(db)
+    try:
+        with open(path, "rb") as fh:
+            key = fh.read()
+    except FileNotFoundError:
+        key = None
+    if key is not None:
+        if len(key) != KEY_BYTES:
+            raise ValueError(f"signature key {path} is {len(key)} bytes, not {KEY_BYTES}")
+        return key, False
+    tmp = f"{path}.{os.getpid()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(fd, os.urandom(KEY_BYTES))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.link(tmp, path)
+        made = True
+    except FileExistsError:
+        made = False
+    finally:
+        os.unlink(tmp)
+    with open(path, "rb") as fh:
+        return fh.read(), made
+
+
+def signature_hash(key: bytes, signature: str) -> str:
+    """The keyed hash a failure's signature is stored as: HMAC-SHA256, 32 hex
+    characters. Without the key it cannot be checked against a guess."""
+    return hmac.new(key, signature.encode("utf-8", "replace"), hashlib.sha256).hexdigest()[:32]
+
+
+def _is_hash(key: str) -> bool:
+    return len(key) == 32 and all(c in "0123456789abcdef" for c in key)
+
+
+def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
+    """Schema version 1 to 2. Version 1 kept failure text: a redacted error
+    head, and the signature in the record and as the signature link's key.
+    Version 2 keeps only the signature's keyed hash, in both places.
+
+    It runs in one write transaction and only while the store is still at
+    version 1, so hooks that race to open the store migrate it once. A
+    record or link already without text is left as it is. Returns counts."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        if con.execute("PRAGMA user_version").fetchone()[0] != 1:
+            con.execute("ROLLBACK")
+            return {}
+        key, _made = signature_key(db)
+        counts = {"failures": 0, "signatures_hashed": 0, "heads_dropped": 0, "links_hashed": 0}
+        for rid, info in con.execute("SELECT id, info FROM record WHERE kind = 'failure'").fetchall():
+            counts["failures"] += 1
+            data = json.loads(info) if info else {}
+            if "sig" not in data and "head" not in data:
+                continue
+            sig = data.pop("sig", None)
+            counts["heads_dropped"] += data.pop("head", None) is not None
+            if isinstance(sig, str) and sig:
+                data["sig_hash"] = signature_hash(key, sig)
+                counts["signatures_hashed"] += 1
+            con.execute("UPDATE record SET info = ? WHERE id = ?", (_json(data or None), rid))
+        for rid, text in con.execute("SELECT record_id, key FROM link WHERE type = 'signature'").fetchall():
+            if not _is_hash(text):
+                con.execute("UPDATE link SET key = ? WHERE record_id = ? AND type = 'signature' AND key = ?",
+                            (signature_hash(key, text), rid, text))
+                counts["links_hashed"] += 1
+        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        con.execute("COMMIT")
+        return counts
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
 def connect(path: str) -> sqlite3.Connection:
     """Open the store, creating it (mode 0600) and its schema on first use."""
     folder = os.path.dirname(path)
@@ -120,11 +222,15 @@ def connect(path: str) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
-    if con.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+    version = con.execute("PRAGMA user_version").fetchone()[0]
+    if version != SCHEMA_VERSION:
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
-            con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            if version == 1:
+                migrate_to_hash_only(con, path)
+            else:
+                con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         except sqlite3.OperationalError as exc:
             con.close()
             if _is_busy(exc):

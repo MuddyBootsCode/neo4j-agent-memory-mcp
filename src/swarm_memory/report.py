@@ -84,7 +84,7 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
         return ", ".join(k.split("::", 1)[1] for k in links[rid]["file"])
 
     sessions, activity, failures = [], [], []
-    for rid, kind, ts, ts_end, sid, agent, tool, action, status, _tuid, info in rec.values():
+    for rid, kind, ts, ts_end, sid, agent, tool, action, status, tuid, info in rec.values():
         info = json.loads(info) if info else {}
         if kind == "session":
             wts = [os.path.basename(w) for w in links[rid]["worktree"]]
@@ -96,8 +96,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
             activity.append((rid, _clock(ts), _short(sid), _short(agent), tool, action, files_of(rid), info.get("program")))
         elif kind == "failure":
             after = round(ts_end - ts, 1) if status == "resolved" and ts_end else None
-            failures.append((rid, _clock(ts), _short(sid), tool, info.get("program"), action, info.get("exit"),
-                             info.get("sig"), info.get("head"), status, after))
+            sig_hash = info.get("sig_hash")
+            failures.append((rid, _clock(ts), sid, tuid, tool, info.get("program"), action, info.get("exit"),
+                             sig_hash[:12] if sig_hash else None, status, after))
 
     def describe(rid):
         r = rec.get(rid)
@@ -131,8 +132,9 @@ def build(db: str, minutes: float | None = None, debug_logs=()) -> str:
     out.append(_table("Sessions", ["session", "repo (cwd)", "worktree", "touched repos", "branch", "ticket",
                                    "first seen", "last seen", "status"], sessions))
     out.append(_table("Activity", ["record", "time", "session", "subagent", "tool", "action", "files", "program"], activity))
-    out.append(_table("Failures", ["record", "time", "session", "tool", "program", "kind", "exit", "signature",
-                                   "error head", "status", "resolved after s"], failures))
+    out.append(_table("Failures (the store keeps no error text: find one in its session's transcript by tool_use_id)",
+                      ["record", "time", "session", "tool_use_id", "tool", "program", "kind", "exit",
+                       "signature hash", "status", "resolved after s"], failures))
     out.append(_table("Would deliver", ["time", "moment", "session", "would show", "detail"], deliver))
     out.append(_table("Hook time in the hook process (ms, from start of hook.py to commit)",
                       ["hook", "n", "p50", "p95", "max"],

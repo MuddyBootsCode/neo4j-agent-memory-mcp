@@ -17,10 +17,11 @@ Records
   shell command that names repo files is ``mention``, because the command does
   not say whether it read or wrote them (D18). Links: session, repo, worktree,
   each file, and the program for a shell command.
-* ``failure``: one per failed tool call, with the F4 signature, the program, the
-  exit code and a redacted head of the error. It is resolved when a later call in
-  the same session succeeds with the same command prefix, or with the same tool
-  on the same file (replay rule). Interrupts are not failures.
+* ``failure``: one per failed tool call, with the program, the exit code, the
+  kind, and the F4 signature only as a keyed hash. It is resolved when a later
+  call in the same session succeeds with the same command in the same
+  directory, or with the same tool on the same file (replay rule). Interrupts
+  are not failures.
 
 Would deliver (one ``event`` row each, naming the records it would have shown)
 
@@ -36,7 +37,8 @@ Would deliver (one ``event`` row each, naming the records it would have shown)
   within 60 minutes, once per session, file and other session.
 
 Never stored: command text, prompt text, tool output. The store keeps the
-program, repo-relative paths, the signature and a short redacted error head.
+program, repo-relative paths, and as keyed or plain hashes the command, the
+directory it ran in, a failed call's file, and its error signature.
 """
 
 from __future__ import annotations
@@ -71,7 +73,7 @@ def run(raw: str, db_arg: str | None = None, t0: float | None = None, ts: float 
         session_id = payload.get("session_id")
         con = store.connect(path)
         try:
-            handle(con, payload, ts, t0, store.ticket_keys(path))
+            handle(con, payload, ts, t0, store.ticket_keys(path), db=path)
         finally:
             con.close()
     except store.Busy:
@@ -105,9 +107,10 @@ def _record_error(path, ts, hook, session_id, exc) -> None:
 class Call:
     """The parts of a hook payload the handlers read."""
 
-    def __init__(self, payload: dict, keys=()):
+    def __init__(self, payload: dict, keys=(), db: str = ""):
         self.payload = payload
         self.keys = tuple(keys)
+        self.db = db
         self.hook = payload.get("hook_event_name")
         self.sid = payload.get("session_id")
         cwd = payload.get("cwd")
@@ -123,8 +126,8 @@ class Call:
         self.dedupe = None
 
 
-def handle(con, payload: dict, ts: float, t0: float, keys=()) -> None:
-    call = Call(payload, keys)
+def handle(con, payload: dict, ts: float, t0: float, keys=(), db: str = "") -> None:
+    call = Call(payload, keys, db)
     if call.hook not in HOOKS or not isinstance(call.sid, str) or not call.sid:
         return
     store.begin(con)
@@ -395,17 +398,30 @@ def _on_tool_failure(con, call: Call, session, ts: float) -> dict:
     err = err if isinstance(err, str) else ""
     desc = _describe(call)
     sig = rules.failure_signature(err)
-    info = {"head": rules.error_head(err), "exit": rules.exit_code(err), "sig": sig, "program": desc["program"],
+    sig_hash = None
+    if sig and call.db:
+        key, made = store.signature_key(call.db)
+        sig_hash = store.signature_hash(key, sig)
+        earlier = con.execute("SELECT count(*) FROM link WHERE type = 'signature' AND length(key) = 32"
+                              " AND key NOT GLOB '*[^0-9a-f]*'").fetchone()[0] if made else 0
+        if earlier:
+            # The key file was gone while the store held hashes made with it:
+            # those hashes no longer match new ones.
+            store.log_event(con, "signature_key_new", ts, hook=call.hook, session_id=call.sid,
+                            detail={"earlier_signatures": earlier})
+    # No text from the output is kept: the exit code, the kind, and the
+    # signature only as a keyed hash.
+    info = {"exit": rules.exit_code(err), "sig_hash": sig_hash, "program": desc["program"],
             "prefix_key": desc["prefix_key"], "file": desc["file"], "where": desc["where"]}
     frid = store.add_record(con, "failure", ts, call.sid, agent_id=call.agent_id, tool=call.tool,
                             action=rules.failure_kind(err), status="open", tool_use_id=call.tool_use_id,
                             info={k: v for k, v in info.items() if v is not None})
     if frid:
-        pairs = _links(call, desc) + [("signature", sig)]
+        pairs = _links(call, desc) + [("signature", sig_hash)]
         if not desc["files"] and loc:
             pairs += [("repo", loc[0]), ("worktree", os.path.realpath(loc[2]))]
         store.add_links(con, frid, ts, pairs)
-    return {"failure": 1 if frid else 0, "signature": bool(sig)}
+    return {"failure": 1 if frid else 0, "signature": bool(sig_hash)}
 
 
 # ---------------------------------------------------------------- SessionEnd
