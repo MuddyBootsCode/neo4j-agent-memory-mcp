@@ -52,6 +52,7 @@ ROSTER_LIMIT = 20
 BRIEF_FILES = ("SWARM_BRIEF.md", "EPIC_BRIEF.md")
 BRIEF_MAX_BYTES = 64 * 1024
 HOOKS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure", "SessionEnd")
+TOOL_HOOKS = ("PostToolUse", "PostToolUseFailure")
 
 
 def run(raw: str, db_arg: str | None = None, t0: float | None = None, ts: float | None = None) -> None:
@@ -129,7 +130,13 @@ def handle(con, payload: dict, ts: float, t0: float, keys=()) -> None:
     store.begin(con)
     try:
         session = _ensure_session(con, call, ts)
-        detail = _HANDLERS[call.hook](con, call, session, ts)
+        call_key = f"call|{call.sid}|{call.tool_use_id}" if call.tool_use_id and call.hook in TOOL_HOOKS else None
+        if call_key and con.execute("SELECT 1 FROM event WHERE dedupe = ?", (call_key,)).fetchone():
+            # The same tool call delivered again: nothing it decides may run twice.
+            detail = {"duplicate": True}
+        else:
+            call.dedupe = call.dedupe or call_key
+            detail = _HANDLERS[call.hook](con, call, session, ts)
         store.log_event(con, "observed", ts, hook=call.hook, session_id=call.sid, agent_id=call.agent_id,
                         tool=call.tool, dedupe=call.dedupe, ms=(time.perf_counter() - t0) * 1000,
                         detail={k: v for k, v in detail.items() if v} or None)
@@ -259,7 +266,7 @@ def _brief(con, call: Call, rid: int, desc: dict, ts: float) -> dict:
             text = fh.read(BRIEF_MAX_BYTES).decode("utf-8", "replace")
     except OSError:
         return {}
-    call.dedupe = key
+    store.log_event(con, "mark", ts, hook=call.hook, session_id=call.sid, dedupe=key)
     root = rules.locate(path)
     bases = [os.path.dirname(path)] + ([root[2]] if root else [])
     return {"brief": _holders(con, call, rid, text, bases, ts, "brief_file", "brief")}
@@ -337,6 +344,11 @@ def _resolve(con, call: Call, desc: dict, ts: float) -> int:
     replay's ``first_resolution``, a success counts only if it began after the
     failure came back: a concurrent call that started first is not the way
     past it. The start is the result time less ``duration_ms``."""
+    response = call.payload.get("tool_response")
+    response = response if isinstance(response, dict) else {}
+    if (call.tool_input.get("run_in_background") or response.get("isAsync")
+            or response.get("status") == "async_launched" or response.get("backgroundTaskId")):
+        return 0  # a background launch answers before its work ends: no known outcome
     duration = call.payload.get("duration_ms")
     started = ts - duration / 1000.0 if isinstance(duration, (int, float)) and duration > 0 else ts
     rows = con.execute(

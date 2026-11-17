@@ -468,6 +468,9 @@ _SECRET_VALUE = re.compile(
     r"(?i)([\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization))"
     r"(['\"]?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)")
 _BEARER = re.compile(r"(?i)\bbearer\s+\S+")
+# The whole Authorization value, scheme and credential: Basic, Bearer or other.
+_AUTH_VALUE = re.compile(
+    r"(?i)(authorization['\"]?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|(?:[A-Za-z][\w-]*\s+)?\S+)")
 _URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
 HEAD_CHARS = 160
 
@@ -479,10 +482,11 @@ def exit_code(error_text: str) -> int | None:
 
 
 def redact(text: str) -> str:
-    """Credentials replaced: ``user:password@`` in URLs, Bearer tokens, and the
-    value after ``password=``, ``token:`` and similar. Bearer goes first, so
-    ``Authorization: Bearer <token>`` loses the token too."""
+    """Credentials replaced: ``user:password@`` in URLs, the whole
+    ``Authorization`` value whatever its scheme, Bearer tokens, and the value
+    after ``password=``, ``token:`` and similar keys."""
     text = _URL_CREDENTIALS.sub(r"\1<redacted>@", text)
+    text = _AUTH_VALUE.sub(lambda m: m.group(1) + "<redacted>", text)
     text = _BEARER.sub("bearer <redacted>", text)
     return _SECRET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", text)
 

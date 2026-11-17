@@ -387,6 +387,25 @@ class TestFailures:
         tool_ok(db, "s1", repo, T + 20, "Bash", {"command": "make build"}, "t3", duration_ms=1_000)
         assert q(db, "SELECT status, ts_end FROM record WHERE kind = 'failure'") == [("resolved", T + 20)]
 
+    def test_a_redelivered_success_never_resolves_a_newer_failure(self, db, repo):
+        """Review finding: the same success delivered again ran the resolution
+        again and closed a failure that came after it."""
+        tool_ok(db, "s1", repo, T, "Bash", {"command": "make build"}, "t1")
+        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t2")
+        tool_ok(db, "s1", repo, T + 20, "Bash", {"command": "make build"}, "t1")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        assert q(db, "SELECT count(*) FROM event WHERE kind = 'observed' AND detail LIKE '%duplicate%'") == [(1,)]
+
+    def test_a_background_launch_resolves_nothing(self, db, repo):
+        """The replay's rule: a launch answers before its work ends, so its
+        outcome is unknown."""
+        tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
+        tool_ok(db, "s1", repo, T + 5, "Bash", {"command": "make build", "run_in_background": True}, "t2")
+        tool_ok(db, "s1", repo, T + 6, "Agent", {"prompt": "x"}, "t3", tool_response={"status": "async_launched"})
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 9, "Bash", {"command": "make build"}, "t4")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+
     def test_another_prefix_another_session_or_an_interrupt_does_not_resolve(self, db, repo):
         tool_fail(db, "s1", repo, T, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
         tool_ok(db, "s1", repo, T + 1, "Bash", {"command": "make lint"}, "t2")
@@ -572,16 +591,17 @@ class TestSafety:
         and both are stored, linked and printed. The secrets are letters only,
         so normalising digits cannot hide a leak."""
         secrets = ("hunterpw", "zxcvbnmasd", "qwertyui", "plughxyzzy", "zorblax", "quixotic", "flumph",
-                   "wibblewobble")
+                   "wibblewobble", "dxnlcmfkbwluagvyzq")
         errors = ["Exit code 1\nerror: authentication failed password=hunterpw for user app",
                   "Exit code 22\ncurl: error 401 with Authorization: Bearer zxcvbnmasd for the api",
                   "Exit code 2\nfatal: could not connect to postgresql://app:qwertyui@db.internal/main",
                   'Exit code 1\nerror: invalid config {"password": "plughxyzzy", "user": "app"}',
                   'Exit code 1\nerror: login failed password="zorblax quixotic flumph" for app',
-                  "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set"]
+                  "Exit code 1\nerror: connection failed with PGPASSWORD=wibblewobble set",
+                  "Exit code 1\nerror: proxy said 407 for Authorization: Basic dXNlcmFkbWluaGVyZQ today"]
         for n, err in enumerate(errors):
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
-        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(6,)]
+        assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(7,)]
         stored = "\n".join(str(row) for table in ("event", "record", "link")
                            for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (stored + report.build(db)).lower()
