@@ -813,12 +813,12 @@ class TestSafety:
             con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, tool_use_id, info)"
                         " VALUES (?, ?, ?, 's1', ?, ?, ?, ?)",
                         (rid, kind, T + rid, tool, action, tuid, json.dumps(info) if info else None))
-        links = [(1, "session", "s1"), (1, "repo", key), (1, "worktree", root), (1, "touched_repo", okey),
-                 (2, "session", "s1"), (2, "repo", okey), (2, "worktree", oroot), (2, "file", f"{okey}::x.py"),
-                 (2, "program", "zorkprog"), (3, "session", "s1"), (3, "repo", okey), (3, "worktree", oroot),
-                 (3, "file", f"{okey}::x.py"), (3, "program", "zorkprog"), (3, "signature", "a" * 32),
-                 (4, "session", "s1"), (4, "repo", key), (4, "worktree", root), (4, "file", f"{key}::README.md")]
-        con.executemany("INSERT INTO link VALUES (?, ?, ?, ?)", [(*row, T) for row in links])
+        link_rows = [(1, "session", "s1"), (1, "repo", key), (1, "worktree", root), (1, "touched_repo", okey),
+                     (2, "session", "s1"), (2, "repo", okey), (2, "worktree", oroot), (2, "file", f"{okey}::x.py"),
+                     (2, "program", "zorkprog"), (3, "session", "s1"), (3, "repo", okey), (3, "worktree", oroot),
+                     (3, "file", f"{okey}::x.py"), (3, "program", "zorkprog"), (3, "signature", "a" * 32),
+                     (4, "session", "s1"), (4, "repo", key), (4, "worktree", root), (4, "file", f"{key}::README.md")]
+        con.executemany("INSERT INTO link VALUES (?, ?, ?, ?)", [(*row, T) for row in link_rows])
         con.execute("INSERT INTO event (ts, kind, hook, session_id, tool, detail)"
                     " VALUES (?, 'observed', 'PostToolUse', 's1', 'Bash', ?)", (T, json.dumps({"activity": 1, "files": 1})))
         con.close()
