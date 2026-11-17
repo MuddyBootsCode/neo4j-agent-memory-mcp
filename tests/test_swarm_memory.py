@@ -71,8 +71,9 @@ def start(db, sid, cwd, ts, source="startup"):
 
 
 def tool_ok(db, sid, cwd, ts, tool, tool_input, tuid, **extra):
+    """A PostToolUse event. Claude Code sends ``duration_ms`` with every one."""
     fire(db, "PostToolUse", sid, cwd, ts, tool_name=tool, tool_input=tool_input, tool_use_id=tuid,
-         **{"tool_response": {}, **extra})
+         **{"tool_response": {}, "duration_ms": 50, **extra})
 
 
 def tool_fail(db, sid, cwd, ts, tool, tool_input, error, tuid, **extra):
@@ -182,6 +183,8 @@ class TestReplayParity:
         "bash -c 'node scripts/gate.mjs --check src/a.ts' | tee out.log",
         "cd sub && ./run.sh a.py; uv run python tools/x.py b.py",
         "timeout 60 npm test",
+        "agent-test-budget run -- /bin/zsh -c 'cd /x && cat src/a.ts && bash -e scripts/run.sh'",
+        "python3 -c \"print(open('src/a.ts').read())\" && node -e 'require(\"./b.js\")' && ruby -w tools/c.rb",
     ]
 
     def test_program_tokens_match_the_replay(self):
@@ -434,6 +437,28 @@ class TestFailures:
         tool_ok(db, "s1", repo, T + 3, "Write", {"file_path": app}, "t4")
         assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
 
+    def test_files_outside_any_repo_resolve_only_their_own_failures(self, db, repo, tmp_path):
+        """Review finding: a file outside every checkout had no file key, so a
+        failed Write to one such file was resolved by a Write to another."""
+        conf, notes = tmp_path / "conf" / "app.json", tmp_path / "notes.txt"
+        conf.parent.mkdir()
+        tool_fail(db, "s1", repo, T, "Write", {"file_path": str(conf)}, "EACCES: permission denied, open", "t1")
+        tool_ok(db, "s1", repo, T + 1, "Write", {"file_path": str(notes)}, "t2")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+        tool_ok(db, "s1", repo, T + 2, "Write", {"file_path": str(conf)}, "t3")
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("resolved",)]
+        stored = "\n".join(str(row) for table in ("event", "record", "link")
+                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        assert "app.json" not in stored and "notes.txt" not in stored
+
+    def test_a_success_without_a_duration_resolves_nothing(self, db, repo):
+        """Review finding: with no ``duration_ms`` the start was taken as the
+        result time, so a call that overlapped the failure could resolve it."""
+        tool_fail(db, "s1", repo, T + 10, "Bash", {"command": "make build"}, "Exit code 2\nmake: *** [build] Error 2", "t1")
+        fire(db, "PostToolUse", "s1", repo, T + 12, tool_name="Bash", tool_input={"command": "make build"},
+             tool_use_id="t2", tool_response={})
+        assert q(db, "SELECT status FROM record WHERE kind = 'failure'") == [("open",)]
+
 
 class TestWouldDeliver:
     def test_session_start_names_the_other_sessions_working_in_the_repo(self, db, repo):
@@ -616,6 +641,23 @@ class TestSafety:
         for n, err in enumerate(errors):
             tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
         assert q(db, "SELECT count(*) FROM link WHERE type = 'signature'") == [(9,)]
+        stored = "\n".join(str(row) for table in ("event", "record", "link")
+                           for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        text = (stored + report.build(db)).lower()
+        for secret in secrets:
+            assert secret not in text
+
+    def test_escaped_quotes_leave_no_part_of_a_credential(self, db, repo):
+        """Review finding: a quoted value stopped at an escaped quote, so
+        {"password":"prefix\\"hunterpw"} kept hunterpw."""
+        secrets = ("snorkelpw", "snorkeltok", "glimmer", "snorkelflag", "elauth", "neverclosed")
+        errors = ['Exit code 1\nerror: bad config {"password":"wobble\\"snorkelpw"} rejected by the server',
+                  'Exit code 1\nerror: bad config {\\"api_key\\":\\"glimmer snorkeltok\\"} rejected',
+                  'Exit code 1\nerror: login --password "fizz\\"snorkelflag" was refused by the server',
+                  'Exit code 1\nerror: header Authorization: "Basic snork\\"elauth" was refused today',
+                  'Exit code 1\nerror: unterminated password="quote neverclosed by the caller']
+        for n, err in enumerate(errors):
+            tool_fail(db, "s1", repo, T + n, "Bash", {"command": f"tool{n} run"}, err, f"t{n}")
         stored = "\n".join(str(row) for table in ("event", "record", "link")
                            for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
         text = (stored + report.build(db)).lower()

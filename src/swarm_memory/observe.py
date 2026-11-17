@@ -283,11 +283,15 @@ def _describe(call: Call) -> dict:
     ti = call.tool_input
     if tool in rules.FILE_TOOLS:
         path = ti.get("file_path") or ti.get("notebook_path")
-        if isinstance(path, str) and path and not os.path.isabs(path) and call.cwd:
+        path = path if isinstance(path, str) and path else None
+        if path and not os.path.isabs(path) and call.cwd:
             path = os.path.join(call.cwd, path)
-        fl = rules.file_location(path) if isinstance(path, str) and path else None
+        fl = rules.file_location(path) if path else None
+        # A file outside every checkout is no activity, but it keeps its own
+        # identity, so a failure on it is resolved only by the same file.
+        key = rules.file_key(fl[0], fl[3]) if fl else (rules.path_key(path) if path else None)
         return {"files": [fl] if fl else [], "action": "edit" if tool in rules.EDIT_TOOLS else "read",
-                "program": None, "prefix_key": None, "file": rules.file_key(fl[0], fl[3]) if fl else None}
+                "program": None, "prefix_key": None, "file": key}
     if tool in rules.SHELL_TOOLS:
         cmd = ti.get("command") if isinstance(ti.get("command"), str) else ""
         files = [fl for fl in (rules.file_location(p) for p in rules.command_files(cmd, call.cwd)) if fl]
@@ -346,14 +350,18 @@ def _resolve(con, call: Call, desc: dict, ts: float) -> int:
     """Resolve open failures of the same kind in this session. Like the
     replay's ``first_resolution``, a success counts only if it began after the
     failure came back: a concurrent call that started first is not the way
-    past it. The start is the result time less ``duration_ms``."""
+    past it. The start is the result time less ``duration_ms``; a success
+    without it resolves nothing, since an overlapping call cannot be told
+    apart."""
     response = call.payload.get("tool_response")
     response = response if isinstance(response, dict) else {}
     if (call.tool_input.get("run_in_background") or response.get("isAsync")
             or response.get("status") == "async_launched" or response.get("backgroundTaskId")):
         return 0  # a background launch answers before its work ends: no known outcome
     duration = call.payload.get("duration_ms")
-    started = ts - duration / 1000.0 if isinstance(duration, (int, float)) and duration > 0 else ts
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
+        return 0
+    started = ts - duration / 1000.0
     rows = con.execute(
         "SELECT id, tool, info, ts FROM record WHERE kind = 'failure' AND status = 'open' AND session_id = ?",
         (call.sid,)).fetchall()
@@ -364,8 +372,8 @@ def _resolve(con, call: Call, desc: dict, ts: float) -> int:
         fi = json.loads(info) if info else {}
         if call.tool in rules.SHELL_TOOLS:
             same = fi.get("prefix_key") == desc["prefix_key"]
-        elif fi.get("file") or desc["file"]:
-            same = fi.get("file") == desc["file"]
+        elif call.tool in rules.FILE_TOOLS:
+            same = desc["file"] is not None and fi.get("file") == desc["file"]
         else:
             same = True
         if same:

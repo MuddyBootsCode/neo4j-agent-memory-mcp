@@ -132,6 +132,12 @@ def file_key(repo_key: str, rel: str) -> str:
     return f"{repo_key}::{rel}"
 
 
+def path_key(path: str) -> str:
+    """An opaque key for a file outside every checkout, so a failure on it is
+    matched only to a later success on the same file. The path is not stored."""
+    return "path::" + hashlib.sha256(os.path.normpath(path).encode("utf-8", "replace")).hexdigest()[:16]
+
+
 # ---------------------------------------------------------------- tickets
 
 _KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
@@ -189,6 +195,9 @@ _RUNNERS = {("uv", "run"), ("poetry", "run"), ("pnpm", "exec"), ("npm", "exec"),
 _SHELLS = {"bash", "zsh", "sh"}
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
+_JS_INLINE = {"-e", "--eval", "-p", "--print"}
+_INLINE_CODE = {"python": {"-c"}, "node": _JS_INLINE, "bun": _JS_INLINE, "tsx": _JS_INLINE, "ts-node": _JS_INLINE,
+                "ruby": {"-e"}, "perl": {"-e", "-E"}}
 
 
 def _segments(command: str) -> list[list[str]]:
@@ -238,9 +247,10 @@ _DURATION = re.compile(r"^\d+(?:\.\d+)?[smhd]?$")
 def program_tokens(command: str) -> list[str]:
     """Tokens a command runs as programs rather than works on: each segment's
     first word, its program once wrappers such as ``env``, ``timeout 60`` or
-    ``uv run`` are stripped, the script an interpreter runs (``node x.mjs``,
-    ``bash x.sh``), and the same inside ``sh -c '...'``. A bare name and an
-    absolute path such as ``/opt/homebrew/bin/python3`` are alike."""
+    ``uv run`` are stripped, and the script an interpreter runs (``node x.mjs``,
+    ``bash x.sh``). A shell's ``-c '...'`` string is parsed as commands, and
+    code passed inline (``python -c``, ``node -e``) names no script. A bare
+    name and an absolute path such as ``/opt/homebrew/bin/python3`` are alike."""
     out: list[str] = []
     for toks in _segments(command or ""):
         while toks and _ENV_ASSIGN.match(toks[0]):
@@ -256,9 +266,10 @@ def program_tokens(command: str) -> list[str]:
         if prog in _SHELLS and "-c" in args and args.index("-c") + 1 < len(args):
             out += program_tokens(args[args.index("-c") + 1])
         elif _INTERPRETERS.match(prog):
-            rest = [a for a in args if not a.startswith("-")]
-            if rest:
-                out.append(rest[0])
+            inline = _INLINE_CODE.get(re.sub(r"[\d.]+$", "", prog), set())
+            script = next((a for a in args if a in inline or not a.startswith("-")), None)
+            if script and script not in inline:
+                out.append(script)
     return out
 
 
@@ -462,19 +473,23 @@ def failure_kind(error_text: str) -> str:
 
 
 _EXIT_LINE = re.compile(r"^\s*exit code (-?\d+)\s*$", re.I)
+# A quoted value, also inside escaped JSON (\"...\"), runs past escaped quotes
+# to its closing quote, or to the end of the text when it never closes, so no
+# part of a credential is left behind.
+_QUOTED = r"\\*\"(?:[^\"\\]|\\.)*(?:\"|\Z)|\\*'(?:[^'\\]|\\.)*(?:'|\Z)"
 # The key may carry a prefix (PGPASSWORD, db_password, client_secret) or a
-# closing quote ("password": ...), and a quoted value is redacted whole.
+# closing quote, escaped or not ("password": ..., \"password\": ...).
 _SECRET_VALUE = re.compile(
     r"(?i)([\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|authorization))"
-    r"(['\"]?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)")
+    r"(\\*['\"]?\s*[=:]\s*)(" + _QUOTED + r"|\S+)")
 _BEARER = re.compile(r"(?i)\bbearer\s+\S+")
 # A credential passed as a command flag with a space, as echoed in an error:
 # --password <value>, --api-key "<value>". Only flags, so prose is left alone.
 _SECRET_FLAG = re.compile(
-    r"(?i)(--?[\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\s+)(\"[^\"]*\"|'[^']*'|\S+)")
+    r"(?i)(--?[\w-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)\s+)(" + _QUOTED + r"|\S+)")
 # The whole Authorization value, scheme and credential: Basic, Bearer or other.
 _AUTH_VALUE = re.compile(
-    r"(?i)(authorization['\"]?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|(?:[A-Za-z][\w-]*\s+)?\S+)")
+    r"(?i)(authorization\\*['\"]?\s*[=:]\s*)(" + _QUOTED + r"|(?:[A-Za-z][\w-]*\s+)?\S+)")
 _URL_CREDENTIALS = re.compile(r"(\b[a-z][\w+.-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
 HEAD_CHARS = 160
 
