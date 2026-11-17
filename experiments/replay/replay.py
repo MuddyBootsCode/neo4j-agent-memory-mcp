@@ -48,9 +48,12 @@ otherwise. Hook blocks and rejected tool inputs are counted apart from
 command and tool failures.
 
 Moment 2 (with the prompt). A prompt is a hit when it contains a path that
-exists in the repo, a pasted error line, or a Linear ticket key. Human
-prompts and the briefs another session writes when it starts one are counted
-separately.
+exists in the repo, a pasted error line, or a ticket key such as ``ABC-123``.
+Ticket prefixes are a local setting and never part of the repo:
+``--ticket-keys``, else ``$SWARM_MEMORY_TICKET_KEYS``, else ``ticket_keys`` in
+the ``config.json`` beside the swarm_memory store. With none set, no prompt
+names a ticket. Human prompts and the briefs another session writes when it
+starts one are counted separately.
 
 A hit means the trigger fired, not that a delivery would have helped (MUD-850
 R15).
@@ -91,9 +94,8 @@ from agent_memory_mcp.hook.capture_hook import (  # noqa: E402  (the error_steps
 SINCE_DEFAULT = "2026-08-01"
 IDLE_GAP_S = 15 * 60
 WINDOWS_MIN = (15, 60, 240)
-# Linear team keys in the three workspaces (grad-graph, muddybootscode,
-# muddyharness), checked with `linear team list` on 2026-11-16.
-TEAM_KEYS = ("MUD", "GRA")
+TICKET_KEYS_ENV = "SWARM_MEMORY_TICKET_KEYS"
+TICKET_KEYS: tuple = ()  # set by main() from load_ticket_keys()
 FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 WORKTREE_MARKERS = ("/.claude/worktrees/", "/.worktrees/")
@@ -661,12 +663,54 @@ def executed_files(command: str, files, cwd_prefix: str = "", repo_root: str | N
     return out
 
 
-_TICKET = re.compile(r"\b(?:%s)-\d+\b" % "|".join(TEAM_KEYS))
+_KEY = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
 
 
-def prompt_tickets(text: str) -> list[str]:
+def store_config_path() -> str:
+    """The ``config.json`` beside the swarm_memory store (MUD-850 Phase 2)."""
+    db = os.environ.get("SWARM_MEMORY_DB") or os.path.expanduser("~/.local/share/swarm-memory/observe.sqlite3")
+    return os.path.join(os.path.dirname(db), "config.json")
+
+
+def parse_ticket_keys(keys) -> tuple:
+    """Upper-case prefixes of one to ten letters or digits, starting with a letter."""
+    if isinstance(keys, str):
+        keys = keys.split(",")
+    if not isinstance(keys, (list, tuple)):
+        return ()
+    clean = (k.strip() for k in keys if isinstance(k, str))
+    return tuple(dict.fromkeys(k for k in clean if _KEY.match(k)))
+
+
+def load_ticket_keys(flag: str | None = None) -> tuple:
+    """Ticket prefixes from ``--ticket-keys``, else ``$SWARM_MEMORY_TICKET_KEYS``,
+    else ``ticket_keys`` in the store's ``config.json``, else none."""
+    if flag:
+        return parse_ticket_keys(flag)
+    env = os.environ.get(TICKET_KEYS_ENV)
+    if env:
+        return parse_ticket_keys(env)
+    try:
+        with open(store_config_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return ()
+    return parse_ticket_keys(data.get("ticket_keys") if isinstance(data, dict) else None)
+
+
+@functools.lru_cache(maxsize=None)
+def _ticket_re(keys: tuple):
+    return re.compile(r"\b(?:%s)-\d+\b" % "|".join(map(re.escape, keys))) if keys else None
+
+
+def prompt_tickets(text: str, keys=None) -> list[str]:
+    """Ticket keys a prompt names, upper case only, in order. ``keys``
+    defaults to the ones main() loaded."""
+    rx = _ticket_re(tuple(TICKET_KEYS if keys is None else keys))
     out: list[str] = []
-    for t in _TICKET.findall(text):
+    if rx is None:
+        return out
+    for t in rx.findall(text):
         if t not in out:
             out.append(t)
     return out
@@ -1114,7 +1158,14 @@ def main(argv=None) -> int:
     ap.add_argument("--idle-gap", type=float, default=IDLE_GAP_S / 60, help="minutes of no events that end a span")
     ap.add_argument("--workers", type=int, default=4, help="scan processes (at most 4)")
     ap.add_argument("--limit", type=int, default=0, help="scan only the first N transcripts (smoke runs)")
+    ap.add_argument("--ticket-keys", default=None,
+                    help="comma-separated ticket prefixes such as ABC,XYZ; default $SWARM_MEMORY_TICKET_KEYS, "
+                         "else ticket_keys in the config.json beside the swarm_memory store")
     args = ap.parse_args(argv)
+    global TICKET_KEYS
+    TICKET_KEYS = load_ticket_keys(args.ticket_keys)
+    if not TICKET_KEYS:
+        print("replay: no ticket keys configured, so no prompt names a ticket", file=sys.stderr)
 
     t0 = time.time()
     since_ts = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc).timestamp()

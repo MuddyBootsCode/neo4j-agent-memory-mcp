@@ -7,6 +7,8 @@ Phases 2 and 3 get built, so each rule is pinned on a small case.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "experiments", "replay"))
 
 import replay  # noqa: E402
@@ -279,11 +281,11 @@ class TestSessionAttribution:
 class TestSessionBrief:
     def test_a_brief_from_the_session_that_started_this_one_is_a_brief(self):
         rec = {"type": "user", "promptSource": "sdk", "turnOrigin": "sdk",
-               "message": {"content": "Background (from the session that started this one): fix MUD-1"}}
+               "message": {"content": "Background (from the session that started this one): fix ABC-1"}}
         assert replay.session_brief(rec).startswith("Background")
 
     def test_a_human_prompt_is_not_a_brief(self):
-        rec = {"type": "user", "origin": {"kind": "human"}, "message": {"content": "fix MUD-1"}}
+        rec = {"type": "user", "origin": {"kind": "human"}, "message": {"content": "fix ABC-1"}}
         assert replay.session_brief(rec) is None
 
 
@@ -320,7 +322,7 @@ class TestHumanPrompt:
 
 
 class TestPromptTriggers:
-    FILES = {"src/app/main.py", "README.md", "tradeCraft/packages/core/src/a.ts"}
+    FILES = {"src/app/main.py", "README.md", "webapp/packages/core/src/a.ts"}
 
     def test_an_existing_repo_path_is_found(self):
         assert replay.prompt_paths("look at src/app/main.py:42 please", self.FILES) == ["src/app/main.py"]
@@ -330,15 +332,37 @@ class TestPromptTriggers:
         assert replay.prompt_paths(text, self.FILES, repo_root="/Users/me/proj") == ["src/app/main.py"]
 
     def test_a_path_relative_to_the_session_cwd_is_found(self):
-        assert replay.prompt_paths("open packages/core/src/a.ts", self.FILES, cwd_prefix="tradeCraft") == [
-            "tradeCraft/packages/core/src/a.ts"
+        assert replay.prompt_paths("open packages/core/src/a.ts", self.FILES, cwd_prefix="webapp") == [
+            "webapp/packages/core/src/a.ts"
         ]
 
     def test_a_path_that_does_not_exist_is_not(self):
         assert replay.prompt_paths("what about src/app/other.py", self.FILES) == []
 
-    def test_ticket_keys_are_the_known_teams_in_upper_case(self):
-        assert replay.prompt_tickets("Do MUD-850 then GRA-12, not UTF-8 or mud-1") == ["MUD-850", "GRA-12"]
+    def test_ticket_keys_are_the_configured_prefixes_in_upper_case(self):
+        text = "Do ABC-850 then XYZ-12, not UTF-8 or abc-1"
+        assert replay.prompt_tickets(text, keys=("ABC", "XYZ")) == ["ABC-850", "XYZ-12"]
+
+
+class TestTicketKeys:
+    """Ticket prefixes are a local setting, never part of the repo."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SWARM_MEMORY_DB", str(tmp_path / "observe.sqlite3"))
+        monkeypatch.delenv("SWARM_MEMORY_TICKET_KEYS", raising=False)
+        self.config = tmp_path / "config.json"
+
+    def test_keys_come_from_the_flag_then_the_environment_then_the_store_config(self, monkeypatch):
+        self.config.write_text('{"ticket_keys": ["ABC", "not a key", "XYZ", "ABC"]}')
+        assert replay.load_ticket_keys() == ("ABC", "XYZ")
+        monkeypatch.setenv("SWARM_MEMORY_TICKET_KEYS", "OPS")
+        assert replay.load_ticket_keys() == ("OPS",)
+        assert replay.load_ticket_keys("QA, ABC") == ("QA", "ABC")
+
+    def test_with_no_keys_configured_no_prompt_names_a_ticket(self):
+        assert replay.load_ticket_keys() == ()
+        assert replay.prompt_tickets("Do ABC-850 now", keys=()) == []
 
     def test_a_pasted_error_line_is_found_and_prose_is_not(self):
         assert replay.prompt_error_lines("there's an error when I click save") == []
