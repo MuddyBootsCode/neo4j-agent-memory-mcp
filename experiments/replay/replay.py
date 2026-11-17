@@ -8,7 +8,9 @@ Run from the repository root:
     python3 experiments/replay/replay.py --since 2026-10-01 --run oct
 
 Read-only on ~/.claude/projects and on every repo the sessions ran in (git
-ls-files, git log, git cat-file and plain file reads). Output goes to
+ls-files, git log, git cat-file and plain file reads). It runs no code from
+those repos: ontology files are parsed with the installed ontology-observer
+plugin's library, never with a copy inside the repo. Output goes to
 experiments/replay/results/<run>/, which is gitignored: report.md,
 summary.json, runs.json and examples.json. Nothing leaves the laptop.
 
@@ -35,7 +37,11 @@ command names, except a script the command runs as its program, and a third
 adds those scripts too. Related is tested three ways: same directory, import
 neighbour (one hop either way, static parse of Python and JS/TS imports), and
 same ontology rule (a gate in ``ontology/*.md`` naming the file, or
-``ontology/gates/*.json``). Paths are repo-relative, so worktrees compare.
+``ontology/gates/*.json``). Paths are repo-relative, so worktrees compare,
+including linked worktrees outside the main checkout. Relations come from
+today's files and branch tips, not the version each agent saw, so related-file
+counts can drift as repos change. Same-file counts do not depend on them, and
+MUD-850 D16 logs related files without delivering them.
 
 Moment 4 (with a failure). Failures are the ``error_steps()`` rules (an
 ``is_error`` result that is not a blocked or rejected call) and the signature
@@ -601,13 +607,15 @@ def build_suffix_index(files) -> dict:
 
 
 def prompt_paths(text: str, files, cwd_prefix: str = "", repo_root: str | None = None,
-                 suffix_index: dict | None = None) -> list[str]:
+                 suffix_index: dict | None = None, checkout_root: str | None = None) -> list[str]:
     """Repo-relative paths of existing repo files named in a prompt.
 
-    Absolute paths are normalised through worktree markers; relative ones are
-    tried from the repo root, then from the session's cwd. A relative path of
-    three or more parts that matches no file there counts when it is the
-    unique suffix of one repo file.
+    Absolute paths are normalised through worktree markers, or taken relative
+    to ``checkout_root``, the session's own checkout, when it is a linked
+    worktree outside the main checkout. Relative ones are tried from the repo
+    root, then from the session's cwd. A relative path of three or more parts
+    that matches no file there counts when it is the unique suffix of one repo
+    file.
     """
     found: list[str] = []
     for raw in _TOKEN_SPLIT.findall(text):
@@ -615,7 +623,8 @@ def prompt_paths(text: str, files, cwd_prefix: str = "", repo_root: str | None =
         if not tok or not ("/" in tok or _HAS_EXT.search(tok)):
             continue
         if tok.startswith(("/", "~")):
-            rel = repo_rel(os.path.expanduser(tok), repo_root) if repo_root else None
+            path = os.path.expanduser(tok)
+            rel = (repo_rel(path, repo_root) if repo_root else None) or checkout_rel(path, checkout_root)
             cands = [rel] if rel else []
         else:
             cands = [os.path.normpath(tok)]
@@ -632,18 +641,19 @@ def prompt_paths(text: str, files, cwd_prefix: str = "", repo_root: str | None =
 
 
 def command_files(command: str, files, cwd_prefix: str = "", repo_root: str | None = None,
-                  suffix_index: dict | None = None) -> list[str]:
+                  suffix_index: dict | None = None, checkout_root: str | None = None) -> list[str]:
     """Existing repo files a Bash command names, by the same rules as a
     prompt. Relative paths are read from the session's starting directory,
     so a path after a ``cd`` resolves only as a unique suffix."""
-    return prompt_paths(command or "", files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index)
+    return prompt_paths(command or "", files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
+                        checkout_root=checkout_root)
 
 
 _INTERPRETERS = re.compile(r"(?:python[\d.]*|node|bash|sh|zsh|tsx|ts-node|deno|bun|ruby|perl)$")
 
 
 def executed_files(command: str, files, cwd_prefix: str = "", repo_root: str | None = None,
-                   suffix_index: dict | None = None) -> set[str]:
+                   suffix_index: dict | None = None, checkout_root: str | None = None) -> set[str]:
     """Repo files a command runs as its program (``./x.sh``, ``node x.mjs``,
     ``bash x.sh``), which is using a tool rather than working on the file."""
     out: set[str] = set()
@@ -659,7 +669,8 @@ def executed_files(command: str, files, cwd_prefix: str = "", repo_root: str | N
             if not args:
                 continue
             prog = args[0]
-        out.update(prompt_paths(prog, files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index))
+        out.update(prompt_paths(prog, files, cwd_prefix=cwd_prefix, repo_root=repo_root, suffix_index=suffix_index,
+                                checkout_root=checkout_root))
     return out
 
 
@@ -968,6 +979,20 @@ def repo_rel(path: str | None, repo_root: str) -> str | None:
     return normalize_repo_path(path, repo_root)
 
 
+def checkout_rel(path: str | None, checkout: str | None) -> str | None:
+    """Path relative to a session's own checkout, for a linked worktree that
+    lives outside the main checkout, where ``repo_rel`` cannot reach it."""
+    if not path or not checkout or not path.startswith("/"):
+        return None
+    prefix = checkout.rstrip("/") + "/"
+    if not path.lower().startswith(prefix.lower()):
+        return None
+    rel = os.path.normpath(path[len(prefix):])
+    if rel in (".", ".git") or rel.startswith(("../", ".git/")):
+        return None
+    return rel
+
+
 def repo_identity(repo_root: str):
     try:
         st = os.stat(os.path.join(repo_root, ".git"))
@@ -1061,8 +1086,9 @@ def ontology_rules(repo_root: str, files) -> tuple[dict[str, set], str] | None:
     od = os.path.join(repo_root, "ontology")
     if not os.path.isdir(od):
         return None
-    own = os.path.join(od, "scripts", "ontology_lib.py")
-    lib_path = own if os.path.isfile(own) else os.path.join(PLUGIN_ONTOLOGY_LIB, "ontology_lib.py")
+    # The parser is always the installed plugin's, never a copy inside the repo:
+    # the replay reads the repos it analyses and runs no code from them.
+    lib_path = os.path.join(PLUGIN_ONTOLOGY_LIB, "ontology_lib.py")
     if not os.path.isfile(lib_path):
         return None
     from pathlib import Path
@@ -1087,8 +1113,7 @@ def ontology_rules(repo_root: str, files) -> tuple[dict[str, set], str] | None:
         for fn in gate.get("functions", []) or []:
             if isinstance(fn, dict) and isinstance(fn.get("file"), str):
                 rules[fn["file"]].add(key)
-    source = "repo" if lib_path == own else "plugin 0.1.0"
-    return dict(rules), source
+    return dict(rules), "plugin 0.1.0"
 
 
 # ---------------------------------------------------------------- report helpers
@@ -1216,7 +1241,7 @@ def main(argv=None) -> int:
         ident = repo_identity(repo)
         repo = repo_roots.setdefault(ident, repo)
         for c in m["calls"]:
-            c["file"] = repo_rel(c["path"], repo)
+            c["file"] = repo_rel(c["path"], repo) or checkout_rel(c["path"], wt)
         own = sorted(f for f in m["files"] if os.path.basename(f)[:-6] == sid)
         home = (own or sorted(m["files"]) or [f.split("/subagents/", 1)[0] for f in sorted(m["subagent_files"])])[0]
         cwd_prefix = os.path.relpath(cwd, wt) if cwd.lower().startswith(wt.lower()) else ""
@@ -1427,10 +1452,10 @@ def moment3(sessions: dict, runs: list[dict], files_by_repo: dict) -> dict:
                 branch_of[(repo, c["file"])].add(s["branch"])
             elif c["tool"] == "Bash" and c["command"]:
                 named = command_files(c["command"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
-                                      suffix_index=suffix_idx[repo])
+                                      suffix_index=suffix_idx[repo], checkout_root=s["worktree"])
                 mix["Bash calls naming a repo file"] += bool(named)
                 ran = executed_files(c["command"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
-                                     suffix_index=suffix_idx[repo]) if named else set()
+                                     suffix_index=suffix_idx[repo], checkout_root=s["worktree"]) if named else set()
                 for f in named:
                     bash_events[rid].append({**base, "file": f, "edit": False, "executed": f in ran})
                     branch_of[(repo, f)].add(s["branch"])
@@ -1644,7 +1669,7 @@ def moment2(sessions: dict, files_by_repo: dict, sig_first_seen: dict) -> dict:
             row = rows[(rname, scope)]
             for p in s[field]:
                 paths = prompt_paths(p["text"], files, cwd_prefix=s["cwd_prefix"], repo_root=repo,
-                                     suffix_index=suffix_idx.get(repo))
+                                     suffix_index=suffix_idx.get(repo), checkout_root=s["worktree"])
                 tickets = prompt_tickets(p["text"])
                 errors = prompt_error_lines(p["text"])
                 known = [e for e in errors if (first := sig_first_seen.get(repo, {}).get(norm(e))) is not None

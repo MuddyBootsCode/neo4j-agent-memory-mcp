@@ -364,6 +364,38 @@ class TestTicketKeys:
         assert replay.load_ticket_keys() == ()
         assert replay.prompt_tickets("Do ABC-850 now", keys=()) == []
 
+
+class TestReadOnly:
+    def test_a_repos_own_ontology_library_is_never_run(self, tmp_path, monkeypatch):
+        """Review finding: the replay imported ontology/scripts/ontology_lib.py
+        from the repo it read. Only the installed plugin's parser may run."""
+        repo = tmp_path / "repo"
+        (repo / "ontology" / "scripts").mkdir(parents=True)
+        marker = tmp_path / "repo-code-ran"
+        (repo / "ontology" / "scripts" / "ontology_lib.py").write_text(f"open({str(marker)!r}, 'w').close()\n")
+        plugin = tmp_path / "plugin"
+        plugin.mkdir()
+        (plugin / "ontology_lib.py").write_text(
+            "def load_all(root):\n    return []\n\ndef path_governed_by(f, onts):\n    return False\n")
+        monkeypatch.setattr(replay, "PLUGIN_ONTOLOGY_LIB", str(plugin))
+        assert replay.ontology_rules(str(repo), {"src/a.py"}) == ({}, "plugin 0.1.0")
+        assert not marker.exists()
+
+
+class TestLinkedWorktreeOutsideTheMainCheckout:
+    """Review finding: paths in a linked worktree that is not under the main
+    checkout came back as None and dropped out of the counts."""
+
+    def test_its_paths_are_taken_relative_to_its_own_checkout(self):
+        assert replay.repo_rel("/projects/app-feature/src/a.py", "/projects/app") is None
+        assert replay.checkout_rel("/projects/app-feature/src/a.py", "/projects/app-feature") == "src/a.py"
+        assert replay.checkout_rel("/projects/app-other/src/a.py", "/projects/app-feature") is None
+        assert replay.checkout_rel("/projects/app-feature/.git/HEAD", "/projects/app-feature") is None
+
+    def test_a_prompt_naming_one_of_its_files_is_found(self):
+        assert replay.prompt_paths("see /projects/app-feature/src/a.py", {"src/a.py"}, repo_root="/projects/app",
+                                   checkout_root="/projects/app-feature") == ["src/a.py"]
+
     def test_a_pasted_error_line_is_found_and_prose_is_not(self):
         assert replay.prompt_error_lines("there's an error when I click save") == []
         assert replay.prompt_error_lines("it says\nTypeError: x is undefined\n") == ["TypeError: x is undefined"]
