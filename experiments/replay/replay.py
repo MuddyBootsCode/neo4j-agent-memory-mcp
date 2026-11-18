@@ -23,8 +23,11 @@ itself) walked up to the directory that holds ``.git``. The main checkout
 counts as one worktree. An agent is a session, and two agents are different
 when they ran in different worktrees. Each touch is attributed to the worktree
 of the file it touched. A session whose cwd moves into another worktree of its
-repo is left out of runs, since a run places each session in one worktree; the
-summary counts them.
+repo is left out of runs, since a run places each session in one worktree. So
+is a session whose cwd moves into another repo: its events are not split by
+repo, so its work in one repo would count as overlap and failures in the other.
+The summary and the report count the two apart, and a session that did both
+counts as having moved to another repo.
 
 Runs. A session's activity is split into spans wherever two consecutive
 events are more than ``--idle-gap`` minutes apart. Two sessions in different
@@ -1135,6 +1138,83 @@ def discover(projects: str) -> tuple[list[str], dict[str, list[str]]]:
     return tops, subs
 
 
+def build_sessions(merged: dict, gap_s: float) -> tuple[dict, collections.Counter]:
+    """Sessions with the repo and worktree of their first cwd in a git repo,
+    and counts of the sessions that have none."""
+    sessions: dict[str, dict] = {}
+    excluded = collections.Counter()
+    repo_roots: dict = {}
+    for sid, m in merged.items():
+        if not m["times"]:
+            excluded["no events since the start date"] += 1
+            continue
+        repo = wt = cwd = None
+        for _ts, c in m["cwds"]:
+            repo, wt = resolve_location(c)
+            if repo:
+                cwd = c
+                break
+        if repo is None:
+            excluded["cwd not in a git repo"] += 1
+            continue
+        ident = repo_identity(repo)
+        repo = repo_roots.setdefault(ident, repo)
+        located = [(r, w) for r, w in (resolve_location(c) for _t, c in m["cwds"]) if r]
+        worktrees = {w.lower() for r, w in located if repo_identity(r) == ident}
+        repos = {repo_identity(r) for r, _w in located}
+        for c in m["calls"]:
+            attribute_call(c, repo, wt)
+        own = sorted(f for f in m["files"] if os.path.basename(f)[:-6] == sid)
+        home = (own or sorted(m["files"]) or [f.split("/subagents/", 1)[0] for f in sorted(m["subagent_files"])])[0]
+        cwd_prefix = os.path.relpath(cwd, wt) if cwd.lower().startswith(wt.lower()) else ""
+        sessions[sid] = {
+            "sid": sid, "repo": repo, "worktree": wt.lower(), "worktree_name": (
+                "main checkout" if wt == repo else os.path.basename(wt)),
+            "cwd": cwd, "moved": len(worktrees) > 1, "switched_repo": len(repos) > 1,
+            "project_dir": os.path.basename(os.path.dirname(home)),
+            "cwd_prefix": "" if cwd_prefix in (".", "") or cwd_prefix.startswith("..") else cwd_prefix,
+            "times": m["times"], "spans": activity_spans(m["times"], gap_s),
+            "calls": m["calls"], "prompts": m["prompts"], "briefs": m["briefs"],
+            "branch": m["branches"].most_common(1)[0][0] if m["branches"] else None,
+            "subagents": len(m["subagent_files"]), "copied_into": len(m["files"]) - len(own),
+        }
+    names = {}
+    for root in set(repo_roots.values()):
+        base = os.path.basename(root)
+        names[root] = base if sum(1 for r in repo_roots.values() if os.path.basename(r) == base) == 1 else \
+            f"{os.path.basename(os.path.dirname(root))}/{base}"
+    for s in sessions.values():
+        s["repo_name"] = names[s["repo"]]
+    return sessions, excluded
+
+
+def left_out_counts(sessions: dict) -> dict:
+    """Sessions left out of runs, by reason. A session whose cwd moved to
+    another repo counts there, whether or not it also moved between worktrees."""
+    return {"cwd moved between worktrees": sum(1 for s in sessions.values() if s["moved"] and not s["switched_repo"]),
+            "cwd moved to another repo": sum(1 for s in sessions.values() if s["switched_repo"])}
+
+
+def place_in_runs(sessions: dict, gap_s: float) -> tuple[list, list]:
+    """The sessions that can be placed in one worktree, and the runs they form."""
+    placed = [s for s in sessions.values() if not s["moved"] and not s["switched_repo"]]
+    run_lists = group_runs(placed)
+    runs = []
+    for k, sids in enumerate(sorted(run_lists, key=lambda ss: min(sessions[s]["times"][0] for s in ss))):
+        members = [sessions[s] for s in sids]
+        rid = f"run{k + 1:03d}"
+        for m in members:
+            m["run"] = rid
+        all_spans = activity_spans([t for m in members for t in m["times"]], gap_s)
+        runs.append({
+            "run": rid, "repo": members[0]["repo_name"], "sessions": sids,
+            "worktrees": sorted({m["worktree_name"] for m in members}),
+            "start": min(m["times"][0] for m in members), "end": max(m["times"][-1] for m in members),
+            "active_minutes": round(sum(b - a for a, b in all_spans) / 60),
+        })
+    return placed, runs
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--since", default=SINCE_DEFAULT, help="first day counted (UTC), default %(default)s")
@@ -1182,66 +1262,11 @@ def main(argv=None) -> int:
 
     # 2. Sessions, repos, worktrees.
     merged = merge_scans(scanned)
-    sessions: dict[str, dict] = {}
-    excluded = collections.Counter()
-    repo_roots: dict = {}
-    for sid, m in merged.items():
-        if not m["times"]:
-            excluded["no events since the start date"] += 1
-            continue
-        repo = wt = cwd = None
-        for _ts, c in m["cwds"]:
-            repo, wt = resolve_location(c)
-            if repo:
-                cwd = c
-                break
-        if repo is None:
-            excluded["cwd not in a git repo"] += 1
-            continue
-        ident = repo_identity(repo)
-        repo = repo_roots.setdefault(ident, repo)
-        worktrees = {w.lower() for r, w in (resolve_location(c) for _t, c in m["cwds"])
-                     if r and repo_identity(r) == ident}
-        for c in m["calls"]:
-            attribute_call(c, repo, wt)
-        own = sorted(f for f in m["files"] if os.path.basename(f)[:-6] == sid)
-        home = (own or sorted(m["files"]) or [f.split("/subagents/", 1)[0] for f in sorted(m["subagent_files"])])[0]
-        cwd_prefix = os.path.relpath(cwd, wt) if cwd.lower().startswith(wt.lower()) else ""
-        sessions[sid] = {
-            "sid": sid, "repo": repo, "worktree": wt.lower(), "worktree_name": (
-                "main checkout" if wt == repo else os.path.basename(wt)),
-            "cwd": cwd, "moved": len(worktrees) > 1,
-            "project_dir": os.path.basename(os.path.dirname(home)),
-            "cwd_prefix": "" if cwd_prefix in (".", "") or cwd_prefix.startswith("..") else cwd_prefix,
-            "times": m["times"], "spans": activity_spans(m["times"], gap_s),
-            "calls": m["calls"], "prompts": m["prompts"], "briefs": m["briefs"],
-            "branch": m["branches"].most_common(1)[0][0] if m["branches"] else None,
-            "subagents": len(m["subagent_files"]), "copied_into": len(m["files"]) - len(own),
-        }
-    names = {}
-    for root in set(repo_roots.values()):
-        base = os.path.basename(root)
-        names[root] = base if sum(1 for r in repo_roots.values() if os.path.basename(r) == base) == 1 else \
-            f"{os.path.basename(os.path.dirname(root))}/{base}"
-    for s in sessions.values():
-        s["repo_name"] = names[s["repo"]]
+    sessions, excluded = build_sessions(merged, gap_s)
 
     # 3. Runs.
-    placed = [s for s in sessions.values() if not s["moved"]]
-    run_lists = group_runs(placed)
-    runs = []
-    for k, sids in enumerate(sorted(run_lists, key=lambda ss: min(sessions[s]["times"][0] for s in ss))):
-        members = [sessions[s] for s in sids]
-        rid = f"run{k + 1:03d}"
-        for m in members:
-            m["run"] = rid
-        all_spans = activity_spans([t for m in members for t in m["times"]], gap_s)
-        runs.append({
-            "run": rid, "repo": members[0]["repo_name"], "sessions": sids,
-            "worktrees": sorted({m["worktree_name"] for m in members}),
-            "start": min(m["times"][0] for m in members), "end": max(m["times"][-1] for m in members),
-            "active_minutes": round(sum(b - a for a, b in all_spans) / 60),
-        })
+    placed, runs = place_in_runs(sessions, gap_s)
+    left_out = left_out_counts(sessions)
     run_by_id = {r["run"]: r for r in runs}
     gap_sensitivity = {}
     for g in (5, 15, 30):
@@ -1285,7 +1310,8 @@ def main(argv=None) -> int:
     }
     summary["runs"] = {
         "runs": len(runs), "sessions_in_runs": sum(len(r["sessions"]) for r in runs),
-        "sessions_left_out_because_their_cwd_moved_between_worktrees": len(sessions) - len(placed),
+        "sessions_left_out_because_their_cwd_moved_between_worktrees": left_out["cwd moved between worktrees"],
+        "sessions_left_out_because_their_cwd_moved_to_another_repo": left_out["cwd moved to another repo"],
         "repos_with_runs": len({r["repo"] for r in runs}),
         "worktrees_per_run_median": _median([len(r["worktrees"]) for r in runs]),
         "worktrees_per_run_max": max((len(r["worktrees"]) for r in runs), default=0),
@@ -1661,6 +1687,9 @@ def render_report(summary: dict, runs: list[dict], examples: dict, run_by_id: di
              f"Worktrees per run: median {r['worktrees_per_run_median']}, max {r['worktrees_per_run_max']}. "
              f"Active time {r['active_hours_total']} h.",
              f"- By repo: {r['by_repo']}.",
+             f"- Left out of runs: {r['sessions_left_out_because_their_cwd_moved_between_worktrees']} sessions "
+             f"whose cwd moved between worktrees of their repo, and "
+             f"{r['sessions_left_out_because_their_cwd_moved_to_another_repo']} whose cwd moved to another repo.",
              f"- Idle gap sensitivity (runs, sessions): {r['idle_gap_sensitivity']}.",
              f"- Without main-checkout sessions: {r['without_main_checkout_sessions']}.",
              f"- Runs with at least one hit: {r['runs_with_a_hit']}.",
