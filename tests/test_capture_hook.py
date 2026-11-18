@@ -206,6 +206,25 @@ class TestTouchedFilesAndErrorSteps:
             {"tool": "tool", "input": "", "file": None, "error": "boom"},
         ]
 
+    def test_error_steps_ignore_the_request_copies_of_a_result(self, tmp_path):
+        """Newer transcripts log each API request as an ``api-request-blob``
+        record whose message repeats earlier tool results. Read as a turn,
+        a failure in one counts twice: 59 extra on top of 355 across 40 real
+        transcripts on 2026-11-16 (MUD-850)."""
+        from agent_memory_mcp.hook.capture_hook import error_steps
+
+        failing = {"type": "tool_result", "tool_use_id": "b1", "is_error": True, "content": "boom"}
+        path = _jsonl(
+            tmp_path / "t.jsonl",
+            [
+                _assistant([{"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "make"}}]),
+                _user([failing]),
+                {"type": "api-request-blob", "hash": "h", "message": {"role": "user", "content": [failing]}},
+            ],
+        )
+
+        assert error_steps(path, "/repo") == [{"tool": "Bash", "input": "make", "file": None, "error": "boom"}]
+
     def test_error_steps_can_be_bounded_to_a_window_of_records(self, tmp_path):
         """The golden set replays a prompt at a known transcript line and
         asks what had just failed (MUD-458), so the reader takes a window.
