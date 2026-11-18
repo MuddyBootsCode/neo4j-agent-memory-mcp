@@ -21,10 +21,11 @@ an HMAC under a random key kept beside the store (``<store>.key``, mode 0600),
 so repeats still match and the hash cannot be checked against a guess. If the
 key file goes missing while the store holds hashes, the next failure makes a
 new key and logs a ``signature_key_new`` event: hashes from before it no longer
-match those after it. A store that held text (schema version 1), values an
-older rule let through (version 4), or anything read from shell command text
-(versions 4 to 6), is migrated, then rewritten on a session hook with VACUUM
-and a TRUNCATE checkpoint, so the replaced text is gone from the file's bytes as
+match those after it. A store from an earlier version (1 to 6) that held
+failure text, values an older rule let through, or anything read from shell
+command text, has its rows migrated to version 7 the first time a hook opens
+it. A session hook then rewrites the file with VACUUM and a TRUNCATE
+checkpoint (version 8), so the replaced text is gone from the file's bytes as
 well as its rows.
 
 WAL mode lets many hook processes read while one writes. A hook takes the write
@@ -219,36 +220,34 @@ def migrate_to_hash_only(con: sqlite3.Connection, db: str) -> dict:
         raise
 
 
-HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows; the file may still hold the old bytes
-PURGED_VERSION = 3  # the file rewritten; failures still carry the fields recovery matching used
+# Versions 3 and 6 were rewritten files an earlier hook could leave a store at.
+# connect() now takes any store below 7 through every row migration at once.
+HASH_ONLY_VERSION = 2  # failure text replaced by hashes in the rows
+PURGED_VERSION = 3  # an earlier file rewrite; failures still carry the fields recovery matching used
 RECOVERY_DROPPED_VERSION = 4  # no recovery fields; values older rules let through may remain
-RULES_APPLIED_VERSION = 5  # stored values meet the run 10 rules; the file may still hold the old bytes
-RULES_PURGED_VERSION = 6  # the file rewritten after 5
-SHELL_DROPPED_VERSION = 7  # nothing read from shell command text; the file may still hold the old bytes
-# A version whose rows a migration rewrote, and the one its file reaches once rewritten too.
-_PURGE_NEXT = {HASH_ONLY_VERSION: PURGED_VERSION, RULES_APPLIED_VERSION: RULES_PURGED_VERSION,
-               SHELL_DROPPED_VERSION: SCHEMA_VERSION}
+RULES_APPLIED_VERSION = 5  # stored values meet the run 10 rules
+RULES_PURGED_VERSION = 6  # an earlier file rewrite after 5
+SHELL_DROPPED_VERSION = 7  # rows meet every rule; the file may still hold the old bytes
 SHELL_TOOLS = ("Bash", "PowerShell")  # whose command text earlier versions read
 
 
 def purge_freed_text(con: sqlite3.Connection) -> bool:
-    """Version 2 to 3, 5 to 6 and 7 to 8: rewrite the file so the text a migration
-    replaced is gone from its bytes, not only from its rows. SQLite leaves a
-    replaced value in the page's free space and in older WAL frames. VACUUM
-    writes a fresh copy of the database, and a TRUNCATE checkpoint moves it
-    into the file and empties the WAL.
+    """Version 7 to 8: rewrite the file so the text the row migrations replaced
+    is gone from its bytes, not only from its rows. SQLite leaves a replaced
+    value in the page's free space and in older WAL frames. VACUUM writes a
+    fresh copy of the database, and a TRUNCATE checkpoint moves it into the
+    file and empties the WAL. One rewrite covers every migration before it.
 
     It needs the write lock, and no other connection may still be reading an
-    older snapshot. When either is busy it stops, leaves the version as it
-    was, and a later session hook tries again. True when the file was rewritten."""
-    target = _PURGE_NEXT.get(con.execute("PRAGMA user_version").fetchone()[0])
-    if target is None:
+    older snapshot. When either is busy it stops, leaves the store at version
+    7, and a later session hook tries again. True when the file was rewritten."""
+    if con.execute("PRAGMA user_version").fetchone()[0] != SHELL_DROPPED_VERSION:
         return False
     try:
         con.execute("VACUUM")
         if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
             return False
-        con.execute(f"PRAGMA user_version={target}")
+        con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return True
     except sqlite3.OperationalError as exc:
@@ -261,14 +260,15 @@ RECOVERY_KEYS = ("prefix_key", "file", "where", "resolved_by")
 
 
 def drop_recovery(con: sqlite3.Connection) -> dict:
-    """Version 3 to 4. Version 3 matched a failure to the later call that got
-    past it: a failure kept a status, the call that resolved it and when, and
-    the hashed command, path and directory it was matched on. Version 4 keeps
-    none of that, and the index over open failures goes. It runs in one write
-    transaction and only while the store is still at version 3. Returns counts."""
+    """Version 2 or 3 to 4. Versions 2 and 3 matched a failure to the later
+    call that got past it: a failure kept a status, the call that resolved it
+    and when, and the hashed command, path and directory it was matched on.
+    Version 4 keeps none of that, and the index over open failures goes. It
+    runs in one write transaction and only while the store is still at version
+    2 or 3. Returns counts."""
     con.execute("BEGIN IMMEDIATE")
     try:
-        if con.execute("PRAGMA user_version").fetchone()[0] != PURGED_VERSION:
+        if con.execute("PRAGMA user_version").fetchone()[0] not in (HASH_ONLY_VERSION, PURGED_VERSION):
             con.execute("ROLLBACK")
             return {}
         counts = {"failures": 0, "changed": 0}
@@ -428,20 +428,21 @@ def connect(path: str) -> sqlite3.Connection:
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     con.execute("PRAGMA synchronous=NORMAL")
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version in (0, 1, PURGED_VERSION, RECOVERY_DROPPED_VERSION, RULES_APPLIED_VERSION, RULES_PURGED_VERSION):
+    if 0 <= version < SHELL_DROPPED_VERSION:
         try:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
             if version == 0:
                 con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")  # a new store never held text
-            elif version == 1:
-                migrate_to_hash_only(con, path)  # to version 2; purge_freed_text() takes it to 3
             else:
-                if version == PURGED_VERSION:
-                    drop_recovery(con)  # to version 4
-                if version in (PURGED_VERSION, RECOVERY_DROPPED_VERSION):
-                    apply_current_rules(con)  # to version 5
-                drop_shell_records(con)  # to version 7; purge_freed_text() takes it to 8
+                # Every row migration runs in this one call, each only from the
+                # version it migrates, so the rows never wait for the byte
+                # rewrite (7 to 8), which a reader on an older snapshot can hold
+                # off. That rewrite then covers everything the steps freed.
+                migrate_to_hash_only(con, path)  # 1 to 2
+                drop_recovery(con)  # 2 or 3 to 4
+                apply_current_rules(con)  # 4 to 5
+                drop_shell_records(con)  # 5 or 6 to 7; purge_freed_text() takes it to 8
         except sqlite3.OperationalError as exc:
             con.close()
             if _is_busy(exc):

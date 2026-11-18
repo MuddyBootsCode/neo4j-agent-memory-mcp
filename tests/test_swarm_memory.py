@@ -620,7 +620,8 @@ class TestSafety:
     def test_a_version_1_store_is_migrated_to_hash_only_once(self, db):
         """Version 1 kept a redacted error head and the signature text. Opening
         it with this code hashes the signature in the record and the link and
-        drops the head. A record already without text is left as it is."""
+        drops the head, and the later row migrations run in the same call. A
+        record already without text keeps its hash."""
         old_sig = "error: login failed for user <q>"
         con = sqlite3.connect(db, isolation_level=None)
         con.executescript(store.SCHEMA)
@@ -640,10 +641,9 @@ class TestSafety:
         with open(store.key_path(db), "rb") as fh:
             new = store.signature_hash(fh.read(), old_sig)
         assert {rid: json.loads(i) for rid, i in q(db, "SELECT id, info FROM record ORDER BY id")} == {
-            1: {"sig_hash": new, "exit": 1, "program": "login"}, 2: {"exit": 2, "program": "make"},
-            3: {"sig_hash": "0" * 32, "exit": 1, "program": "make"}}
+            1: {"sig_hash": new, "exit": 1}, 2: {"exit": 2}, 3: {"sig_hash": "0" * 32, "exit": 1}}
         assert q(db, "SELECT record_id, key FROM link ORDER BY record_id") == [(1, new), (3, "0" * 32)]
-        assert q(db, "PRAGMA user_version") == [(2,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         con = sqlite3.connect(db, isolation_level=None)
         assert store.migrate_to_hash_only(con, db) == {}
         con.close()
@@ -660,7 +660,7 @@ class TestSafety:
         other_hook = sqlite3.connect(db, isolation_level=None)  # holds the store open, as live hooks do
         other_hook.execute("SELECT count(*) FROM record").fetchone()
         store.connect(db).close()
-        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         rows = "\n".join(str(r) for t in ("record", "link") for r in q(db, f"SELECT * FROM {t}"))  # noqa: S608
         assert "zorkmarker" not in rows and "plughmarker" not in rows
         assert b"zorkmarker" in raw_bytes(db) and b"plughmarker" in raw_bytes(db)
@@ -670,12 +670,12 @@ class TestSafety:
         other_hook.close()
         data = raw_bytes(db)
         assert b"zorkmarker" not in data and b"plughmarker" not in data
-        assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         assert q(db, "SELECT count(*) FROM record WHERE kind = 'failure'") == [(2,)]
 
     def test_the_rewrite_steps_back_from_a_writer_or_a_reader_and_retries(self, db):
         """It never waits past the busy timeout: a writer holding the lock, or a
-        reader on an older snapshot, leaves the store at version 2 for later."""
+        reader on an older snapshot, leaves the store at version 7 for later."""
         version_1_store(db, ["fatal: zorkmarker needed a single revision"])
         con = store.connect(db)
         holder = sqlite3.connect(db, isolation_level=None)
@@ -685,7 +685,7 @@ class TestSafety:
         holder.execute("BEGIN")
         holder.execute("SELECT count(*) FROM record").fetchone()
         assert store.purge_freed_text(con) is False
-        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         holder.execute("COMMIT")
         holder.close()
         assert store.purge_freed_text(con) is True
@@ -695,17 +695,59 @@ class TestSafety:
     def test_only_a_session_hook_rewrites_the_store_and_a_new_store_needs_none(self, db, repo, tmp_path):
         version_1_store(db, ["fatal: zorkmarker needed a single revision"])
         tool_ok(db, "s1", repo, T, "Bash", {"command": "ls"}, "t9")
-        assert q(db, "PRAGMA user_version") == [(store.HASH_ONLY_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
         start(db, "s1", repo, T + 1)
-        assert q(db, "PRAGMA user_version") == [(store.PURGED_VERSION,)]
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         assert b"zorkmarker" not in raw_bytes(db)
         store.connect(db).close()
-        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
-        start(db, "s1", repo, T + 2)
         assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
         fresh = str(tmp_path / "fresh" / "observe.sqlite3")
         start(fresh, "s2", repo, T)
         assert q(fresh, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_an_old_store_has_clean_rows_after_one_hook_while_the_rewrite_waits(self, db, repo, version):
+        """Review finding (run 13): a version 1 store stopped at version 2, and
+        connect() ran no migration there, so the later row cleanups waited for
+        the byte rewrite, which a reader on an older snapshot holds off for as
+        long as it stays open. One hook call now takes the rows to version 7,
+        and only the rewrite to 8 waits."""
+        key, root = os.path.realpath(repo / ".git"), os.path.realpath(repo)
+        cred = "curl --user " + "alice" + ":" + "hunterpw"
+        sig = "curl: (22) error 401 zorksig"
+        failure = {"head": sig, "sig": sig} if version == 1 else {"sig_hash": "a" * 32}
+        con = sqlite3.connect(db, isolation_level=None)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(store.SCHEMA)
+        con.execute(f"PRAGMA user_version={version}")
+        con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, tool_use_id, info)"
+                    " VALUES (1, 'failure', ?, 's0', 'Bash', 'command or tool failure', 't1', ?)",
+                    (T, json.dumps({**failure, "exit": 22, "program": cred})))
+        con.execute("INSERT INTO record (id, kind, ts, session_id, tool, action, tool_use_id)"
+                    " VALUES (2, 'failure', ?, 's0', 'Read', 'command or tool failure', 't2')", (T,))
+        link_rows = [(1, "signature", sig if version == 1 else "a" * 32), (1, "program", cred),
+                     (2, "file", f"{key}::no such zorkpath.txt"), (2, "worktree", root)]
+        con.executemany("INSERT INTO link VALUES (?, ?, ?, ?)", [(*row, T) for row in link_rows])
+        con.execute("INSERT INTO event (ts, kind, hook, detail) VALUES (?, 'hook_error', 'PostToolUse', ?)",
+                    (T, json.dumps({"type": "NameError", "message": "name 'zorkmsg' is not defined"})))
+        con.close()
+        reader = sqlite3.connect(db, isolation_level=None)  # an older snapshot the checkpoint cannot pass
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM record").fetchone()
+        start(db, "s1", repo, T + 1)
+        assert q(db, "PRAGMA user_version") == [(store.SHELL_DROPPED_VERSION,)]
+        dump = "\n".join(str(row) for table in ("event", "record", "link")
+                         for row in q(db, f"SELECT * FROM {table}"))  # noqa: S608
+        for word in ("hunterpw", "zorksig", "zorkpath", "zorkmsg"):
+            assert word not in dump, word
+        assert b"hunterpw" in raw_bytes(db)  # the rewrite could not run yet
+        reader.execute("COMMIT")
+        reader.close()
+        start(db, "s2", repo, T + 2)
+        assert q(db, "PRAGMA user_version") == [(store.SCHEMA_VERSION,)]
+        data = raw_bytes(db)
+        for word in (b"hunterpw", b"zorksig", b"zorkpath", b"zorkmsg"):
+            assert word not in data, word
 
     def test_a_version_3_store_drops_the_recovery_fields_and_their_index(self, db):
         """Version 3 matched a failure to the call that got past it. Opening it
