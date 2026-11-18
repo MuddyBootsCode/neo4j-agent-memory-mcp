@@ -4,6 +4,7 @@ A wrong rule here does not error. It changes a count that decides whether
 Phases 2 and 3 get built, so each rule is pinned on a small case.
 """
 
+import collections
 import os
 import sys
 
@@ -67,6 +68,42 @@ class TestGroupRuns:
             _session("c", "wt3", [(50 * MIN, 90 * MIN)]),
         ])
         assert runs == [["a", "b", "c"]]
+
+
+def _call(ts, error=None):
+    return {"id": f"c{ts}", "ts": ts, "rts": ts + 1, "line": 0, "tool": "Bash", "sub": False, "path": None,
+            "cwd": None, "ok": error is None, "blocked": False, "error": error}
+
+
+def _merged(sid, cwds, times, calls):
+    return {"times": sorted(times), "cwds": cwds, "branches": collections.Counter(), "calls": calls,
+            "prompts": [], "briefs": [], "files": {f"/projects/p/{sid}.jsonl"}, "subagent_files": set()}
+
+
+class TestRepoSwitch:
+    def test_a_session_that_moves_to_another_repo_is_left_out_of_runs(self, tmp_path):
+        """Review finding (run 13): a session kept the repo of its first cwd,
+        so its work in a second repo overlapped another worktree of the first
+        and made a run and a failure hit that never happened."""
+        a, b = tmp_path / "a", tmp_path / "b"
+        for root in (a, b):
+            (root / ".git").mkdir(parents=True)
+        for name in ("w1", "w2"):
+            (a / ".worktrees" / name).mkdir(parents=True)
+        err = "Exit code 2\nmake: *** [build] Error 2"
+        t0 = 1_800_000_000.0
+        later = [t0 + 60 * MIN + k * MIN for k in range(30)]
+        merged = {
+            "switcher": _merged("switcher", [(t0, str(a / ".worktrees" / "w1")), (t0 + 10 * MIN, str(b))],
+                                [t0, t0 + MIN] + later, [_call(t0 + 70 * MIN, err)]),
+            "other": _merged("other", [(t0 + 55 * MIN, str(a / ".worktrees" / "w2"))], later,
+                             [_call(t0 + 75 * MIN, err)]),
+        }
+        sessions, _ = replay.build_sessions(merged, 15 * MIN)
+        placed, runs = replay.place_in_runs(sessions, 15 * MIN)
+        assert runs == [] and [s["sid"] for s in placed] == ["other"]
+        assert replay.moment4(sessions, runs)["per_run"] == {}
+        assert replay.left_out_counts(sessions) == {"cwd moved between worktrees": 0, "cwd moved to another repo": 1}
 
 
 class TestFailureSignature:
