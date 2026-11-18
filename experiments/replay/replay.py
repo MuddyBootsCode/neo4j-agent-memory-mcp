@@ -59,7 +59,11 @@ is the F4 normaliser (MUD-478 attachment ``failure-recurrence-baseline-
 in the same run had failed with that signature within the window before. Only
 that exact part is measured: whether an agent got past a failure is not, since
 no rule for it held up (MUD-850). Hook blocks and rejected tool inputs are
-counted apart from command and tool failures.
+counted apart from command and tool failures. A session whose cwd moved to
+another repo is left out of every repo's failure counts and of the signature
+index that Moment 2 matches pasted errors against, as it is left out of runs:
+which repo each of its failures belongs to is not tracked. The summary counts
+those sessions and their failures.
 
 Moment 2 (with the prompt). A prompt is a hit when it contains a path that
 exists in the repo, a pasted error line, or a ticket key such as ``ABC-123``.
@@ -1516,6 +1520,7 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
     failures_by_session = {}
     sig_first_seen = collections.defaultdict(dict)  # repo -> sig -> first ts
     counts = collections.defaultdict(lambda: collections.defaultdict(int))
+    left_out = {"sessions whose cwd moved to another repo": 0, "their failures": 0}
     for s in sessions.values():
         fl = []
         calls = s["calls"]
@@ -1526,12 +1531,16 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
             if sig is None:
                 continue
             fts = c["rts"] or c["ts"]
-            f = {"ts": fts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
-                 "sig": sig, "tool": c["tool"], "repo": s["repo"], "kind": failure_kind(c["error"])}
-            fl.append(f)
-            first = sig_first_seen[s["repo"]].get(sig)
-            if first is None or fts < first:
-                sig_first_seen[s["repo"]][sig] = fts
+            fl.append({"ts": fts, "sid": s["sid"], "worktree": s["worktree"], "wt_name": s["worktree_name"],
+                       "sig": sig, "tool": c["tool"], "repo": s["repo"], "kind": failure_kind(c["error"])})
+        if s["switched_repo"]:
+            left_out["sessions whose cwd moved to another repo"] += 1
+            left_out["their failures"] += len(fl)
+            fl = []
+        for f in fl:
+            first = sig_first_seen[s["repo"]].get(f["sig"])
+            if first is None or f["ts"] < first:
+                sig_first_seen[s["repo"]][f["sig"]] = f["ts"]
         failures_by_session[s["sid"]] = fl
 
     # Context, comparable with MUD-476 F4: repeats of a signature first seen in another session of the repo.
@@ -1595,7 +1604,8 @@ def moment4(sessions: dict, runs: list[dict]) -> dict:
                               for h in example_pool)
     return {"summary": {"by_repo": {k: dict(v) for k, v in counts.items()}, "total": dict(totals),
                         "top_hit_signatures": [{"repo": r, "signature": s, "kind": k, "hits": n}
-                                               for (r, s, k), n in top.most_common(10)]},
+                                               for (r, s, k), n in top.most_common(10)],
+                        "left_out": left_out},
             "examples": examples, "per_run": per_run, "sig_first_seen": sig_first_seen}
 
 
@@ -1741,6 +1751,9 @@ def render_report(summary: dict, runs: list[dict], examples: dict, run_by_id: di
     lines += ["", "- Failures in runs by kind: " + ", ".join(
         f"{k} {t.get(f'failures in runs|{k}', 0):,}" for k in kinds) + ".",
               f"- Hits any time in run, no window: {t.get('hits any time in run', 0):,}.",
+              f"- Left out of every count and of the signature index: "
+              f"{m4['left_out']['sessions whose cwd moved to another repo']:,} sessions whose cwd moved to another "
+              f"repo, with {m4['left_out']['their failures']:,} failures.",
               f"- 240-min hits that are command or tool failures: {t.get('hits|kind|command or tool failure', 0):,}.",
               "", "Top signatures among hits:", ""]
     for x in m4["top_hit_signatures"]:

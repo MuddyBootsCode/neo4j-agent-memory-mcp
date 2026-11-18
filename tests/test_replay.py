@@ -105,6 +105,31 @@ class TestRepoSwitch:
         assert replay.moment4(sessions, runs)["per_run"] == {}
         assert replay.left_out_counts(sessions) == {"cwd moved between worktrees": 0, "cwd moved to another repo": 1}
 
+    def test_its_failures_count_in_no_repo_and_match_no_pasted_error(self, tmp_path):
+        """Review finding (run 14): a session that moved to another repo was left
+        out of runs, but a failure it made in the second repo still counted in
+        the first repo's all-sessions totals and signature index, where Moment 2
+        matches pasted error lines."""
+        a, b = tmp_path / "a", tmp_path / "b"
+        for root in (a, b):
+            (root / ".git").mkdir(parents=True)
+        line = "fatal: not a git repository (or any of the parent directories): .git"
+        t0 = 1_800_000_000.0
+        merged = {
+            "switcher": _merged("switcher", [(t0, str(a)), (t0 + 10 * MIN, str(b))], [t0, t0 + 20 * MIN],
+                                [_call(t0 + 20 * MIN, f"Exit code 128\n{line}")]),
+            "stayer": _merged("stayer", [(t0, str(a))], [t0, t0 + 30 * MIN], []),
+        }
+        merged["stayer"]["prompts"] = [{"id": "p1", "ts": t0 + 30 * MIN, "text": f"it says\n{line}\n"}]
+        sessions, _ = replay.build_sessions(merged, 15 * MIN)
+        _placed, runs = replay.place_in_runs(sessions, 15 * MIN)
+        m4 = replay.moment4(sessions, runs)
+        assert m4["summary"]["total"].get("failures, all sessions", 0) == 0
+        m2 = replay.moment2(sessions, {}, m4["sig_first_seen"])
+        assert m2["summary"]["total"]["human prompts, all sessions"]["error line"] == 1
+        assert m2["summary"]["total"]["human prompts, all sessions"]["error line matching an earlier tool failure"] == 0
+        assert m4["summary"]["left_out"] == {"sessions whose cwd moved to another repo": 1, "their failures": 1}
+
 
 class TestFailureSignature:
     def test_bash_error_uses_the_last_error_line_with_placeholders(self):
@@ -264,7 +289,7 @@ class TestRepeatFailureHits:
 
         def session(sid, wt, ts):
             return {"sid": sid, "repo": "/r/.git", "repo_name": "r", "worktree": wt, "worktree_name": wt,
-                    "calls": [{"tool": "Bash", "ok": False, "error": err, "ts": ts, "rts": ts + 1}]}
+                    "switched_repo": False, "calls": [{"tool": "Bash", "ok": False, "error": err, "ts": ts, "rts": ts + 1}]}
 
         sessions = {"a": session("a", "wt1", 0.0), "b": session("b", "wt2", 10 * MIN)}
         total = replay.moment4(sessions, [{"run": "run001", "repo": "r", "sessions": ["a", "b"]}])["summary"]["total"]
