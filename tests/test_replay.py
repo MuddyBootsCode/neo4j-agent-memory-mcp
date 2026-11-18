@@ -130,6 +130,26 @@ class TestRepoSwitch:
         assert m2["summary"]["total"]["human prompts, all sessions"]["error line matching an earlier tool failure"] == 0
         assert m4["summary"]["left_out"] == {"sessions whose cwd moved to another repo": 1, "their failures": 1}
 
+    def test_its_prompts_and_briefs_count_in_no_repos_moment_2_rows(self, tmp_path, monkeypatch):
+        """GitHub Codex review: a session that moved to another repo had every
+        prompt checked against its first repo and cwd, so a prompt naming a file
+        that exists only in the second repo missed, and its prompts counted
+        under the first repo."""
+        monkeypatch.setattr(replay, "TICKET_KEYS", ("ABC",))
+        a, b = tmp_path / "a", tmp_path / "b"
+        for root in (a, b):
+            (root / ".git").mkdir(parents=True)
+        t0 = 1_800_000_000.0
+        merged = {"switcher": _merged("switcher", [(t0, str(a)), (t0 + 10 * MIN, str(b))], [t0, t0 + 20 * MIN], [])}
+        merged["switcher"]["prompts"] = [{"id": "p1", "ts": t0 + 15 * MIN, "text": "fix src/only_in_b.py please"},
+                                         {"id": "p2", "ts": t0 + 16 * MIN, "text": "this is for ABC-12"}]
+        merged["switcher"]["briefs"] = [{"id": "b1", "ts": t0, "text": "Slice of ABC-12."}]
+        sessions, _ = replay.build_sessions(merged, 15 * MIN)
+        m2 = replay.moment2(sessions, {str(a): set(), str(b): {"src/only_in_b.py"}}, {})
+        assert m2["summary"]["by_repo"] == {}
+        assert m2["summary"]["left_out"] == {"sessions whose cwd moved to another repo": 1, "their prompts": 2,
+                                             "their briefs": 1}
+
 
 class TestFailureSignature:
     def test_bash_error_uses_the_last_error_line_with_placeholders(self):
@@ -174,6 +194,18 @@ class TestFileWindowHits:
     def test_the_same_worktree_is_no_hit(self):
         events = [_touch(0, "a", "wt1", "src/x.py"), _touch(5 * MIN, "b", "wt1", "src/x.py")]
         assert replay.file_window_hits(events, 15 * MIN) == []
+
+    def test_only_a_strictly_earlier_touch_counts(self):
+        """GitHub Codex review: the upper bound took a touch with the same
+        timestamp as earlier, so two worktrees touching one file at one moment
+        each made a hit on the other."""
+        same = [_touch(10 * MIN, "a", "wt1", "src/x.py"), _touch(10 * MIN, "b", "wt2", "src/x.py")]
+        assert replay.file_window_hits(same, 15 * MIN) == []
+        earlier = [_touch(10 * MIN - 1, "a", "wt1", "src/x.py"), _touch(10 * MIN, "b", "wt2", "src/x.py")]
+        assert [h["event"]["sid"] for h in replay.file_window_hits(earlier, 15 * MIN)] == ["b"]
+        for events, hit in ((same, set()), (earlier, {"cb"})):
+            edits = [{**e, "edit": True, "call": "c" + e["sid"]} for e in events]
+            assert replay.edit_after_edit_calls(edits, 15 * MIN) == hit
 
     def test_a_read_between_two_edits_does_not_hide_the_edit_after_edit(self):
         """Review finding: the latest touch was the first worktree's read-back,
