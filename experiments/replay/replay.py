@@ -71,7 +71,10 @@ Ticket prefixes are a local setting and never part of the repo:
 ``--ticket-keys``, else ``$SWARM_MEMORY_TICKET_KEYS``, else ``ticket_keys`` in
 the ``config.json`` beside the swarm_memory store. With none set, no prompt
 names a ticket. Human prompts and the briefs another session writes when it
-starts one are counted separately.
+starts one are counted separately. A session whose cwd moved to another repo
+is left out of every Moment 2 count, as it is left out of runs and failure
+counts: which repo and directory each prompt was written in is not tracked.
+The summary counts those sessions and their prompts and briefs.
 
 A hit means the trigger fired, not that a delivery would have helped (MUD-850
 R15).
@@ -268,7 +271,8 @@ def touch_ts(call: dict) -> float | None:
 
 def file_window_hits(events: list[dict], window_s: float, related=None) -> list[dict]:
     """Events that another session's touch of the same (or a related) file, in
-    another worktree, preceded within the window.
+    another worktree, preceded within the window. Only a strictly earlier
+    touch counts, so two touches at one moment do not hit each other.
 
     ``events``: dicts with ts, sid, worktree, file, all from one run.
     ``related``: None for the same file, else a function from a file to the
@@ -288,10 +292,10 @@ def file_window_hits(events: list[dict], window_s: float, related=None) -> list[
             if not lst:
                 continue
             lo = bisect.bisect_left(lst, (e["ts"] - window_s, -1))
-            hi = bisect.bisect_right(lst, (e["ts"], float("inf")))
+            hi = bisect.bisect_left(lst, (e["ts"], -1))
             for _ts, k2 in reversed(lst[lo:hi]):
                 o = evs[k2]
-                if o is e or o["worktree"] == e["worktree"] or o["sid"] == e["sid"]:
+                if o["worktree"] == e["worktree"] or o["sid"] == e["sid"]:
                     continue
                 if best is None or o["ts"] > best["ts"]:
                     best = o
@@ -1616,7 +1620,13 @@ def moment2(sessions: dict, files_by_repo: dict, sig_first_seen: dict) -> dict:
     populations = (("human prompts, all sessions", "prompts", False),
                    ("human prompts, sessions in runs", "prompts", True),
                    ("briefs from another session", "briefs", False))
+    left_out = {"sessions whose cwd moved to another repo": 0, "their prompts": 0, "their briefs": 0}
     for s in sessions.values():
+        if s["switched_repo"]:
+            left_out["sessions whose cwd moved to another repo"] += 1
+            left_out["their prompts"] += len(s["prompts"])
+            left_out["their briefs"] += len(s["briefs"])
+            continue
         repo, rname = s["repo"], s["repo_name"]
         files = files_by_repo.get(repo, set())
         for scope, field, runs_only in populations:
@@ -1658,7 +1668,7 @@ def moment2(sessions: dict, files_by_repo: dict, sig_first_seen: dict) -> dict:
                  "at": iso_minute(x["ts"]), **({"matches_earlier_failure": x["known"]} if "known" in x else {})}
                 for x in picked]
     return {"summary": {"by_repo": {f"{r} ({scope})": dict(v) for (r, scope), v in sorted(rows.items())},
-                        "total": {k: dict(v) for k, v in by_scope.items()}},
+                        "total": {k: dict(v) for k, v in by_scope.items()}, "left_out": left_out},
             "examples": examples}
 
 
@@ -1774,7 +1784,10 @@ def render_report(summary: dict, runs: list[dict], examples: dict, run_by_id: di
         lines.append(f"| {rname} | {d:,} | " + " | ".join(
             frac(row.get(k, 0), d) for k in ("file path", "error line", "error line matching an earlier tool failure",
                                              "ticket key", "any of the three")) + " |")
-    lines += ["", "Examples:", ""]
+    lo2 = m2["left_out"]
+    lines += ["", f"- Left out of every row: {lo2['sessions whose cwd moved to another repo']:,} sessions whose cwd "
+                  f"moved to another repo, with {lo2['their prompts']:,} human prompts and {lo2['their briefs']:,} "
+                  f"briefs.", "", "Examples:", ""]
     for x in examples["moment2"]:
         extra = f", matches an earlier tool failure: {x['matches_earlier_failure']}" if "matches_earlier_failure" in x else ""
         lines.append(f"- {x['repo']} session {x['session']}: {x['kind']} `{x['value']}`{extra} ({x['at']} UTC).")
